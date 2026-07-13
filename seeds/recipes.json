@@ -1,0 +1,64 @@
+[
+  {
+    "slug": "pbj_sandwich",
+    "name": "Peanut Butter & Jelly Sandwich",
+    "servings": 2,
+    "ingredients": [
+      {"name": "Peanut Butter and Jelly Jam", "category": "spread"},
+      {"name": "Wheat Bread", "category": "bread"},
+      {"name": "White Chocolate", "category": "chocolate"}
+    ]
+  },
+  {
+    "slug": "spaghetti_bolognese",
+    "name": "Spaghetti Bolognese",
+    "servings": 4,
+    "ingredients": [
+      {"name": "Spaghetti", "category": "pantry"},
+      {"name": "Ground Beef", "category": "meat"},
+      {"name": "Yellow Onion", "category": "produce"},
+      {"name": "Garlic", "category": "produce"},
+      {"name": "Canned Tomatoes", "category": "pantry"},
+      {"name": "Olive Oil", "category": "oil"},
+      {"name": "Mozzarella", "category": "dairy"}
+    ]
+  },
+  {
+    "slug": "chicken_curry",
+    "name": "Simple Chicken Curry",
+    "servings": 4,
+    "ingredients": [
+      {"name": "Chicken Thighs", "category": "meat"},
+      {"name": "Basmati Rice", "category": "grain"},
+      {"name": "Yellow Onion", "category": "produce"},
+      {"name": "Garlic", "category": "produce"},
+      {"name": "Ginger", "category": "produce"},
+      {"name": "Garam Masala", "category": "spice"},
+      {"name": "Turmeric", "category": "spice"},
+      {"name": "Diced Tomatoes", "category": "pantry"},
+      {"name": "Canola Oil", "category": "oil"}
+    ]
+  },
+  {
+    "slug": "grilled_cheese",
+    "name": "Grilled Cheese Sandwich",
+    "servings": 1,
+    "ingredients": [
+      {"name": "Sliced Bread", "category": "bread"},
+      {"name": "Cheddar Cheese", "category": "dairy"},
+      {"name": "Butter", "category": "dairy"}
+    ]
+  },
+  {
+    "slug": "veggie_stirfry",
+    "name": "Vegetable Stir Fry",
+    "servings": 2,
+    "ingredients": [
+      {"name": "Broccoli", "category": "produce"},
+      {"name": "Basmati Rice", "category": "grain"},
+      {"name": "Garlic", "category": "produce"},
+      {"name": "Ginger", "category": "produce"},
+      {"name": "Canola Oil", "category": "oil"}
+    ]
+  }
+]

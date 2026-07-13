@@ -1,0 +1,17 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}
+      ROUTING_STRATEGY: ${ROUTING_STRATEGY:-cascade}
+      CONFIDENCE_THRESHOLD: ${CONFIDENCE_THRESHOLD:-0.80}
+      DB_URL: sqlite:////data/pantry.db
+    volumes:
+      - pantry-data:/data
+      - burr-data:/app/.burr
+
+volumes:
+  pantry-data:
+  burr-data:

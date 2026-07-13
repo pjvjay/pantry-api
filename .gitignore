@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Testing / Type checking
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Burr tracking DB (regenerate on each run)
+burr_tracking.db
+.burr/
+
+# SQLite
+*.sqlite
+*.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store

@@ -1,0 +1,42 @@
+# fly.toml — Fly.io deployment config.
+#
+# Usage:
+#   fly launch --no-deploy       # first time, generates app + volume
+#   fly secrets set ANTHROPIC_API_KEY=sk-...
+#   fly deploy
+#
+# The API + Burr tracking DB live in a volume so they survive restarts.
+
+app = "pantry-planner"
+primary_region = "sea"     # US-West; swap for your region
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  ROUTING_STRATEGY     = "cascade"
+  CONFIDENCE_THRESHOLD = "0.80"
+  DB_URL               = "sqlite:////data/pantry.db"
+
+[[mounts]]
+  source      = "pantry_data"
+  destination = "/data"
+
+[http_service]
+  internal_port       = 8000
+  force_https         = true
+  auto_stop_machines  = "stop"     # scale to zero when idle
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval     = "30s"
+    method       = "GET"
+    timeout      = "5s"
+    path         = "/health"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus     = 1
+  memory   = "512mb"

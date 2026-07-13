@@ -1,0 +1,212 @@
+[
+  {
+    "id": 1,
+    "name": "Wheat Bread 1",
+    "description": "Whole-grain wheat sandwich loaf, 675g, sliced",
+    "price": 5.00,
+    "category": "bread"
+  },
+  {
+    "id": 2,
+    "name": "Wheat Bread 2",
+    "description": "Basic wheat sandwich loaf, 450g, sliced, store brand",
+    "price": 3.00,
+    "category": "bread"
+  },
+  {
+    "id": 3,
+    "name": "Dark Chocolate Cadbury",
+    "description": "70% cocoa dark chocolate bar, 100g",
+    "price": 5.00,
+    "category": "chocolate"
+  },
+  {
+    "id": 4,
+    "name": "Milk Chocolate Cadbury",
+    "description": "Milk chocolate bar, smooth and creamy, 100g",
+    "price": 10.00,
+    "category": "chocolate"
+  },
+  {
+    "id": 5,
+    "name": "Nestles PBJ",
+    "description": "Peanut butter and grape jelly swirl in a single jar, 340g",
+    "price": 8.00,
+    "category": "spread"
+  },
+  {
+    "id": 6,
+    "name": "Canadian Peanut Butter Cream",
+    "description": "Smooth peanut butter, no jelly, 500g",
+    "price": 3.00,
+    "category": "spread"
+  },
+  {
+    "id": 7,
+    "name": "Sourdough Loaf",
+    "description": "Artisanal sourdough, 600g, whole loaf uncut",
+    "price": 6.50,
+    "category": "bread"
+  },
+  {
+    "id": 8,
+    "name": "Basmati Rice 2kg",
+    "description": "Long-grain basmati rice, 2kg bag, produced in India",
+    "price": 12.00,
+    "category": "grain"
+  },
+  {
+    "id": 9,
+    "name": "Long Grain White Rice 1kg",
+    "description": "Standard long-grain white rice, 1kg bag",
+    "price": 4.50,
+    "category": "grain"
+  },
+  {
+    "id": 10,
+    "name": "Boneless Skinless Chicken Breast",
+    "description": "Fresh chicken breast, boneless & skinless, ~500g package",
+    "price": 8.99,
+    "category": "meat"
+  },
+  {
+    "id": 11,
+    "name": "Chicken Thighs Bone-In",
+    "description": "Bone-in, skin-on chicken thighs, ~700g",
+    "price": 6.49,
+    "category": "meat"
+  },
+  {
+    "id": 12,
+    "name": "Yellow Onion",
+    "description": "Fresh yellow cooking onion, 1 bulb (~200g)",
+    "price": 0.99,
+    "category": "produce"
+  },
+  {
+    "id": 13,
+    "name": "Fresh Garlic",
+    "description": "One bulb of fresh garlic (~50g)",
+    "price": 0.79,
+    "category": "produce"
+  },
+  {
+    "id": 14,
+    "name": "Roma Tomato",
+    "description": "Fresh Roma tomatoes, 500g pack",
+    "price": 2.99,
+    "category": "produce"
+  },
+  {
+    "id": 15,
+    "name": "Canned Diced Tomatoes",
+    "description": "Diced tomatoes in juice, canned, 796ml",
+    "price": 1.99,
+    "category": "pantry"
+  },
+  {
+    "id": 16,
+    "name": "Extra Virgin Olive Oil 500ml",
+    "description": "Cold-pressed extra virgin olive oil, 500ml",
+    "price": 9.99,
+    "category": "oil"
+  },
+  {
+    "id": 17,
+    "name": "Canola Oil 1L",
+    "description": "Neutral canola cooking oil, 1L",
+    "price": 4.49,
+    "category": "oil"
+  },
+  {
+    "id": 18,
+    "name": "Butter Salted 454g",
+    "description": "Salted butter, 454g, from grass-fed cows",
+    "price": 6.99,
+    "category": "dairy"
+  },
+  {
+    "id": 19,
+    "name": "Whole Milk 1L",
+    "description": "3.25% homogenized milk, 1L carton",
+    "price": 2.99,
+    "category": "dairy"
+  },
+  {
+    "id": 20,
+    "name": "Plain Greek Yogurt 750g",
+    "description": "Plain Greek yogurt, unsweetened, 750g tub",
+    "price": 5.99,
+    "category": "dairy"
+  },
+  {
+    "id": 21,
+    "name": "Spaghetti Pasta 500g",
+    "description": "Dry spaghetti pasta, 500g box",
+    "price": 2.49,
+    "category": "pantry"
+  },
+  {
+    "id": 22,
+    "name": "Ground Beef Lean",
+    "description": "Lean ground beef, ~450g package, fresh",
+    "price": 7.99,
+    "category": "meat"
+  },
+  {
+    "id": 23,
+    "name": "Cheddar Cheese Block 300g",
+    "description": "Sharp aged cheddar cheese, 300g block",
+    "price": 5.99,
+    "category": "dairy"
+  },
+  {
+    "id": 24,
+    "name": "Mozzarella Shredded 200g",
+    "description": "Shredded mozzarella for pizza / pasta, 200g",
+    "price": 4.99,
+    "category": "dairy"
+  },
+  {
+    "id": 25,
+    "name": "Fresh Ginger",
+    "description": "Fresh ginger root, sold by weight, priced per 100g",
+    "price": 1.29,
+    "category": "produce"
+  },
+  {
+    "id": 26,
+    "name": "Cumin Ground 100g",
+    "description": "Ground cumin spice, 100g jar",
+    "price": 3.49,
+    "category": "spice"
+  },
+  {
+    "id": 27,
+    "name": "Turmeric Ground 100g",
+    "description": "Ground turmeric spice, 100g jar",
+    "price": 3.99,
+    "category": "spice"
+  },
+  {
+    "id": 28,
+    "name": "Coriander Ground 100g",
+    "description": "Ground coriander spice, 100g jar",
+    "price": 3.49,
+    "category": "spice"
+  },
+  {
+    "id": 29,
+    "name": "Garam Masala 100g",
+    "description": "Traditional Indian spice blend, 100g",
+    "price": 4.99,
+    "category": "spice"
+  },
+  {
+    "id": 30,
+    "name": "Frozen Broccoli 500g",
+    "description": "Frozen broccoli florets, 500g bag",
+    "price": 3.49,
+    "category": "produce"
+  }
+]
