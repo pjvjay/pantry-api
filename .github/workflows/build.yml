@@ -1,0 +1,102 @@
+# ============================================================
+# pantry-api — CI test, build & GitOps bump
+#
+#   push to main
+#     → pytest
+#     → docker build (linux/amd64 + linux/arm64)
+#     → push ghcr.io/pjvjay/pantry-api:dev-<sha>
+#     → kustomize edit set image in pjvjay/pantry-gitops
+#     → ArgoCD rolls the API Deployment on AKS
+#
+# Auth:
+#   - GHCR push: the workflow's own GITHUB_TOKEN (packages: write)
+#   - gitops write-back: GITOPS_PAT repo secret — a fine-grained PAT
+#     with contents:write on pjvjay/pantry-gitops only
+# ============================================================
+
+name: build-and-deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "pyproject.toml"
+      - "pantry_planner/**"
+      - "seeds/**"
+      - "tests/**"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/pantry-api
+  GITOPS_REPO: pjvjay/pantry-gitops
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Run tests
+        run: python -m pytest -q
+
+  build-push-bump:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU (for the arm64 half of the build)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tag
+        id: tag
+        run: echo "tag=dev-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push (multi-arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
+            ${{ env.IMAGE }}:latest
+
+      - name: Bump image tag in pantry-gitops
+        run: |
+          git clone "https://x-access-token:${{ secrets.GITOPS_PAT }}@github.com/${GITOPS_REPO}.git" gitops
+          cd gitops/apps
+          curl -sLo /tmp/kustomize.tgz \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz"
+          tar -xzf /tmp/kustomize.tgz -C /tmp
+          /tmp/kustomize edit set image "${IMAGE}=${IMAGE}:${{ steps.tag.outputs.tag }}"
+          git config user.name  "pantry-ci"
+          git config user.email "ci@users.noreply.github.com"
+          git commit -am "bump pantry-api to ${{ steps.tag.outputs.tag }}"
+          git push

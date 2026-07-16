@@ -135,7 +135,8 @@ def seed_from_json() -> None:
                     category=ing.get("category") if isinstance(ing, dict) else None,
                 ))
         s.commit()
-    print(f"Seeded {len(products)} products, {len(recipes)} recipes into {settings().db_url}")
+    from .config import redact_db_url
+    print(f"Seeded {len(products)} products, {len(recipes)} recipes into {redact_db_url(settings().db_url)}")
 
 
 if __name__ == "__main__":

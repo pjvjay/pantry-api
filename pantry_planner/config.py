@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from functools import lru_cache
+from urllib.parse import quote
 
 
 # ─── Model names ──────────────────────────────────────────────
@@ -17,6 +18,42 @@ from functools import lru_cache
 HAIKU = "claude-haiku-4-5-20251001"
 SONNET = "claude-sonnet-4-6"
 SONNET_THINKING = "claude-sonnet-4-6"  # same model, thinking enabled at call site
+
+
+def _db_url_from_env() -> str:
+    """Resolve the SQLAlchemy DB URL.
+
+    Precedence:
+      1. DB_URL — full URL, used verbatim (local dev, docker-compose).
+      2. DB_HOST + friends — composed into a Postgres URL. This is the
+         Kubernetes path: the CNPG-generated credential secret exposes
+         username/password as separate keys, so the Deployment injects
+         parts rather than assembling a URL in YAML (K8s `$(VAR)`
+         interpolation can't URL-encode a password; Python can).
+      3. Neither — local SQLite file.
+    """
+    url = os.environ.get("DB_URL", "")
+    if url:
+        return url
+    host = os.environ.get("DB_HOST", "")
+    if host:
+        user = os.environ.get("DB_USER", "pantry")
+        password = quote(os.environ.get("DB_PASSWORD", ""), safe="")
+        port = os.environ.get("DB_PORT", "5432")
+        name = os.environ.get("DB_NAME", "pantry")
+        return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{name}"
+    return "sqlite:///./pantry.db"
+
+
+def redact_db_url(url: str) -> str:
+    """Mask the password portion of a DB URL for safe logging."""
+    if "@" in url and "://" in url:
+        scheme, rest = url.split("://", 1)
+        creds, host = rest.rsplit("@", 1)
+        if ":" in creds:
+            user = creds.split(":", 1)[0]
+            return f"{scheme}://{user}:***@{host}"
+    return url
 
 
 @dataclass(frozen=True)
@@ -55,7 +92,7 @@ class Settings:
 
         return Settings(
             anthropic_api_key=api_key,
-            db_url=os.environ.get("DB_URL", "sqlite:///./pantry.db"),
+            db_url=_db_url_from_env(),
             routing_strategy=strategy,
             confidence_threshold=float(os.environ.get("CONFIDENCE_THRESHOLD", "0.80")),
             selector_model_default=os.environ.get("SELECTOR_MODEL_DEFAULT", HAIKU),

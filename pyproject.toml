@@ -15,6 +15,9 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "sqlalchemy>=2.0.30",
+    # Postgres driver — used when DB_URL/DB_HOST point at Postgres
+    # (the GitOps/Kubernetes deployment); SQLite needs nothing extra.
+    "psycopg[binary]>=3.2",
     "pydantic>=2.9.0",
     "python-dotenv>=1.0.0",
     # Pin: Burr's tracking UI ships templates that break on Jinja2 3.1.5+
