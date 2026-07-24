@@ -40,12 +40,15 @@ def jaccard(a: set[str], b: set[str]) -> float:
 
 # ─── The Phase A computation ─────────────────────────────────
 
-def compute_phase_a(recipe: Recipe, products: list[Product]) -> PhaseAMetrics:
+def compute_phase_a(recipe: Recipe, products: list[Product],
+                    retrieval_stats=None) -> PhaseAMetrics:
     """
     For each ingredient:
         max_similarity = max over products of Jaccard(ingredient_grams, product_grams)
 
-    Aggregate into a per-run signal.
+    Aggregate into a per-run signal. When the NL2SQL path supplies
+    `retrieval_stats` (nlsearch.schemas.RetrievalStats), its pool-level
+    signals are attached — Phase C only weighs them when has_retrieval.
     """
     max_sims: list[float] = []
     for ing in recipe.ingredients:
@@ -69,10 +72,16 @@ def compute_phase_a(recipe: Recipe, products: list[Product]) -> PhaseAMetrics:
     density_values = [category_counts.get(c, 0) for c in ing_categories]
     category_density = mean(density_values) if density_values else 0.0
 
-    return PhaseAMetrics(
+    metrics = PhaseAMetrics(
         ingredient_count=len(recipe.ingredients),
         mean_max_similarity=mean(max_sims) if max_sims else 0.0,
         min_max_similarity=min(max_sims) if max_sims else 0.0,
         count_below_0_3=sum(1 for s in max_sims if s < 0.3),
         category_density=category_density,
     )
+    if retrieval_stats is not None:
+        metrics.has_retrieval = True
+        metrics.mean_pool_size = retrieval_stats.mean_pool_size
+        metrics.zero_hit_ingredients = retrieval_stats.zero_hit_ingredients
+        metrics.value_disagreement = retrieval_stats.value_disagreement
+    return metrics

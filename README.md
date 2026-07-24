@@ -126,6 +126,36 @@ pantry-planner/
 └── ARCHITECTURE.md
 ```
 
+## NL2SQL search (`POST /plan/nl`)
+
+Paste an **entire recipe** (ingredients with quantities, plus inline notes like
+"under $30, no dairy") and the pipeline plans your shopping. The design is
+**constrained NL2SQL** — the LLM produces a validated semantic parse; Python
+compiles it against a fixed pattern menu; the model never writes SQL. Structured
+per the [NL2SQL Handbook](https://github.com/HKUSTDial/NL2SQL_handbook) taxonomy:
+
+- **Pre-processing** — unit normalization (`"2 cups shredded mozzarella"` →
+  `mozzarella`, 500 ml, prep=shredded), *schema linking* (live
+  category/subcategory vocabulary in the extractor prompt), question
+  decomposition (RecipeSpec + Constraints in one call)
+- **Translation** — multi-shot semantic parse → composable predicate patterns
+  (price ceiling, dietary tags, category/subcategory scope, token-AND ingredient
+  match with purchase-form tokens, quantity-aware size-fit ranking)
+- **Post-processing** — vocabulary clamping with cross-level correction,
+  *execution-guided refinement* (zero-hit pools widen form→subcategory→category
+  in one batched retry), forced LIMIT, bound parameters only
+
+Retrieval emits one `UNION ALL` query labeled by ingredient (one round trip for
+the whole recipe); per-ingredient candidate pools feed **three retrieval-aware
+router signals** (`mean_pool_size`, `zero_hit_ingredients`,
+`value_disagreement` — cheapest ≠ best `price/unit_qty`) so the model router
+selects the model based on the size of the data and evaluated complexity. The
+response carries the interpretation chips and the executed SQL for transparency.
+Ingredient-form handling distinguishes *purchase forms* ("canned tomatoes" must
+match a canned product) from *cook's prep* ("mashed potatoes" buys fresh
+potatoes). Related: LifeGuide housing's `market_context.py` shows the
+LLM-written-SQL variant with a validation harness — deliberately not used here.
+
 ## How it deploys
 
 This repo is one of six in the **pantry-platform** GitOps demo:

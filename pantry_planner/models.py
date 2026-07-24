@@ -28,6 +28,12 @@ class Product(BaseModel):
     description: str
     price: float                 # CAD
     category: str | None = None
+    # 0002_product_attributes (NL2SQL search) — defaults keep old data valid
+    subcategory: str | None = None
+    dietary_tags: str = ""       # comma list of what it CONTAINS: "dairy,gluten"
+    unit_size: str = ""          # display: "450g"
+    unit_qty: float | None = None  # canonical amount: 450
+    unit_uom: str = ""           # canonical uom: g|ml|each
 
 
 # ─── Selector I/O ─────────────────────────────────────────────
@@ -59,6 +65,12 @@ class PhaseAMetrics(BaseModel):
     min_max_similarity: float
     count_below_0_3: int
     category_density: float
+    # Retrieval-aware signals (NL2SQL path only; has_retrieval gates the
+    # extra decision weights so the classic path scores exactly as before)
+    has_retrieval: bool = False
+    mean_pool_size: float = 0.0        # avg candidates per ingredient
+    zero_hit_ingredients: int = 0      # needed the widening ladder
+    value_disagreement: float = 0.0    # pools where cheapest != best unit value
 
 
 class PhaseBMetrics(BaseModel):
@@ -114,3 +126,7 @@ class ShoppingPlan(BaseModel):
     escalated: bool
     total_llm_cost_usd: float
     total_latency_ms: int
+    # NL2SQL path extras (empty on the classic /plan/{slug} path)
+    interpretation: list[str] = Field(default_factory=list)
+    retrieval_sql: str = ""
+    candidate_count: int = 0

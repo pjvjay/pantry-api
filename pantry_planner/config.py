@@ -72,6 +72,7 @@ class Settings:
     selector_model_default: str    # main selector; cascade uses this first
     selector_model_escalation: str # what cascade escalates to; what 3-phase may pick
     classifier_model: str          # Phase B (three_phase only)
+    nl2sql_model: str              # recipe/constraint extractor (NL2SQL stage)
 
     # Feature flags
     enable_thinking_on_escalation: bool  # if True, escalation model runs with thinking on
@@ -98,6 +99,7 @@ class Settings:
             selector_model_default=os.environ.get("SELECTOR_MODEL_DEFAULT", HAIKU),
             selector_model_escalation=os.environ.get("SELECTOR_MODEL_ESCALATION", SONNET),
             classifier_model=os.environ.get("CLASSIFIER_MODEL", HAIKU),
+            nl2sql_model=os.environ.get("NL2SQL_MODEL", SONNET),
             enable_thinking_on_escalation=(
                 os.environ.get("ENABLE_THINKING_ON_ESCALATION", "false").lower() == "true"
             ),

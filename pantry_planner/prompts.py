@@ -42,6 +42,17 @@ the rule above it. NEVER let a lower rule override a higher one:
     * 0.4-0.6 = required substitution reasoning (rule 3 kicked in)
     * < 0.4 = you're uncomfortable with the match
 
+6. CONSTRAINTS OBJECT (when present in the input). It is BINDING:
+   * max_total_budget: the basket total must stay under this. If rules
+     1-3 would exceed it, prefer the cheaper acceptable match and say so
+     in the reasoning.
+   * quantities_needed: per-ingredient amounts the cook requires. Prefer
+     products whose pack size covers the need without absurd excess;
+     note "buy 2" in the reasoning when one pack is short.
+   * preps: how the cook will prepare an item (e.g. mashed) — buy the
+     base product, do NOT search for pre-prepared versions.
+   * preferences: soft guidance — apply when rules 1-3 leave a choice.
+
 Return your selections via the submit_plan tool.
 """
 

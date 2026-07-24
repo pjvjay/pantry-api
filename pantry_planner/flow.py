@@ -37,6 +37,27 @@ from .selector import call_selector, merge_selections
 from .tracing import llm_span, make_tracker
 
 
+def _selector_constraints(parsed) -> dict | None:
+    """Condense the NL parse into the binding-constraints object the
+    selector prompt understands. None on the classic path."""
+    if parsed is None:
+        return None
+    c = parsed.constraints
+    quantities = {
+        ing.name: f"{ing.quantity:g} {ing.unit}"
+        for ing in parsed.recipe.ingredients
+        if ing.quantity is not None and ing.unit
+    }
+    out = {
+        "max_total_budget": c.max_total_budget,
+        "preferences": c.soft_text or None,
+        "quantities_needed": quantities or None,
+        "preps": {i.name: i.prep for i in parsed.recipe.ingredients if i.prep} or None,
+    }
+    out = {k: v for k, v in out.items() if v is not None}
+    return out or None
+
+
 # ─── Actions ─────────────────────────────────────────────────
 
 @action(reads=[], writes=["recipe"])
@@ -53,13 +74,34 @@ def load_products(state: State) -> tuple[dict, State]:
     return result, state.update(products=products)
 
 
+@action(reads=[], writes=["recipe", "products", "parsed_input",
+                          "retrieval_sql", "retrieval_stats"])
+def parse_and_retrieve(state: State, recipe_text: str) -> tuple[dict, State]:
+    """NL2SQL entrypoint: pasted recipe text → ad-hoc Recipe + narrowed
+    candidate products. Replaces load_recipe + load_products on the NL path;
+    downstream actions consume the same state keys."""
+    from . import nlsearch
+
+    r = nlsearch.retrieve(recipe_text)
+    result = {
+        "ingredient_count": len(r.recipe.ingredients),
+        "product_count": len(r.products),
+        "zero_hit_ingredients": r.stats.zero_hit_ingredients,
+        "parse_cost_usd": r.parsed.cost_usd,
+    }
+    return result, state.update(
+        recipe=r.recipe, products=r.products, parsed_input=r.parsed,
+        retrieval_sql=r.sql_display, retrieval_stats=r.stats)
+
+
 @action(reads=["recipe", "products"], writes=["preselect_result"])
 def preselect_model(state: State) -> tuple[dict, State]:
     router = get_router()
     recipe: Recipe = state["recipe"]
     products: list[Product] = state["products"]
 
-    preselect: PreselectResult = router.preselect_model(recipe, products)
+    preselect: PreselectResult = router.preselect_model(
+        recipe, products, retrieval_stats=state.get("retrieval_stats"))
 
     result = {
         "router": router.name,
@@ -77,11 +119,13 @@ def select_products(state: State) -> tuple[dict, State]:
     products: list[Product] = state["products"]
     preselect: PreselectResult = state["preselect_result"]
 
+    parsed = state.get("parsed_input")   # NL path only
     result: SelectorResult = call_selector(
         recipe.ingredients,
         products,
         model=preselect.model,
         enable_thinking=False,
+        constraints=_selector_constraints(parsed),
     )
 
     span = llm_span(
@@ -184,6 +228,7 @@ def build_plan(state: State) -> tuple[dict, State]:
         ))
         total_cost += prod.price
 
+    parsed = state.get("parsed_input")   # NL path only
     plan = ShoppingPlan(
         recipe_slug=recipe.slug,
         recipe_name=recipe.name,
@@ -193,9 +238,13 @@ def build_plan(state: State) -> tuple[dict, State]:
         preselected_model=preselect.model,
         escalated=decision.escalate,
         total_llm_cost_usd=round(
-            preselect.routing_cost_usd + final.cost_usd, 6
+            preselect.routing_cost_usd + final.cost_usd
+            + (parsed.cost_usd if parsed else 0.0), 6
         ),
         total_latency_ms=final.latency_ms,
+        interpretation=parsed.display_lines() if parsed else [],
+        retrieval_sql=state.get("retrieval_sql") or "",
+        candidate_count=len(state["products"]) if parsed else 0,
     )
     return {"total_cost": plan.total_cost, "n_line_items": len(plan.line_items)}, \
         state.update(plan=plan)
@@ -203,52 +252,78 @@ def build_plan(state: State) -> tuple[dict, State]:
 
 # ─── Application builder ─────────────────────────────────────
 
-def build_application(recipe_slug: str) -> Application:
+def build_application(recipe_slug: str | None = None,
+                      recipe_text: str | None = None) -> Application:
     """Construct the Burr Application for one run.
+
+    Two entry variants sharing the router/selector/plan tail:
+      * classic (recipe_slug): load_recipe → load_products → …
+      * NL2SQL (recipe_text):  parse_and_retrieve → …  (recipe + narrowed
+        products both come from the pasted text)
 
     Conditional transitions:
       * check_escalation → escalate_if_needed  if escalation_decision.escalate
       * check_escalation → skip_escalation     otherwise
     """
-    return (
-        ApplicationBuilder()
-        .with_actions(
-            load_recipe.bind(recipe_slug=recipe_slug),
-            load_products,
-            preselect_model,
-            select_products,
-            check_escalation,
-            escalate_if_needed,
-            skip_escalation,
-            build_plan,
+    if (recipe_slug is None) == (recipe_text is None):
+        raise ValueError("provide exactly one of recipe_slug / recipe_text")
+
+    shared_tail = [
+        ("preselect_model", "select_products"),
+        ("select_products", "check_escalation"),
+        (
+            "check_escalation",
+            "escalate_if_needed",
+            expr("escalation_decision.escalate == True"),
+        ),
+        (
+            "check_escalation",
+            "skip_escalation",
+            expr("escalation_decision.escalate == False"),
+        ),
+        ("escalate_if_needed", "build_plan"),
+        ("skip_escalation", "build_plan"),
+    ]
+    common_actions = [preselect_model, select_products, check_escalation,
+                      escalate_if_needed, skip_escalation, build_plan]
+
+    if recipe_text is not None:
+        builder = (
+            ApplicationBuilder()
+            .with_actions(parse_and_retrieve.bind(recipe_text=recipe_text),
+                          *common_actions)
+            .with_transitions(("parse_and_retrieve", "preselect_model"),
+                              *shared_tail)
+            .with_entrypoint("parse_and_retrieve")
+            .with_identifiers(app_id="run-nl")
         )
-        .with_transitions(
-            ("load_recipe", "load_products"),
-            ("load_products", "preselect_model"),
-            ("preselect_model", "select_products"),
-            ("select_products", "check_escalation"),
-            (
-                "check_escalation",
-                "escalate_if_needed",
-                expr("escalation_decision.escalate == True"),
-            ),
-            (
-                "check_escalation",
-                "skip_escalation",
-                expr("escalation_decision.escalate == False"),
-            ),
-            ("escalate_if_needed", "build_plan"),
-            ("skip_escalation", "build_plan"),
+    else:
+        builder = (
+            ApplicationBuilder()
+            .with_actions(load_recipe.bind(recipe_slug=recipe_slug),
+                          load_products, *common_actions)
+            .with_transitions(("load_recipe", "load_products"),
+                              ("load_products", "preselect_model"),
+                              *shared_tail)
+            .with_entrypoint("load_recipe")
+            .with_identifiers(app_id=f"run-{recipe_slug}")
         )
-        .with_entrypoint("load_recipe")
-        .with_tracker(make_tracker())
-        .with_identifiers(app_id=f"run-{recipe_slug}")
-        .build()
-    )
+    return builder.with_tracker(make_tracker()).build()
 
 
 def run(recipe_slug: str) -> ShoppingPlan:
-    """Run the pipeline end-to-end. Returns the final ShoppingPlan."""
-    app = build_application(recipe_slug)
+    """Run the classic pipeline end-to-end. Returns the final ShoppingPlan."""
+    app = build_application(recipe_slug=recipe_slug)
+    _action, _result, state = app.run(halt_after=["build_plan"])
+    return state["plan"]
+
+
+def run_nl(recipe_text: str) -> ShoppingPlan:
+    """Run the NL2SQL pipeline on pasted recipe text.
+
+    Raises nlsearch.UnparseableRecipe when no ingredient list is found —
+    the API maps that to a 422 with guidance.
+    """
+    app = build_application(recipe_text=recipe_text)
     _action, _result, state = app.run(halt_after=["build_plan"])
     return state["plan"]

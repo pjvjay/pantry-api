@@ -21,6 +21,14 @@ W_AMBIGUOUS_FRAC   = 0.25   # LLM-flagged ambiguity per ingredient
 W_MATCH_UNCERTAIN  = 0.30   # classifier's overall assessment
 W_COST_COMPLEXITY  = 0.10   # cost-vs-suitability difficulty
 
+# Retrieval-aware weights — NL2SQL path only. Applied as a gated blend:
+#   complexity = base * (1 - W_RETRIEVAL_TOTAL) + retrieval_terms
+# so the classic path (has_retrieval=False) scores exactly as before.
+W_POOL_SIZE        = 0.05   # big per-ingredient pools → more to judge
+W_ZERO_HIT         = 0.10   # widening ladder fired → retrieval was guessing
+W_VALUE_DISAGREE   = 0.05   # cheapest != best unit value → real reasoning needed
+W_RETRIEVAL_TOTAL  = W_POOL_SIZE + W_ZERO_HIT + W_VALUE_DISAGREE
+
 # ─── Thresholds ───────────────────────────────────────────────
 # Initial values (0.30 / 0.65) over-escalated on the current golden set:
 # 4/5 recipes routed to Sonnet when Haiku handled them at 100% in cascade.
@@ -63,6 +71,18 @@ def decide(
         W_MATCH_UNCERTAIN  * match_uncertain +
         W_COST_COMPLEXITY  * cost_complexity
     )
+
+    if phase_a.has_retrieval:
+        # Normalize retrieval signals to [0, 1]; blend without disturbing
+        # the classic-path scale (see weight comment above).
+        pool_norm = min(phase_a.mean_pool_size / 8.0, 1.0)      # 8 = per-ingredient LIMIT
+        zero_norm = min(
+            phase_a.zero_hit_ingredients / max(phase_a.ingredient_count, 1), 1.0)
+        complexity = complexity * (1 - W_RETRIEVAL_TOTAL) + (
+            W_POOL_SIZE      * pool_norm +
+            W_ZERO_HIT       * zero_norm +
+            W_VALUE_DISAGREE * phase_a.value_disagreement
+        )
 
     if complexity < THRESHOLD_HAIKU:
         return HAIKU, complexity, (
