@@ -5,8 +5,8 @@ two-part parse: RecipeSpec (what to cook) + Constraints (how to shop).
 The model never writes SQL — it parameterizes a fixed pattern menu, and
 validate_parsed() clamps every value against the live DB vocabulary.
 
-Failure mode (from lifeguide housing/query_parser.py): any error returns an
-empty parse with `error` set — the caller decides how to degrade. Never raises.
+Failure mode: any error returns an empty parse with `error` set — the
+caller decides how to degrade. Never raises.
 """
 from __future__ import annotations
 

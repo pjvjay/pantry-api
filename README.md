@@ -153,8 +153,9 @@ selects the model based on the size of the data and evaluated complexity. The
 response carries the interpretation chips and the executed SQL for transparency.
 Ingredient-form handling distinguishes *purchase forms* ("canned tomatoes" must
 match a canned product) from *cook's prep* ("mashed potatoes" buys fresh
-potatoes). Related: LifeGuide housing's `market_context.py` shows the
-LLM-written-SQL variant with a validation harness — deliberately not used here.
+potatoes). An LLM-written-SQL variant (guarded generation behind a keyword
+filter + read-only execution) is a known alternative — deliberately not used
+here; the constrained parse is the injection-safe hot path.
 
 ## How it deploys
 
