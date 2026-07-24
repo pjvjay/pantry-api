@@ -1,212 +1,65 @@
 [
-  {
-    "id": 1,
-    "name": "Wheat Bread 1",
-    "description": "Whole-grain wheat sandwich loaf, 675g, sliced",
-    "price": 5.00,
-    "category": "bread"
-  },
-  {
-    "id": 2,
-    "name": "Wheat Bread 2",
-    "description": "Basic wheat sandwich loaf, 450g, sliced, store brand",
-    "price": 3.00,
-    "category": "bread"
-  },
-  {
-    "id": 3,
-    "name": "Dark Chocolate Cadbury",
-    "description": "70% cocoa dark chocolate bar, 100g",
-    "price": 5.00,
-    "category": "chocolate"
-  },
-  {
-    "id": 4,
-    "name": "Milk Chocolate Cadbury",
-    "description": "Milk chocolate bar, smooth and creamy, 100g",
-    "price": 10.00,
-    "category": "chocolate"
-  },
-  {
-    "id": 5,
-    "name": "Nestles PBJ",
-    "description": "Peanut butter and grape jelly swirl in a single jar, 340g",
-    "price": 8.00,
-    "category": "spread"
-  },
-  {
-    "id": 6,
-    "name": "Canadian Peanut Butter Cream",
-    "description": "Smooth peanut butter, no jelly, 500g",
-    "price": 3.00,
-    "category": "spread"
-  },
-  {
-    "id": 7,
-    "name": "Sourdough Loaf",
-    "description": "Artisanal sourdough, 600g, whole loaf uncut",
-    "price": 6.50,
-    "category": "bread"
-  },
-  {
-    "id": 8,
-    "name": "Basmati Rice 2kg",
-    "description": "Long-grain basmati rice, 2kg bag, produced in India",
-    "price": 12.00,
-    "category": "grain"
-  },
-  {
-    "id": 9,
-    "name": "Long Grain White Rice 1kg",
-    "description": "Standard long-grain white rice, 1kg bag",
-    "price": 4.50,
-    "category": "grain"
-  },
-  {
-    "id": 10,
-    "name": "Boneless Skinless Chicken Breast",
-    "description": "Fresh chicken breast, boneless & skinless, ~500g package",
-    "price": 8.99,
-    "category": "meat"
-  },
-  {
-    "id": 11,
-    "name": "Chicken Thighs Bone-In",
-    "description": "Bone-in, skin-on chicken thighs, ~700g",
-    "price": 6.49,
-    "category": "meat"
-  },
-  {
-    "id": 12,
-    "name": "Yellow Onion",
-    "description": "Fresh yellow cooking onion, 1 bulb (~200g)",
-    "price": 0.99,
-    "category": "produce"
-  },
-  {
-    "id": 13,
-    "name": "Fresh Garlic",
-    "description": "One bulb of fresh garlic (~50g)",
-    "price": 0.79,
-    "category": "produce"
-  },
-  {
-    "id": 14,
-    "name": "Roma Tomato",
-    "description": "Fresh Roma tomatoes, 500g pack",
-    "price": 2.99,
-    "category": "produce"
-  },
-  {
-    "id": 15,
-    "name": "Canned Diced Tomatoes",
-    "description": "Diced tomatoes in juice, canned, 796ml",
-    "price": 1.99,
-    "category": "pantry"
-  },
-  {
-    "id": 16,
-    "name": "Extra Virgin Olive Oil 500ml",
-    "description": "Cold-pressed extra virgin olive oil, 500ml",
-    "price": 9.99,
-    "category": "oil"
-  },
-  {
-    "id": 17,
-    "name": "Canola Oil 1L",
-    "description": "Neutral canola cooking oil, 1L",
-    "price": 4.49,
-    "category": "oil"
-  },
-  {
-    "id": 18,
-    "name": "Butter Salted 454g",
-    "description": "Salted butter, 454g, from grass-fed cows",
-    "price": 6.99,
-    "category": "dairy"
-  },
-  {
-    "id": 19,
-    "name": "Whole Milk 1L",
-    "description": "3.25% homogenized milk, 1L carton",
-    "price": 2.99,
-    "category": "dairy"
-  },
-  {
-    "id": 20,
-    "name": "Plain Greek Yogurt 750g",
-    "description": "Plain Greek yogurt, unsweetened, 750g tub",
-    "price": 5.99,
-    "category": "dairy"
-  },
-  {
-    "id": 21,
-    "name": "Spaghetti Pasta 500g",
-    "description": "Dry spaghetti pasta, 500g box",
-    "price": 2.49,
-    "category": "pantry"
-  },
-  {
-    "id": 22,
-    "name": "Ground Beef Lean",
-    "description": "Lean ground beef, ~450g package, fresh",
-    "price": 7.99,
-    "category": "meat"
-  },
-  {
-    "id": 23,
-    "name": "Cheddar Cheese Block 300g",
-    "description": "Sharp aged cheddar cheese, 300g block",
-    "price": 5.99,
-    "category": "dairy"
-  },
-  {
-    "id": 24,
-    "name": "Mozzarella Shredded 200g",
-    "description": "Shredded mozzarella for pizza / pasta, 200g",
-    "price": 4.99,
-    "category": "dairy"
-  },
-  {
-    "id": 25,
-    "name": "Fresh Ginger",
-    "description": "Fresh ginger root, sold by weight, priced per 100g",
-    "price": 1.29,
-    "category": "produce"
-  },
-  {
-    "id": 26,
-    "name": "Cumin Ground 100g",
-    "description": "Ground cumin spice, 100g jar",
-    "price": 3.49,
-    "category": "spice"
-  },
-  {
-    "id": 27,
-    "name": "Turmeric Ground 100g",
-    "description": "Ground turmeric spice, 100g jar",
-    "price": 3.99,
-    "category": "spice"
-  },
-  {
-    "id": 28,
-    "name": "Coriander Ground 100g",
-    "description": "Ground coriander spice, 100g jar",
-    "price": 3.49,
-    "category": "spice"
-  },
-  {
-    "id": 29,
-    "name": "Garam Masala 100g",
-    "description": "Traditional Indian spice blend, 100g",
-    "price": 4.99,
-    "category": "spice"
-  },
-  {
-    "id": 30,
-    "name": "Frozen Broccoli 500g",
-    "description": "Frozen broccoli florets, 500g bag",
-    "price": 3.49,
-    "category": "produce"
-  }
+  {"id": 1,  "name": "Wheat Bread 1", "description": "Whole-grain wheat sandwich loaf, 675g, sliced", "price": 5.00, "category": "bakery", "subcategory": "bread", "dietary_tags": "gluten", "unit_size": "675g", "unit_qty": 675, "unit_uom": "g"},
+  {"id": 2,  "name": "Wheat Bread 2", "description": "Basic wheat sandwich loaf, 450g, sliced, store brand", "price": 3.00, "category": "bakery", "subcategory": "bread", "dietary_tags": "gluten", "unit_size": "450g", "unit_qty": 450, "unit_uom": "g"},
+  {"id": 3,  "name": "Dark Chocolate Cadbury", "description": "70% cocoa dark chocolate bar, 100g, dairy-free", "price": 5.00, "category": "snacks", "subcategory": "chocolate", "dietary_tags": "", "unit_size": "100g", "unit_qty": 100, "unit_uom": "g"},
+  {"id": 4,  "name": "Milk Chocolate Cadbury", "description": "Milk chocolate bar, smooth and creamy, 100g", "price": 10.00, "category": "snacks", "subcategory": "chocolate", "dietary_tags": "dairy", "unit_size": "100g", "unit_qty": 100, "unit_uom": "g"},
+  {"id": 5,  "name": "Nestles PBJ", "description": "Peanut butter and grape jelly swirl in a single jar, 340g", "price": 8.00, "category": "pantry", "subcategory": "spread", "dietary_tags": "nuts", "unit_size": "340g", "unit_qty": 340, "unit_uom": "g"},
+  {"id": 6,  "name": "Canadian Peanut Butter Cream", "description": "Smooth peanut butter, no jelly, 500g", "price": 3.00, "category": "pantry", "subcategory": "spread", "dietary_tags": "nuts", "unit_size": "500g", "unit_qty": 500, "unit_uom": "g"},
+  {"id": 7,  "name": "Sourdough Loaf", "description": "Artisanal sourdough, 600g, whole loaf uncut", "price": 6.50, "category": "bakery", "subcategory": "bread", "dietary_tags": "gluten", "unit_size": "600g", "unit_qty": 600, "unit_uom": "g"},
+  {"id": 8,  "name": "Basmati Rice 2kg", "description": "Long-grain basmati rice, 2kg bag, produced in India", "price": 12.00, "category": "pantry", "subcategory": "rice", "dietary_tags": "", "unit_size": "2kg", "unit_qty": 2000, "unit_uom": "g"},
+  {"id": 9,  "name": "Long Grain White Rice 1kg", "description": "Standard long-grain white rice, 1kg bag", "price": 4.50, "category": "pantry", "subcategory": "rice", "dietary_tags": "", "unit_size": "1kg", "unit_qty": 1000, "unit_uom": "g"},
+  {"id": 10, "name": "Boneless Skinless Chicken Breast", "description": "Fresh chicken breast, boneless & skinless, ~500g package", "price": 8.99, "category": "meat", "subcategory": "poultry", "dietary_tags": "meat", "unit_size": "500g", "unit_qty": 500, "unit_uom": "g"},
+  {"id": 11, "name": "Chicken Thighs Bone-In", "description": "Bone-in, skin-on chicken thighs, ~700g", "price": 6.49, "category": "meat", "subcategory": "poultry", "dietary_tags": "meat", "unit_size": "700g", "unit_qty": 700, "unit_uom": "g"},
+  {"id": 12, "name": "Yellow Onion", "description": "Fresh yellow cooking onion, 1 bulb (~200g)", "price": 0.99, "category": "produce", "subcategory": "vegetables", "dietary_tags": "", "unit_size": "~200g", "unit_qty": 200, "unit_uom": "g"},
+  {"id": 13, "name": "Fresh Garlic", "description": "One bulb of fresh garlic (~50g)", "price": 0.79, "category": "produce", "subcategory": "vegetables", "dietary_tags": "", "unit_size": "~50g", "unit_qty": 50, "unit_uom": "g"},
+  {"id": 14, "name": "Roma Tomato", "description": "Fresh Roma tomatoes, 500g pack", "price": 2.99, "category": "produce", "subcategory": "vegetables", "dietary_tags": "", "unit_size": "500g", "unit_qty": 500, "unit_uom": "g"},
+  {"id": 15, "name": "Canned Diced Tomatoes", "description": "Diced tomatoes in juice, canned, 796ml", "price": 1.99, "category": "pantry", "subcategory": "canned", "dietary_tags": "", "unit_size": "796ml", "unit_qty": 796, "unit_uom": "ml"},
+  {"id": 16, "name": "Extra Virgin Olive Oil 500ml", "description": "Cold-pressed extra virgin olive oil, 500ml", "price": 9.99, "category": "pantry", "subcategory": "oil", "dietary_tags": "", "unit_size": "500ml", "unit_qty": 500, "unit_uom": "ml"},
+  {"id": 17, "name": "Canola Oil 1L", "description": "Neutral canola cooking oil, 1L", "price": 4.49, "category": "pantry", "subcategory": "oil", "dietary_tags": "", "unit_size": "1L", "unit_qty": 1000, "unit_uom": "ml"},
+  {"id": 18, "name": "Butter Salted 454g", "description": "Salted butter, 454g, from grass-fed cows", "price": 6.99, "category": "dairy", "subcategory": "butter", "dietary_tags": "dairy", "unit_size": "454g", "unit_qty": 454, "unit_uom": "g"},
+  {"id": 19, "name": "Whole Milk 1L", "description": "3.25% homogenized milk, 1L carton", "price": 2.99, "category": "dairy", "subcategory": "milk", "dietary_tags": "dairy", "unit_size": "1L", "unit_qty": 1000, "unit_uom": "ml"},
+  {"id": 20, "name": "Plain Greek Yogurt 750g", "description": "Plain Greek yogurt, unsweetened, 750g tub", "price": 5.99, "category": "dairy", "subcategory": "yogurt", "dietary_tags": "dairy", "unit_size": "750g", "unit_qty": 750, "unit_uom": "g"},
+  {"id": 21, "name": "Spaghetti Pasta 500g", "description": "Dry spaghetti pasta, 500g box", "price": 2.49, "category": "pantry", "subcategory": "pasta", "dietary_tags": "gluten", "unit_size": "500g", "unit_qty": 500, "unit_uom": "g"},
+  {"id": 22, "name": "Ground Beef Lean", "description": "Lean ground beef, ~450g package, fresh", "price": 7.99, "category": "meat", "subcategory": "beef", "dietary_tags": "meat", "unit_size": "450g", "unit_qty": 450, "unit_uom": "g"},
+  {"id": 23, "name": "Cheddar Cheese Block 300g", "description": "Sharp aged cheddar cheese, 300g block", "price": 5.99, "category": "dairy", "subcategory": "cheese", "dietary_tags": "dairy", "unit_size": "300g", "unit_qty": 300, "unit_uom": "g"},
+  {"id": 24, "name": "Mozzarella Shredded 200g", "description": "Shredded mozzarella for pizza / pasta, 200g", "price": 4.99, "category": "dairy", "subcategory": "cheese", "dietary_tags": "dairy", "unit_size": "200g", "unit_qty": 200, "unit_uom": "g"},
+  {"id": 25, "name": "Fresh Ginger", "description": "Fresh ginger root, sold by weight, priced per 100g", "price": 1.29, "category": "produce", "subcategory": "vegetables", "dietary_tags": "", "unit_size": "100g", "unit_qty": 100, "unit_uom": "g"},
+  {"id": 26, "name": "Cumin Ground 100g", "description": "Ground cumin spice, 100g jar", "price": 3.49, "category": "pantry", "subcategory": "spice", "dietary_tags": "", "unit_size": "100g", "unit_qty": 100, "unit_uom": "g"},
+  {"id": 27, "name": "Turmeric Ground 100g", "description": "Ground turmeric spice, 100g jar", "price": 3.99, "category": "pantry", "subcategory": "spice", "dietary_tags": "", "unit_size": "100g", "unit_qty": 100, "unit_uom": "g"},
+  {"id": 28, "name": "Coriander Ground 100g", "description": "Ground coriander spice, 100g jar", "price": 3.49, "category": "pantry", "subcategory": "spice", "dietary_tags": "", "unit_size": "100g", "unit_qty": 100, "unit_uom": "g"},
+  {"id": 29, "name": "Garam Masala 100g", "description": "Traditional Indian spice blend, 100g", "price": 4.99, "category": "pantry", "subcategory": "spice", "dietary_tags": "", "unit_size": "100g", "unit_qty": 100, "unit_uom": "g"},
+  {"id": 30, "name": "Frozen Broccoli 500g", "description": "Frozen broccoli florets, 500g bag", "price": 3.49, "category": "frozen", "subcategory": "vegetables", "dietary_tags": "", "unit_size": "500g", "unit_qty": 500, "unit_uom": "g"},
+
+  {"id": 31, "name": "Tomato Sauce Jar 650ml", "description": "Classic marinara tomato sauce for pasta, 650ml jar", "price": 3.99, "category": "pantry", "subcategory": "sauce", "dietary_tags": "", "unit_size": "650ml", "unit_qty": 650, "unit_uom": "ml"},
+  {"id": 32, "name": "Tomato Paste 156ml", "description": "Double-concentrated tomato paste, 156ml can", "price": 1.29, "category": "pantry", "subcategory": "canned", "dietary_tags": "", "unit_size": "156ml", "unit_qty": 156, "unit_uom": "ml"},
+  {"id": 33, "name": "Crushed Tomatoes Canned 796ml", "description": "Canned crushed tomatoes, no salt added, 796ml", "price": 2.29, "category": "pantry", "subcategory": "canned", "dietary_tags": "", "unit_size": "796ml", "unit_qty": 796, "unit_uom": "ml"},
+  {"id": 34, "name": "Passata Strained Tomatoes 680ml", "description": "Ground strained tomatoes (passata), glass bottle, 680ml", "price": 2.79, "category": "pantry", "subcategory": "sauce", "dietary_tags": "", "unit_size": "680ml", "unit_qty": 680, "unit_uom": "ml"},
+  {"id": 35, "name": "Ground Beef Medium 900g", "description": "Medium ground beef, family value pack, ~900g", "price": 11.99, "category": "meat", "subcategory": "beef", "dietary_tags": "meat", "unit_size": "900g", "unit_qty": 900, "unit_uom": "g"},
+  {"id": 36, "name": "Ground Beef Extra Lean 300g", "description": "Extra lean ground beef, small pack, ~300g", "price": 6.49, "category": "meat", "subcategory": "beef", "dietary_tags": "meat", "unit_size": "300g", "unit_qty": 300, "unit_uom": "g"},
+  {"id": 37, "name": "Russet Potatoes 5lb Bag", "description": "Russet potatoes for baking and mashing, 5lb (2.27kg) bag", "price": 4.99, "category": "produce", "subcategory": "vegetables", "dietary_tags": "", "unit_size": "2.27kg", "unit_qty": 2270, "unit_uom": "g"},
+  {"id": 38, "name": "Baby Potatoes 680g", "description": "Creamer baby potatoes, 680g bag", "price": 3.99, "category": "produce", "subcategory": "vegetables", "dietary_tags": "", "unit_size": "680g", "unit_qty": 680, "unit_uom": "g"},
+  {"id": 39, "name": "Oat Milk 1L", "description": "Unsweetened oat beverage, dairy-free, 1L carton", "price": 3.49, "category": "dairy", "subcategory": "milk", "dietary_tags": "", "unit_size": "1L", "unit_qty": 1000, "unit_uom": "ml"},
+  {"id": 40, "name": "Almond Milk 946ml", "description": "Unsweetened almond beverage, dairy-free, 946ml", "price": 3.29, "category": "dairy", "subcategory": "milk", "dietary_tags": "nuts", "unit_size": "946ml", "unit_qty": 946, "unit_uom": "ml"},
+  {"id": 41, "name": "Vegan Cheese Shreds 200g", "description": "Plant-based mozzarella-style shreds, dairy-free, 200g", "price": 5.49, "category": "dairy", "subcategory": "cheese", "dietary_tags": "soy", "unit_size": "200g", "unit_qty": 200, "unit_uom": "g"},
+  {"id": 42, "name": "Coconut Yogurt 500g", "description": "Plain coconut-based yogurt alternative, dairy-free, 500g", "price": 5.99, "category": "dairy", "subcategory": "yogurt", "dietary_tags": "", "unit_size": "500g", "unit_qty": 500, "unit_uom": "g"},
+  {"id": 43, "name": "Parmesan Wedge 200g", "description": "Aged parmesan cheese wedge, 200g", "price": 7.99, "category": "dairy", "subcategory": "cheese", "dietary_tags": "dairy", "unit_size": "200g", "unit_qty": 200, "unit_uom": "g"},
+  {"id": 44, "name": "Cheddar Shredded 320g", "description": "Shredded mild cheddar, resealable bag, 320g", "price": 6.99, "category": "dairy", "subcategory": "cheese", "dietary_tags": "dairy", "unit_size": "320g", "unit_qty": 320, "unit_uom": "g"},
+  {"id": 45, "name": "Whole Chicken 1.6kg", "description": "Whole roasting chicken, ~1.6kg", "price": 12.99, "category": "meat", "subcategory": "poultry", "dietary_tags": "meat", "unit_size": "1.6kg", "unit_qty": 1600, "unit_uom": "g"},
+  {"id": 46, "name": "Chicken Thighs Boneless 450g", "description": "Boneless skinless chicken thighs, ~450g", "price": 7.49, "category": "meat", "subcategory": "poultry", "dietary_tags": "meat", "unit_size": "450g", "unit_qty": 450, "unit_uom": "g"},
+  {"id": 47, "name": "Atlantic Salmon Fillet 400g", "description": "Fresh Atlantic salmon fillet, ~400g", "price": 13.99, "category": "meat", "subcategory": "seafood", "dietary_tags": "meat", "unit_size": "400g", "unit_qty": 400, "unit_uom": "g"},
+  {"id": 48, "name": "Canned Tuna Flaked 170g", "description": "Flaked light tuna in water, canned, 170g", "price": 1.79, "category": "pantry", "subcategory": "canned", "dietary_tags": "meat", "unit_size": "170g", "unit_qty": 170, "unit_uom": "g"},
+  {"id": 49, "name": "Gluten-Free Penne 340g", "description": "Corn and rice gluten-free penne, 340g", "price": 4.49, "category": "pantry", "subcategory": "pasta", "dietary_tags": "", "unit_size": "340g", "unit_qty": 340, "unit_uom": "g"},
+  {"id": 50, "name": "Gluten-Free Bread 400g", "description": "Gluten-free sandwich loaf, 400g, sliced", "price": 6.99, "category": "bakery", "subcategory": "bread", "dietary_tags": "egg", "unit_size": "400g", "unit_qty": 400, "unit_uom": "g"},
+  {"id": 51, "name": "Penne Rigate 500g", "description": "Dry penne rigate pasta, 500g box", "price": 2.29, "category": "pantry", "subcategory": "pasta", "dietary_tags": "gluten", "unit_size": "500g", "unit_qty": 500, "unit_uom": "g"},
+  {"id": 52, "name": "Fusilli Family Pack 900g", "description": "Dry fusilli pasta, family value pack, 900g", "price": 3.79, "category": "pantry", "subcategory": "pasta", "dietary_tags": "gluten", "unit_size": "900g", "unit_qty": 900, "unit_uom": "g"},
+  {"id": 53, "name": "Broccoli Crown", "description": "Fresh broccoli crown, ~400g", "price": 2.49, "category": "produce", "subcategory": "vegetables", "dietary_tags": "", "unit_size": "~400g", "unit_qty": 400, "unit_uom": "g"},
+  {"id": 54, "name": "Carrots 1kg", "description": "Fresh carrots, 1kg bag", "price": 2.29, "category": "produce", "subcategory": "vegetables", "dietary_tags": "", "unit_size": "1kg", "unit_qty": 1000, "unit_uom": "g"},
+  {"id": 55, "name": "Bell Pepper Trio", "description": "Three sweet bell peppers (red/yellow/orange), ~500g", "price": 4.99, "category": "produce", "subcategory": "vegetables", "dietary_tags": "", "unit_size": "~500g", "unit_qty": 500, "unit_uom": "g"},
+  {"id": 56, "name": "Fresh Basil 30g", "description": "Fresh basil herb bunch, 30g clamshell", "price": 2.99, "category": "produce", "subcategory": "herbs", "dietary_tags": "", "unit_size": "30g", "unit_qty": 30, "unit_uom": "g"},
+  {"id": 57, "name": "Chicken Stock 900ml", "description": "Low-sodium chicken stock, 900ml carton", "price": 2.49, "category": "pantry", "subcategory": "canned", "dietary_tags": "meat", "unit_size": "900ml", "unit_qty": 900, "unit_uom": "ml"},
+  {"id": 58, "name": "Coconut Milk Canned 400ml", "description": "Full-fat coconut milk, canned, 400ml", "price": 2.29, "category": "pantry", "subcategory": "canned", "dietary_tags": "", "unit_size": "400ml", "unit_qty": 400, "unit_uom": "ml"},
+  {"id": 59, "name": "Soy Sauce 500ml", "description": "Naturally brewed soy sauce, 500ml", "price": 3.99, "category": "pantry", "subcategory": "sauce", "dietary_tags": "soy,gluten", "unit_size": "500ml", "unit_qty": 500, "unit_uom": "ml"},
+  {"id": 60, "name": "Eggs Large Dozen", "description": "12 large white eggs", "price": 4.29, "category": "dairy", "subcategory": "eggs", "dietary_tags": "egg", "unit_size": "12", "unit_qty": 12, "unit_uom": "each"},
+  {"id": 61, "name": "All-Purpose Flour 2.5kg", "description": "All-purpose wheat flour, 2.5kg bag", "price": 5.49, "category": "pantry", "subcategory": "baking", "dietary_tags": "gluten", "unit_size": "2.5kg", "unit_qty": 2500, "unit_uom": "g"},
+  {"id": 62, "name": "Olive Oil 1L", "description": "Pure olive oil, everyday cooking grade, 1L", "price": 13.99, "category": "pantry", "subcategory": "oil", "dietary_tags": "", "unit_size": "1L", "unit_qty": 1000, "unit_uom": "ml"}
 ]

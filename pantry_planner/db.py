@@ -29,6 +29,12 @@ class ProductRow(Base):
     description = Column(String, nullable=False, default="")
     price = Column(Float, nullable=False)
     category = Column(String, nullable=True)
+    # 0002_product_attributes — mirrors pantry-db migrations
+    subcategory = Column(String, nullable=False, default="")
+    dietary_tags = Column(String, nullable=False, default="")
+    unit_size = Column(String, nullable=False, default="")
+    unit_qty = Column(Float, nullable=True)
+    unit_uom = Column(String, nullable=False, default="")
 
 
 class RecipeRow(Base):
@@ -90,6 +96,11 @@ def load_all_products() -> list[Product]:
                 description=r.description,
                 price=r.price,
                 category=r.category,
+                subcategory=r.subcategory or None,
+                dietary_tags=r.dietary_tags or "",
+                unit_size=r.unit_size or "",
+                unit_qty=r.unit_qty,
+                unit_uom=r.unit_uom or "",
             )
             for r in rows
         ]
@@ -116,6 +127,11 @@ def seed_from_json() -> None:
                 description=p.get("description", ""),
                 price=float(p["price"]),
                 category=p.get("category"),
+                subcategory=p.get("subcategory", ""),
+                dietary_tags=p.get("dietary_tags", ""),
+                unit_size=p.get("unit_size", ""),
+                unit_qty=p.get("unit_qty"),
+                unit_uom=p.get("unit_uom", ""),
             ))
 
         # Recipes

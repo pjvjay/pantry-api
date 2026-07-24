@@ -21,10 +21,10 @@ class ThreePhaseRouter:
     name = "three_phase"
 
     def preselect_model(
-        self, recipe: Recipe, products: list[Product]
+        self, recipe: Recipe, products: list[Product], retrieval_stats=None
     ) -> PreselectResult:
-        # Phase A — cheap deterministic signals
-        phase_a = compute_phase_a(recipe, products)
+        # Phase A — cheap deterministic signals (+ NL2SQL pool stats when present)
+        phase_a = compute_phase_a(recipe, products, retrieval_stats=retrieval_stats)
 
         # Phase B — meta-cognitive classifier
         phase_b = call_classifier(recipe, products)

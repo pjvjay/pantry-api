@@ -24,6 +24,7 @@ class Router(Protocol):
         self,
         recipe: Recipe,
         products: list[Product],
+        retrieval_stats=None,
     ) -> PreselectResult:
         """Pick the model the main selector should use.
 

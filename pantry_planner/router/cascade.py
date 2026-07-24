@@ -18,8 +18,9 @@ class CascadeRouter:
     name = "cascade"
 
     def preselect_model(
-        self, recipe: Recipe, products: list[Product]
+        self, recipe: Recipe, products: list[Product], retrieval_stats=None
     ) -> PreselectResult:
+        # retrieval_stats is unused: cascade routes by post-hoc confidence.
         cfg = settings()
         return PreselectResult(
             model=cfg.selector_model_default,
