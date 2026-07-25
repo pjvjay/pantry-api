@@ -35,19 +35,5 @@ def prompt_block(vocab: dict[str, str]) -> str:
     return f"categories: {', '.join(cats)}\nsubcategories: {', '.join(subs)}"
 
 
-@lru_cache(maxsize=1)
-def subcat_parents() -> dict[str, str]:
-    """{'cheese': 'dairy', ...} — for the scope-fallback widening rung."""
-    parents: dict[str, str] = {}
-    with Session(db.engine()) as s:
-        rows = s.execute(text(
-            "SELECT DISTINCT category, subcategory FROM products")).all()
-    for cat, sub in rows:
-        if cat and sub:
-            parents[sub.lower()] = cat.lower()
-    return parents
-
-
 def clear_cache() -> None:   # tests + after reseeding
     db_vocab.cache_clear()
-    subcat_parents.cache_clear()

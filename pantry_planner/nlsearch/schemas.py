@@ -24,6 +24,7 @@ class RecipeSpec(BaseModel):
 class Constraints(BaseModel):
     max_item_price: float | None = None
     max_total_budget: float | None = None
+    max_distance_km: float | None = None   # "only stores within 10 km"
     exclude_tags: list[str] = Field(default_factory=list)
     require_tags: list[str] = Field(default_factory=list)
     categories: list[str] = Field(default_factory=list)
@@ -52,6 +53,8 @@ class ParsedInput(BaseModel):
             out.append(f"budget ≤ ${c.max_total_budget:.2f}")
         if c.max_item_price is not None:
             out.append(f"per item ≤ ${c.max_item_price:.2f}")
+        if c.max_distance_km is not None:
+            out.append(f"stores ≤ {c.max_distance_km:g} km")
         out += [f"no {t}" for t in c.exclude_tags]
         out += [f"only {t}" for t in c.require_tags]
         out += [f"skip {s}" for s in (*c.exclude_categories, *c.exclude_subcategories)]
@@ -65,7 +68,7 @@ class RetrievalStats(BaseModel):
     """Per-ingredient pool statistics — feed Phase A of the model router."""
 
     pool_sizes: list[int] = Field(default_factory=list)
-    zero_hit_ingredients: int = 0          # needed the widening ladder
+    zero_hit_ingredients: int = 0          # needed t1's form-relaxed match
     value_disagreement: float = 0.0        # fraction of pools: cheapest != best unit value
     catalog_size: int = 0
 

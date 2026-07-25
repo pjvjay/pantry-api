@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from .nlsearch.plan import StepResult  # import-safe: plan.py is pydantic-only
+
 
 # ─── Domain models ────────────────────────────────────────────
 
@@ -34,6 +36,13 @@ class Product(BaseModel):
     unit_size: str = ""          # display: "450g"
     unit_qty: float | None = None  # canonical amount: 450
     unit_uom: str = ""           # canonical uom: g|ml|each
+    # 0003_stores_reviews_terms (query-plan retrieval) — a candidate is a
+    # product pinned to its cheapest in-range store offer
+    brand: str = ""
+    store_name: str = ""
+    store_price: float | None = None   # offer price at store_name
+    distance_km: float | None = None   # store distance from the request point
+    substitute: bool = False           # t4 same-subcategory alternative
 
 
 # ─── Selector I/O ─────────────────────────────────────────────
@@ -69,7 +78,7 @@ class PhaseAMetrics(BaseModel):
     # extra decision weights so the classic path scores exactly as before)
     has_retrieval: bool = False
     mean_pool_size: float = 0.0        # avg candidates per ingredient
-    zero_hit_ingredients: int = 0      # needed the widening ladder
+    zero_hit_ingredients: int = 0      # needed t1's form-relaxed match
     value_disagreement: float = 0.0    # pools where cheapest != best unit value
 
 
@@ -110,10 +119,13 @@ class PlanLineItem(BaseModel):
     product_id: int
     product_name: str
     product_description: str
-    price: float
+    price: float                       # the charged price (store offer when known)
     confidence: float
     reasoning: str
     model_used: str
+    # Query-plan path: which store the price comes from
+    store_name: str = ""
+    store_price: float | None = None
 
 
 class ShoppingPlan(BaseModel):
@@ -128,5 +140,5 @@ class ShoppingPlan(BaseModel):
     total_latency_ms: int
     # NL2SQL path extras (empty on the classic /plan/{slug} path)
     interpretation: list[str] = Field(default_factory=list)
-    retrieval_sql: str = ""
+    plan_trace: list[StepResult] = Field(default_factory=list)
     candidate_count: int = 0

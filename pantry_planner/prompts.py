@@ -52,6 +52,16 @@ the rule above it. NEVER let a lower rule override a higher one:
    * preps: how the cook will prepare an item (e.g. mashed) — buy the
      base product, do NOT search for pre-prepared versions.
    * preferences: soft guidance — apply when rules 1-3 leave a choice.
+   * brand_statistics: per-ingredient, per-brand aggregates (options,
+     avg price, avg rating, review count) from store + review data.
+     Context for breaking ties among equally-good matches: prefer the
+     better-rated brand when prices are close, and say so in the
+     reasoning. Never let it override rules 1-3.
+
+7. Products carry their best store offer ("store", offer "price",
+   "distance_km"). A product flagged "substitute": true is a same-aisle
+   alternative fetched because the direct pool was thin — choose it only
+   when no direct match fits, and flag the swap in the reasoning.
 
 Return your selections via the submit_plan tool.
 """

@@ -58,20 +58,25 @@ def list_products() -> list[Product]:
 
 
 class NLPlanRequest(BaseModel):
-    """The FULL pasted recipe text (+ optional inline shopping notes)."""
+    """The FULL pasted recipe text (+ optional inline shopping notes).
+    lat/lon: optional shopping location for the distance constraint;
+    defaults to the configured reference point."""
 
     recipe_text: str
+    lat: float | None = None
+    lon: float | None = None
 
 
 @app.post("/plan/nl", response_model=ShoppingPlan)
 def plan_nl(req: NLPlanRequest) -> ShoppingPlan:
-    """NL2SQL path: parse a pasted recipe, retrieve narrowed candidates via
-    templated SQL, route, select. Returns the plan + interpretation + the
-    executed SQL for transparency."""
-    from .nlsearch import UnparseableRecipe
+    """NL2SQL path: parse a pasted recipe, execute the staged query plan
+    (existence → options → brand stats → lookups), route, select. Returns
+    the plan + interpretation + the full per-step SQL trace. A gate abort
+    returns 409 with the alert and the trace up to the failed step."""
+    from .nlsearch import PlanAborted, UnparseableRecipe
 
     try:
-        return flow.run_nl(req.recipe_text)
+        return flow.run_nl(req.recipe_text, lat=req.lat, lon=req.lon)
     except UnparseableRecipe:
         raise HTTPException(status_code=422, detail=(
             "Couldn't find an ingredient list in that text. Paste a recipe "
@@ -79,6 +84,8 @@ def plan_nl(req: NLPlanRequest) -> ShoppingPlan:
             "Spaghetti Bolognese (serves 4)\n"
             "- 400g spaghetti\n- 500g ground beef\n- 1 can crushed tomatoes\n"
             "Notes: under $30, no dairy"))
+    except PlanAborted as e:
+        raise HTTPException(status_code=409, detail=e.execution.model_dump(mode="json"))
 
 
 @app.post("/plan/{slug}", response_model=ShoppingPlan)

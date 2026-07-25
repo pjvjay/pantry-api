@@ -36,6 +36,15 @@ def _serialize_products(products: list[Product]) -> list[dict]:
             d["contains"] = p.dietary_tags
         if p.unit_size:
             d["unit_size"] = p.unit_size
+        # Query-plan path: each candidate is pinned to its best store offer
+        if p.brand:
+            d["brand"] = p.brand
+        if p.store_name:
+            d["store"] = p.store_name
+            d["price"] = p.store_price          # the offer price is what's charged
+            d["distance_km"] = p.distance_km
+        if p.substitute:
+            d["substitute"] = True              # t4 alternative, not a direct match
         out.append(d)
     return out
 

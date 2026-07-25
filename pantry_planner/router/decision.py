@@ -25,7 +25,7 @@ W_COST_COMPLEXITY  = 0.10   # cost-vs-suitability difficulty
 #   complexity = base * (1 - W_RETRIEVAL_TOTAL) + retrieval_terms
 # so the classic path (has_retrieval=False) scores exactly as before.
 W_POOL_SIZE        = 0.05   # big per-ingredient pools → more to judge
-W_ZERO_HIT         = 0.10   # widening ladder fired → retrieval was guessing
+W_ZERO_HIT         = 0.10   # t1 form-relaxation fired → looser matches in pool
 W_VALUE_DISAGREE   = 0.05   # cheapest != best unit value → real reasoning needed
 W_RETRIEVAL_TOTAL  = W_POOL_SIZE + W_ZERO_HIT + W_VALUE_DISAGREE
 

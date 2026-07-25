@@ -77,6 +77,11 @@ class Settings:
     # Feature flags
     enable_thinking_on_escalation: bool  # if True, escalation model runs with thinking on
 
+    # Query-plan retrieval: default shopping location when the request
+    # doesn't send one (matches the seeded stores' reference point)
+    default_lat: float
+    default_lon: float
+
     @staticmethod
     def from_env() -> "Settings":
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -103,6 +108,8 @@ class Settings:
             enable_thinking_on_escalation=(
                 os.environ.get("ENABLE_THINKING_ON_ESCALATION", "false").lower() == "true"
             ),
+            default_lat=float(os.environ.get("DEFAULT_LAT", "49.28")),
+            default_lon=float(os.environ.get("DEFAULT_LON", "-123.12")),
         )
 
 

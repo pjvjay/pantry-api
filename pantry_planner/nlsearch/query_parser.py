@@ -43,6 +43,7 @@ planner. Extract TWO things via the submit_parse tool:
    * "no cheese" (a product kind) -> exclude_subcategories ["cheese"]
    * "skip the dairy aisle" -> exclude_categories ["dairy"]
    * budgets: "under $30" -> max_total_budget 30
+   * travel limits: "only stores within 10km" -> max_distance_km 10
    * anything left that expresses preference -> soft_text
 
 Known vocabulary:
@@ -53,13 +54,13 @@ EXAMPLES (input -> key outputs):
 
 A) "Spaghetti Bolognese (serves 4)\\n- 400g spaghetti\\n- 500g ground beef
    \\n- 1 yellow onion\\n- 2 cloves garlic\\n- 1 can crushed tomatoes
-   \\n- olive oil\\nNotes: under $30 please, no pork."
+   \\n- olive oil\\nNotes: under $30 please, no pork, only stores within 10km."
    -> title "Spaghetti Bolognese", servings 4; ingredients include
       {{name "spaghetti", quantity 400, unit "g", category_hint "pasta"}},
       {{name "ground beef", quantity 500, unit "g", category_hint "beef"}},
       {{name "tomato", form "canned", quantity 1, unit "can", category_hint "canned"}},
       {{name "olive oil", category_hint "oil"}};
-      constraints {{max_total_budget 30, soft_text "no pork"}}
+      constraints {{max_total_budget 30, max_distance_km 10, soft_text "no pork"}}
 
 B) "Shepherd's pie for 6: 2 lb ground lamb, mashed potatoes (about 1kg),
    frozen peas, 2 cups shredded cheddar. We're gluten-free."
@@ -126,6 +127,7 @@ PARSER_TOOL = {
                 "properties": {
                     "max_item_price": {"type": ["number", "null"]},
                     "max_total_budget": {"type": ["number", "null"]},
+                    "max_distance_km": {"type": ["number", "null"]},
                     "exclude_tags": {"type": "array", "items": {"type": "string"}},
                     "require_tags": {"type": "array", "items": {"type": "string"}},
                     "categories": {"type": "array", "items": {"type": "string"}},
@@ -200,9 +202,10 @@ def validate_parsed(parsed: ParsedInput, vocab: dict[str, str]) -> ParsedInput:
     c.exclude_categories, c.exclude_subcategories = resolve_levels(
         c.exclude_categories, c.exclude_subcategories)
 
-    for bound in ("max_item_price", "max_total_budget"):
+    for bound, upper in (("max_item_price", 10_000), ("max_total_budget", 10_000),
+                         ("max_distance_km", 500)):
         v = getattr(c, bound)
-        if v is not None and not (0 < v < 10_000):
+        if v is not None and not (0 < v < upper):
             setattr(c, bound, None)
             parsed.ignored.append(f"{bound}={v}")
 

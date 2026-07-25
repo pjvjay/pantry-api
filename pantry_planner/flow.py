@@ -37,7 +37,7 @@ from .selector import call_selector, merge_selections
 from .tracing import llm_span, make_tracker
 
 
-def _selector_constraints(parsed) -> dict | None:
+def _selector_constraints(parsed, brand_stats: dict | None = None) -> dict | None:
     """Condense the NL parse into the binding-constraints object the
     selector prompt understands. None on the classic path."""
     if parsed is None:
@@ -53,6 +53,9 @@ def _selector_constraints(parsed) -> dict | None:
         "preferences": c.soft_text or None,
         "quantities_needed": quantities or None,
         "preps": {i.name: i.prep for i in parsed.recipe.ingredients if i.prep} or None,
+        # t3's per-ingredient brand aggregates (options/avg price/avg rating/
+        # review count) — context for the final mapping, not a hard rule
+        "brand_statistics": brand_stats or None,
     }
     out = {k: v for k, v in out.items() if v is not None}
     return out or None
@@ -75,23 +78,28 @@ def load_products(state: State) -> tuple[dict, State]:
 
 
 @action(reads=[], writes=["recipe", "products", "parsed_input",
-                          "retrieval_sql", "retrieval_stats"])
-def parse_and_retrieve(state: State, recipe_text: str) -> tuple[dict, State]:
-    """NL2SQL entrypoint: pasted recipe text → ad-hoc Recipe + narrowed
-    candidate products. Replaces load_recipe + load_products on the NL path;
-    downstream actions consume the same state keys."""
+                          "plan_trace", "brand_stats", "retrieval_stats"])
+def parse_and_retrieve(state: State, recipe_text: str,
+                       lat: float | None = None,
+                       lon: float | None = None) -> tuple[dict, State]:
+    """NL2SQL entrypoint: pasted recipe text → query-plan execution
+    (t1 existence → t2 options → t3 brand stats → t4 lookups) producing an
+    ad-hoc Recipe + store-priced candidate pools. Replaces load_recipe +
+    load_products on the NL path; downstream actions consume the same state
+    keys. Gate aborts raise nlsearch.PlanAborted → API 409."""
     from . import nlsearch
 
-    r = nlsearch.retrieve(recipe_text)
+    r = nlsearch.run_query_plan(recipe_text, lat=lat, lon=lon)
     result = {
         "ingredient_count": len(r.recipe.ingredients),
         "product_count": len(r.products),
-        "zero_hit_ingredients": r.stats.zero_hit_ingredients,
+        "plan_steps": [s.step_id for s in r.execution.steps],
         "parse_cost_usd": r.parsed.cost_usd,
     }
     return result, state.update(
         recipe=r.recipe, products=r.products, parsed_input=r.parsed,
-        retrieval_sql=r.sql_display, retrieval_stats=r.stats)
+        plan_trace=r.execution.steps, brand_stats=r.brand_stats,
+        retrieval_stats=r.stats)
 
 
 @action(reads=["recipe", "products"], writes=["preselect_result"])
@@ -125,7 +133,7 @@ def select_products(state: State) -> tuple[dict, State]:
         products,
         model=preselect.model,
         enable_thinking=False,
-        constraints=_selector_constraints(parsed),
+        constraints=_selector_constraints(parsed, state.get("brand_stats")),
     )
 
     span = llm_span(
@@ -215,18 +223,21 @@ def build_plan(state: State) -> tuple[dict, State]:
             # Defensive: the LLM referenced a product_id or line_no we
             # don't have. Skip; downstream can flag/re-run.
             continue
+        charged = prod.store_price if prod.store_price is not None else prod.price
         line_items.append(PlanLineItem(
             line_no=s.line_no,
             ingredient_name=ing.name,
             product_id=prod.id,
             product_name=prod.name,
             product_description=prod.description,
-            price=prod.price,
+            price=charged,
             confidence=s.confidence,
             reasoning=s.reasoning,
             model_used=final.model_used,
+            store_name=prod.store_name,
+            store_price=prod.store_price,
         ))
-        total_cost += prod.price
+        total_cost += charged
 
     parsed = state.get("parsed_input")   # NL path only
     plan = ShoppingPlan(
@@ -243,7 +254,7 @@ def build_plan(state: State) -> tuple[dict, State]:
         ),
         total_latency_ms=final.latency_ms,
         interpretation=parsed.display_lines() if parsed else [],
-        retrieval_sql=state.get("retrieval_sql") or "",
+        plan_trace=state.get("plan_trace") or [],
         candidate_count=len(state["products"]) if parsed else 0,
     )
     return {"total_cost": plan.total_cost, "n_line_items": len(plan.line_items)}, \
@@ -253,7 +264,9 @@ def build_plan(state: State) -> tuple[dict, State]:
 # ─── Application builder ─────────────────────────────────────
 
 def build_application(recipe_slug: str | None = None,
-                      recipe_text: str | None = None) -> Application:
+                      recipe_text: str | None = None,
+                      lat: float | None = None,
+                      lon: float | None = None) -> Application:
     """Construct the Burr Application for one run.
 
     Two entry variants sharing the router/selector/plan tail:
@@ -290,7 +303,8 @@ def build_application(recipe_slug: str | None = None,
     if recipe_text is not None:
         builder = (
             ApplicationBuilder()
-            .with_actions(parse_and_retrieve.bind(recipe_text=recipe_text),
+            .with_actions(parse_and_retrieve.bind(recipe_text=recipe_text,
+                                                  lat=lat, lon=lon),
                           *common_actions)
             .with_transitions(("parse_and_retrieve", "preselect_model"),
                               *shared_tail)
@@ -318,12 +332,14 @@ def run(recipe_slug: str) -> ShoppingPlan:
     return state["plan"]
 
 
-def run_nl(recipe_text: str) -> ShoppingPlan:
+def run_nl(recipe_text: str, lat: float | None = None,
+           lon: float | None = None) -> ShoppingPlan:
     """Run the NL2SQL pipeline on pasted recipe text.
 
-    Raises nlsearch.UnparseableRecipe when no ingredient list is found —
-    the API maps that to a 422 with guidance.
+    Raises nlsearch.UnparseableRecipe when no ingredient list is found
+    (API → 422 with guidance) and nlsearch.PlanAborted when a query-plan
+    gate fires (API → 409 with the PlanAlert + trace).
     """
-    app = build_application(recipe_text=recipe_text)
+    app = build_application(recipe_text=recipe_text, lat=lat, lon=lon)
     _action, _result, state = app.run(halt_after=["build_plan"])
     return state["plan"]

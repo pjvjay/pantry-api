@@ -35,6 +35,39 @@ class ProductRow(Base):
     unit_size = Column(String, nullable=False, default="")
     unit_qty = Column(Float, nullable=True)
     unit_uom = Column(String, nullable=False, default="")
+    # 0003_stores_reviews_terms — mirrors pantry-db migrations
+    brand = Column(String, nullable=False, default="")
+
+
+class StoreRow(Base):
+    __tablename__ = "stores"
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    lat = Column(Float, nullable=False)
+    lon = Column(Float, nullable=False)
+    address = Column(String, nullable=False, default="")
+
+
+class StoreProductRow(Base):
+    __tablename__ = "store_products"
+    store_id = Column(Integer, primary_key=True)
+    product_id = Column(Integer, primary_key=True)
+    price = Column(Float, nullable=False)
+
+
+class ReviewRow(Base):
+    __tablename__ = "reviews"
+    id = Column(Integer, primary_key=True)
+    product_id = Column(Integer, nullable=False, index=True)
+    rating = Column(Integer, nullable=False)
+    comment = Column(String, nullable=False, default="")
+    created_at = Column(String, nullable=False, default="")
+
+
+class ProductTermRow(Base):
+    __tablename__ = "product_terms"
+    term = Column(String, primary_key=True)
+    product_id = Column(Integer, primary_key=True)
 
 
 class RecipeRow(Base):
@@ -101,6 +134,7 @@ def load_all_products() -> list[Product]:
                 unit_size=r.unit_size or "",
                 unit_qty=r.unit_qty,
                 unit_uom=r.unit_uom or "",
+                brand=r.brand or "",
             )
             for r in rows
         ]
@@ -109,18 +143,29 @@ def load_all_products() -> list[Product]:
 # ─── Seed loader ─────────────────────────────────────────────
 
 def seed_from_json() -> None:
-    """Wipe the DB and load fresh data from seeds/*.json."""
+    """Wipe the DB and load fresh data from seeds/*.json. Store prices,
+    reviews, brands, and the product_terms inverted index are synthesized
+    deterministically (storeseed.py — same algorithm as pantry-db's
+    seed generator)."""
+    from . import storeseed
+
     init_schema()
     with Session(engine()) as s:
         # Clear existing
         s.query(RecipeIngredientRow).delete()
         s.query(RecipeRow).delete()
+        s.query(ProductTermRow).delete()
+        s.query(ReviewRow).delete()
+        s.query(StoreProductRow).delete()
+        s.query(StoreRow).delete()
         s.query(ProductRow).delete()
 
-        # Products
+        # Products (+ synthetic store offers / reviews / terms per product)
         with (SEEDS_DIR / "products.json").open() as f:
             products = json.load(f)
+        review_id = 0
         for p in products:
+            brand = storeseed.brand_for(p)
             s.add(ProductRow(
                 id=p["id"],
                 name=p["name"],
@@ -132,7 +177,22 @@ def seed_from_json() -> None:
                 unit_size=p.get("unit_size", ""),
                 unit_qty=p.get("unit_qty"),
                 unit_uom=p.get("unit_uom", ""),
+                brand=brand,
             ))
+            for sid, *_ in storeseed.STORES:
+                s.add(StoreProductRow(
+                    store_id=sid, product_id=p["id"],
+                    price=storeseed.store_price(sid, p["id"], float(p["price"]))))
+            for rating, comment, created in storeseed.reviews_for(p, brand):
+                review_id += 1
+                s.add(ReviewRow(id=review_id, product_id=p["id"], rating=rating,
+                                comment=comment, created_at=created))
+            for term in storeseed.product_terms(p):
+                s.add(ProductTermRow(term=term, product_id=p["id"]))
+
+        # Stores
+        for sid, name, lat, lon, address in storeseed.STORES:
+            s.add(StoreRow(id=sid, name=name, lat=lat, lon=lon, address=address))
 
         # Recipes
         with (SEEDS_DIR / "recipes.json").open() as f:
