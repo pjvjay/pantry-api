@@ -183,9 +183,9 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
                 message=(f"Cheapest possible {days}-dinner basket is ${floor:.2f} "
                          f"— over the ${max_total_budget:.2f} budget."),
                 details=[{"name": candidates[ci][0].name,
-                          "reason": f"adds ${marginal_cost:.2f} at cheapest",
+                          "reason": f"cheapest standalone ${standalone:.2f}",
                           "suggestions": []}
-                         for ci, marginal_cost in
+                         for ci, standalone in
                          [(ci, sum(p for _pid, p in cheapest[ci].values()))
                           for ci in picked]])
             raise PlanAborted(execution)

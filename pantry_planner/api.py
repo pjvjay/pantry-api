@@ -7,7 +7,7 @@ web layer. Every route delegates to pantry_planner.flow or pantry_planner.db.
 from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import db, flow
 from .config import settings
@@ -58,7 +58,7 @@ class NLPlanRequest(BaseModel):
     lat/lon: optional shopping location for the distance constraint;
     defaults to the configured reference point."""
 
-    recipe_text: str
+    recipe_text: str = Field(max_length=8000)   # public endpoint: bound the paste
     lat: float | None = None
     lon: float | None = None
 
@@ -89,7 +89,7 @@ class WeekPlanRequest(BaseModel):
     Deterministic menu selection (marginal-cost greedy over one batched
     retrieval); the LLM only does the per-day product mapping."""
 
-    days: int = 5
+    days: int = Field(5, ge=1, le=14)
     max_total_budget: float | None = None
     exclude_tags: list[str] = []
     lat: float | None = None

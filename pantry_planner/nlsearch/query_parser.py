@@ -219,4 +219,11 @@ def validate_parsed(parsed: ParsedInput, vocab: dict[str, str]) -> ParsedInput:
         if ing.category_hint and ing.category_hint.strip().lower() not in vocab:
             ing.category_hint = None
     parsed.recipe.servings = max(1, parsed.recipe.servings)
+    # Public-endpoint bound: cap the plan at 40 ingredients (keeps the
+    # VALUES rowsets well under SQLite's parameter limit). Surfaced, not
+    # silent — the dropped count lands in the interpretation chips.
+    if len(parsed.recipe.ingredients) > 40:
+        dropped = len(parsed.recipe.ingredients) - 40
+        parsed.recipe.ingredients = parsed.recipe.ingredients[:40]
+        parsed.ignored.append(f"{dropped} ingredients over the 40-ingredient cap")
     return parsed
