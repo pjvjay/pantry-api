@@ -254,6 +254,29 @@ def build_substitute_sql(c: Constraints, subcategory: str, exclude_ids: list[int
     return sql, params
 
 
+# ─── t5: full price matrix for the split-trip optimizer ──────
+
+def build_price_matrix_sql(product_ids: list[int], lat: float, lon: float,
+                           max_km: float | None = None) -> tuple[str, dict]:
+    """Every (store, product) offer for the chosen basket, with store
+    distance — the input to the deterministic split-trip enumeration."""
+    params: dict = {f"mp{i}": pid for i, pid in enumerate(product_ids)}
+    _location_params(params, lat, lon)
+    in_list = ", ".join(f":mp{i}" for i in range(len(product_ids)))
+    where = [f"sp.product_id IN ({in_list})"]
+    if max_km is not None:
+        params["maxdist2"] = max_km * max_km
+        where.append(f"{DIST_EXPR} <= :maxdist2")
+    sql = (
+        "SELECT s.id AS store_id, s.name AS store_name, s.lat AS lat, s.lon AS lon,\n"
+        f"       {DIST_EXPR} AS dist_km2, sp.product_id AS product_id, sp.price AS price\n"
+        "FROM store_products sp JOIN stores s ON s.id = sp.store_id\n"
+        f"WHERE {' AND '.join(where)}\n"
+        "ORDER BY s.id, sp.product_id"
+    )
+    return sql, params
+
+
 # ─── abort helper: suggestions for a missing ingredient ──────
 
 def build_suggestions_sql(category_hint: str, limit: int = 3) -> tuple[str, dict]:
@@ -273,6 +296,7 @@ TEMPLATES = {
     "brand_stats": build_stats_sql,
     "substitute_lookup": build_substitute_sql,
     "missing_suggestions": build_suggestions_sql,
+    "store_price_matrix": build_price_matrix_sql,
 }
 
 

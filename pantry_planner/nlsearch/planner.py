@@ -56,6 +56,10 @@ class PlanRunResult:
     parsed: ParsedInput
     execution: PlanExecution
     brand_stats: dict[str, list[dict]] = field(default_factory=dict)  # ing name -> per-brand rows
+    # resolved shopping location — downstream steps (trip optimizer) reuse it
+    lat: float = 0.0
+    lon: float = 0.0
+    max_km: float | None = None
 
 
 def _slugify(title: str) -> str:
@@ -323,7 +327,7 @@ def execute_plan(parsed: ParsedInput, plan: QueryPlan, *,
     )
     return PlanRunResult(recipe=recipe, products=products, pools=pools,
                          stats=stats, parsed=parsed, execution=execution,
-                         brand_stats=brand_stats)
+                         brand_stats=brand_stats, lat=lat, lon=lon, max_km=max_km)
 
 
 def run_query_plan(text_input: str, *, parsed: ParsedInput | None = None,

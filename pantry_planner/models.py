@@ -111,6 +111,28 @@ class EscalationDecision(BaseModel):
     reason: str = ""
 
 
+# ─── Split-trip optimizer (4A) ────────────────────────────────
+
+class TripItem(BaseModel):
+    """One basket line under a trip option's store assignment."""
+    product_id: int
+    product_name: str
+    store_name: str
+    price: float
+
+
+class TripOption(BaseModel):
+    """One point on the stops-vs-cost frontier: shop these stores, pay this."""
+    stores: list[str]
+    basket_cost: float
+    travel_km: float
+    travel_cost: float
+    total_cost: float                  # basket + travel
+    savings_vs_one_stop: float = 0.0   # against the best single-store trip
+    recommended: bool = False
+    items: list[TripItem] = Field(default_factory=list)  # recommended option only
+
+
 # ─── Final plan ───────────────────────────────────────────────
 
 class PlanLineItem(BaseModel):
@@ -142,3 +164,37 @@ class ShoppingPlan(BaseModel):
     interpretation: list[str] = Field(default_factory=list)
     plan_trace: list[StepResult] = Field(default_factory=list)
     candidate_count: int = 0
+    # Split-trip optimizer: stops-vs-cost frontier for the chosen basket
+    trip_options: list[TripOption] = Field(default_factory=list)
+
+
+# ─── Weekly menu optimizer (5A) ───────────────────────────────
+
+class WeekItem(BaseModel):
+    """One line of the merged week shopping list. A product shared by
+    several dinners appears ONCE, with every recipe that uses it."""
+    product_id: int
+    product_name: str
+    store_name: str
+    price: float
+    used_by: list[str]                 # recipe names
+
+
+class DayPlan(BaseModel):
+    recipe_slug: str
+    recipe_name: str
+    line_items: list[PlanLineItem]
+    day_cost: float                    # this dinner priced standalone
+
+
+class WeekPlan(BaseModel):
+    days: list[DayPlan]
+    shopping_list: list[WeekItem]      # merged; shared products counted once
+    total_cost: float                  # merged basket total
+    standalone_cost: float             # sum of day costs (no sharing)
+    overlap_savings: float             # standalone - merged
+    budget: float | None = None
+    notes: list[str] = Field(default_factory=list)
+    plan_trace: list[StepResult] = Field(default_factory=list)
+    trip_options: list[TripOption] = Field(default_factory=list)
+    total_llm_cost_usd: float = 0.0

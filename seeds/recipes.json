@@ -4,9 +4,18 @@
     "name": "Peanut Butter & Jelly Sandwich",
     "servings": 2,
     "ingredients": [
-      {"name": "Peanut Butter and Jelly Jam", "category": "spread"},
-      {"name": "Wheat Bread", "category": "bread"},
-      {"name": "White Chocolate", "category": "chocolate"}
+      {
+        "name": "Peanut Butter and Jelly Jam",
+        "category": "spread"
+      },
+      {
+        "name": "Wheat Bread",
+        "category": "bread"
+      },
+      {
+        "name": "White Chocolate",
+        "category": "chocolate"
+      }
     ]
   },
   {
@@ -14,13 +23,34 @@
     "name": "Spaghetti Bolognese",
     "servings": 4,
     "ingredients": [
-      {"name": "Spaghetti", "category": "pantry"},
-      {"name": "Ground Beef", "category": "meat"},
-      {"name": "Yellow Onion", "category": "produce"},
-      {"name": "Garlic", "category": "produce"},
-      {"name": "Canned Tomatoes", "category": "pantry"},
-      {"name": "Olive Oil", "category": "oil"},
-      {"name": "Mozzarella", "category": "dairy"}
+      {
+        "name": "Spaghetti",
+        "category": "pantry"
+      },
+      {
+        "name": "Ground Beef",
+        "category": "meat"
+      },
+      {
+        "name": "Yellow Onion",
+        "category": "produce"
+      },
+      {
+        "name": "Garlic",
+        "category": "produce"
+      },
+      {
+        "name": "Canned Tomatoes",
+        "category": "pantry"
+      },
+      {
+        "name": "Olive Oil",
+        "category": "oil"
+      },
+      {
+        "name": "Mozzarella",
+        "category": "dairy"
+      }
     ]
   },
   {
@@ -28,15 +58,42 @@
     "name": "Simple Chicken Curry",
     "servings": 4,
     "ingredients": [
-      {"name": "Chicken Thighs", "category": "meat"},
-      {"name": "Basmati Rice", "category": "grain"},
-      {"name": "Yellow Onion", "category": "produce"},
-      {"name": "Garlic", "category": "produce"},
-      {"name": "Ginger", "category": "produce"},
-      {"name": "Garam Masala", "category": "spice"},
-      {"name": "Turmeric", "category": "spice"},
-      {"name": "Diced Tomatoes", "category": "pantry"},
-      {"name": "Canola Oil", "category": "oil"}
+      {
+        "name": "Chicken Thighs",
+        "category": "meat"
+      },
+      {
+        "name": "Basmati Rice",
+        "category": "grain"
+      },
+      {
+        "name": "Yellow Onion",
+        "category": "produce"
+      },
+      {
+        "name": "Garlic",
+        "category": "produce"
+      },
+      {
+        "name": "Ginger",
+        "category": "produce"
+      },
+      {
+        "name": "Garam Masala",
+        "category": "spice"
+      },
+      {
+        "name": "Turmeric",
+        "category": "spice"
+      },
+      {
+        "name": "Diced Tomatoes",
+        "category": "pantry"
+      },
+      {
+        "name": "Canola Oil",
+        "category": "oil"
+      }
     ]
   },
   {
@@ -44,9 +101,18 @@
     "name": "Grilled Cheese Sandwich",
     "servings": 1,
     "ingredients": [
-      {"name": "Sliced Bread", "category": "bread"},
-      {"name": "Cheddar Cheese", "category": "dairy"},
-      {"name": "Butter", "category": "dairy"}
+      {
+        "name": "Sliced Bread",
+        "category": "bread"
+      },
+      {
+        "name": "Cheddar Cheese",
+        "category": "dairy"
+      },
+      {
+        "name": "Butter",
+        "category": "dairy"
+      }
     ]
   },
   {
@@ -54,11 +120,80 @@
     "name": "Vegetable Stir Fry",
     "servings": 2,
     "ingredients": [
-      {"name": "Broccoli", "category": "produce"},
-      {"name": "Basmati Rice", "category": "grain"},
-      {"name": "Garlic", "category": "produce"},
-      {"name": "Ginger", "category": "produce"},
-      {"name": "Canola Oil", "category": "oil"}
+      {
+        "name": "Broccoli",
+        "category": "produce"
+      },
+      {
+        "name": "Basmati Rice",
+        "category": "grain"
+      },
+      {
+        "name": "Garlic",
+        "category": "produce"
+      },
+      {
+        "name": "Ginger",
+        "category": "produce"
+      },
+      {
+        "name": "Canola Oil",
+        "category": "oil"
+      }
+    ]
+  },
+  {
+    "slug": "beef_rice_bowl",
+    "name": "Beef & Broccoli Rice Bowl",
+    "servings": 3,
+    "ingredients": [
+      {
+        "name": "Ground Beef",
+        "category": "meat"
+      },
+      {
+        "name": "Basmati Rice",
+        "category": "grain"
+      },
+      {
+        "name": "Broccoli",
+        "category": "produce"
+      },
+      {
+        "name": "Garlic",
+        "category": "produce"
+      },
+      {
+        "name": "Canola Oil",
+        "category": "oil"
+      }
+    ]
+  },
+  {
+    "slug": "tomato_penne",
+    "name": "Tomato Penne",
+    "servings": 2,
+    "ingredients": [
+      {
+        "name": "Penne",
+        "category": "pantry"
+      },
+      {
+        "name": "Canned Tomatoes",
+        "category": "pantry"
+      },
+      {
+        "name": "Garlic",
+        "category": "produce"
+      },
+      {
+        "name": "Olive Oil",
+        "category": "oil"
+      },
+      {
+        "name": "Mozzarella",
+        "category": "dairy"
+      }
     ]
   }
 ]

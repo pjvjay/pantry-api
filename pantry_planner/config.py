@@ -82,6 +82,10 @@ class Settings:
     default_lat: float
     default_lon: float
 
+    # Split-trip optimizer: how a km of driving trades against basket
+    # savings ("save $4 by adding a 6 km detour?"). CAD per km.
+    travel_cost_per_km: float
+
     @staticmethod
     def from_env() -> "Settings":
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -110,6 +114,7 @@ class Settings:
             ),
             default_lat=float(os.environ.get("DEFAULT_LAT", "49.28")),
             default_lon=float(os.environ.get("DEFAULT_LON", "-123.12")),
+            travel_cost_per_km=float(os.environ.get("TRAVEL_COST_PER_KM", "0.50")),
         )
 
 

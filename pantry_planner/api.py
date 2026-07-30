@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from . import db, flow
 from .config import settings
-from .models import Product, Recipe, ShoppingPlan
+from .models import Product, Recipe, ShoppingPlan, WeekPlan
 
 app = FastAPI(
     title="pantry-planner",
@@ -36,12 +36,7 @@ def health() -> dict:
 
 @app.get("/recipes", response_model=list[Recipe])
 def list_recipes() -> list[Recipe]:
-    from .db import RecipeRow, engine
-    from sqlalchemy.orm import Session
-
-    with Session(engine()) as s:
-        rows = s.query(RecipeRow).all()
-        return [db.load_recipe(r.slug) for r in rows]
+    return db.load_all_recipes()
 
 
 @app.get("/recipes/{slug}", response_model=Recipe)
@@ -84,6 +79,36 @@ def plan_nl(req: NLPlanRequest) -> ShoppingPlan:
             "Spaghetti Bolognese (serves 4)\n"
             "- 400g spaghetti\n- 500g ground beef\n- 1 can crushed tomatoes\n"
             "Notes: under $30, no dairy"))
+    except PlanAborted as e:
+        raise HTTPException(status_code=409, detail=e.execution.model_dump(mode="json"))
+
+
+class WeekPlanRequest(BaseModel):
+    """Plan `days` dinners from the recipe library under an optional budget.
+    Deterministic menu selection (marginal-cost greedy over one batched
+    retrieval); the LLM only does the per-day product mapping."""
+
+    days: int = 5
+    max_total_budget: float | None = None
+    exclude_tags: list[str] = []
+    lat: float | None = None
+    lon: float | None = None
+    max_distance_km: float | None = None
+
+
+@app.post("/plan/week", response_model=WeekPlan)
+def plan_week(req: WeekPlanRequest) -> WeekPlan:
+    """5A: weekly menu optimizer. Rewards ingredient overlap exactly (a
+    shared product costs $0 marginal), gates on the cheapest-basket floor
+    before any LLM spend, and prices the merged basket's store split."""
+    from . import weekplan
+    from .nlsearch import PlanAborted
+
+    try:
+        return weekplan.plan_week(
+            days=req.days, max_total_budget=req.max_total_budget,
+            exclude_tags=req.exclude_tags, lat=req.lat, lon=req.lon,
+            max_distance_km=req.max_distance_km)
     except PlanAborted as e:
         raise HTTPException(status_code=409, detail=e.execution.model_dump(mode="json"))
 

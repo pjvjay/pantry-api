@@ -1,12 +1,13 @@
 """
-Burr state machine — the whole pipeline as a 6-action graph.
+Burr state machine — the whole pipeline as one action graph.
 
-    load_recipe
+    load_recipe (or parse_and_retrieve on the NL path)
       → load_products
       → preselect_model         (router.preselect_model)
       → select_products         (main LLM call using preselected model)
       → check_escalation        (router.should_escalate)
       → escalate_if_needed      (conditional; re-runs subset if cascade said so)
+      → optimize_trips          (4A: deterministic split-trip optimizer, NL path)
       → build_plan
 
 Both routers use the same graph. The only difference is which nodes
@@ -77,7 +78,7 @@ def load_products(state: State) -> tuple[dict, State]:
     return result, state.update(products=products)
 
 
-@action(reads=[], writes=["recipe", "products", "parsed_input",
+@action(reads=[], writes=["recipe", "products", "parsed_input", "location",
                           "plan_trace", "brand_stats", "retrieval_stats"])
 def parse_and_retrieve(state: State, recipe_text: str,
                        lat: float | None = None,
@@ -98,6 +99,7 @@ def parse_and_retrieve(state: State, recipe_text: str,
     }
     return result, state.update(
         recipe=r.recipe, products=r.products, parsed_input=r.parsed,
+        location={"lat": r.lat, "lon": r.lon, "max_km": r.max_km},
         plan_trace=r.execution.steps, brand_stats=r.brand_stats,
         retrieval_stats=r.stats)
 
@@ -202,8 +204,57 @@ def skip_escalation(state: State) -> tuple[dict, State]:
     return {"escalated": False}, state.update(final_result=state["initial_result"])
 
 
+@action(reads=["final_result", "products"], writes=["trip_options", "plan_trace"])
+def optimize_trips(state: State) -> tuple[dict, State]:
+    """4A: deterministic split-trip optimizer over the chosen basket.
+    Prices every line at every in-range store (one templated query), then
+    enumerates store subsets with exact travel loops — no LLM. NL path
+    only; the classic path has no location and passes straight through."""
+    import time as _time
+
+    from sqlalchemy import text as _text
+    from sqlalchemy.orm import Session as _Session
+
+    from . import db, tripopt
+    from .nlsearch.plan import StepKind, StepResult
+    from .nlsearch.sql_builder import build_price_matrix_sql, inline_for_display
+
+    loc = state.get("location")
+    final: SelectorResult = state["final_result"]
+    products_by_id = {p.id: p for p in state["products"]}
+    basket = [(s.product_id, products_by_id[s.product_id].name)
+              for s in final.selections if s.product_id in products_by_id]
+    if loc is None or not basket:
+        # Burr requires every declared write; pass the trace through untouched.
+        return {"skipped": True}, state.update(
+            trip_options=[], plan_trace=state.get("plan_trace") or [])
+
+    sql, params = build_price_matrix_sql(
+        sorted({pid for pid, _ in basket}), loc["lat"], loc["lon"], loc["max_km"])
+    t0 = _time.perf_counter()
+    with _Session(db.engine()) as s:
+        rows = list(s.execute(_text(sql), params).mappings())
+    duration_ms = int((_time.perf_counter() - t0) * 1000)
+
+    options = tripopt.optimize_trips(
+        rows, basket, home_lat=loc["lat"], home_lon=loc["lon"],
+        cost_per_km=settings().travel_cost_per_km)
+    best = next((o for o in options if o.recommended), None)
+    label = (f"{len(options)} trip options · best: {len(best.stores)} stop(s), "
+             f"${best.total_cost:.2f} total"
+             + (f" (saves ${best.savings_vs_one_stop:.2f} vs one stop)"
+                if best.savings_vs_one_stop > 0 else "")) if best else "no options"
+    step = StepResult(step_id="t5_trip_optimizer", kind=StepKind.lookup,
+                      sql_display=inline_for_display(sql, params),
+                      row_count=len(rows), duration_ms=duration_ms, label=label)
+    return {"n_options": len(options)}, state.update(
+        trip_options=options,
+        plan_trace=[*(state.get("plan_trace") or []), step])
+
+
 @action(
-    reads=["recipe", "products", "final_result", "preselect_result", "escalation_decision"],
+    reads=["recipe", "products", "final_result", "preselect_result",
+           "escalation_decision", "trip_options"],
     writes=["plan"],
 )
 def build_plan(state: State) -> tuple[dict, State]:
@@ -256,6 +307,7 @@ def build_plan(state: State) -> tuple[dict, State]:
         interpretation=parsed.display_lines() if parsed else [],
         plan_trace=state.get("plan_trace") or [],
         candidate_count=len(state["products"]) if parsed else 0,
+        trip_options=state.get("trip_options") or [],
     )
     return {"total_cost": plan.total_cost, "n_line_items": len(plan.line_items)}, \
         state.update(plan=plan)
@@ -294,11 +346,13 @@ def build_application(recipe_slug: str | None = None,
             "skip_escalation",
             expr("escalation_decision.escalate == False"),
         ),
-        ("escalate_if_needed", "build_plan"),
-        ("skip_escalation", "build_plan"),
+        ("escalate_if_needed", "optimize_trips"),
+        ("skip_escalation", "optimize_trips"),
+        ("optimize_trips", "build_plan"),
     ]
     common_actions = [preselect_model, select_products, check_escalation,
-                      escalate_if_needed, skip_escalation, build_plan]
+                      escalate_if_needed, skip_escalation, optimize_trips,
+                      build_plan]
 
     if recipe_text is not None:
         builder = (

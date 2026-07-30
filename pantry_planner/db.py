@@ -119,6 +119,12 @@ def load_recipe(slug: str) -> Recipe:
         )
 
 
+def load_all_recipes() -> list[Recipe]:
+    with Session(engine()) as s:
+        slugs = [r.slug for r in s.query(RecipeRow).order_by(RecipeRow.slug).all()]
+    return [load_recipe(slug) for slug in slugs]
+
+
 def load_all_products() -> list[Product]:
     with Session(engine()) as s:
         rows = s.query(ProductRow).all()
