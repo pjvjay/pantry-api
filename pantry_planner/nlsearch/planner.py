@@ -336,7 +336,13 @@ def run_query_plan(text_input: str, *, parsed: ParsedInput | None = None,
     from ..config import settings
 
     cfg = settings()
-    parsed = validate_parsed(parsed or parse_input(text_input), db_vocab())
+    if parsed is None:
+        if cfg.demo_mode:                   # public demo: deterministic parse
+            from .. import demomode
+            parsed = demomode.parse_recipe(text_input)
+        else:
+            parsed = parse_input(text_input)
+    parsed = validate_parsed(parsed, db_vocab())
     max_km = parsed.constraints.max_distance_km
     plan = build_plan(parsed, max_km=max_km)
     return execute_plan(parsed, plan,

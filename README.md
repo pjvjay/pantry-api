@@ -76,6 +76,9 @@ Everything's env-var driven. Defaults in `pantry_planner/config.py`.
 | `CLASSIFIER_MODEL`           | `claude-haiku-4-5-20251001`      | Phase B classifier (three_phase only)        |
 | `CONFIDENCE_THRESHOLD`       | `0.80`                           | Below this → escalate (cascade only)         |
 | `DB_URL`                     | `sqlite:///./pantry.db`          | SQLAlchemy URL (wins if set)                 |
+| `DEMO_MODE`                  | `false`                          | Deterministic stand-ins replace both LLM calls (public demo: no key, no cost) |
+| `TRAVEL_COST_PER_KM`         | `0.50`                           | Split-trip optimizer: $ value of a km of driving |
+| `DEFAULT_LAT` / `DEFAULT_LON`| `49.28` / `-123.12`              | Shopping location when the request sends none |
 | `DB_HOST` (+ `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`) | *(unset)* | Composed into a Postgres URL when `DB_URL` is unset — the Kubernetes path, parts injected from the CNPG credential secret |
 
 ## Try both routers side-by-side
@@ -164,6 +167,7 @@ model never writes SQL and never composes the plan. Structured per the
 | t2 | `options_single_pass` | All ingredients resolved in ONE query: per-product cheapest in-range store offer, ranked per ingredient by size-fit then price, under budget/distance constraints | `unavailable_within_constraints` (attribution re-probe names the out-of-range offer); `budget_infeasible` (cheapest-basket floor vs budget) |
 | t3 | `brand_stats` | Per-brand price/rating/review aggregates over the retrieved pools — context the selector uses to break ties | — |
 | t4 | `substitute_lookup` | Data-driven: same-subcategory alternatives for thin pools, labeled `substitute`, never silently swapped in | — |
+| t5 | `store_price_matrix` | **Split-trip optimizer** (zero LLM): full store×product matrix for the chosen basket → exhaustive store-subset enumeration with exact home→stores→home loops → stops-vs-cost frontier (`trip_options`, best flagged recommended) | — |
 
 Every step's SQL, row count, timing, and outcome are returned as `plan_trace`
 (the UI renders it as an expandable timeline); a gate abort returns **409**
@@ -192,6 +196,32 @@ buys fresh potatoes). An LLM-written-SQL variant (guarded generation behind a
 keyword filter + read-only execution) is a known alternative — deliberately
 not used here; the constrained parse + templated plan is the injection-safe
 hot path.
+
+## Weekly menu optimizer (`POST /plan/week`)
+
+Plans N dinners from the recipe library under an optional budget — with no
+LLM composing anything. ONE single-pass query prices every ingredient of
+every library recipe (37 ingredients, one round trip); a head-noun fallback
+rescues strict token-AND misses; then a **marginal-cost greedy** picks the
+menu — an ingredient whose cheapest product is already in the basket adds
+$0 marginal cost, so ingredient overlap is rewarded exactly, not
+heuristically. The `budget_infeasible` gate fires on the cheapest-basket
+floor **before any LLM spend**. The existing selector maps each dinner
+(one call per day), the shopping list merges shared products once (with
+`used_by` per recipe), and the merged basket runs through the split-trip
+optimizer.
+
+## Demo mode
+
+`DEMO_MODE=1` swaps the two Claude call sites — recipe parse and product
+selection — for deterministic stand-ins (`demomode.py`, labeled
+`model_used: "demo-deterministic"`; `/health` reports `demo_mode`). The
+public demo runs keyless, free, and abuse-proof while the query-plan
+machinery, gates, and optimizers run unchanged.
+`pantry_planner/demo_server.py` serves the built SPA (`SPA_DIST`) and the
+API from one port for single-container hosting — see
+[pantry-platform/demo](https://github.com/pjvjay/pantry-platform/tree/main/demo)
+for the Hugging Face Space image.
 
 ## How it deploys
 

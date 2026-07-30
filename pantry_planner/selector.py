@@ -70,6 +70,11 @@ def call_selector(
     budget, quantities needed, preferences — see SELECTOR_SYSTEM rule 6.
     """
     cfg = settings()
+    if cfg.demo_mode:                       # public demo: no API key, no cost
+        from . import demomode
+        return demomode.select_products(ingredients, products, model=model,
+                                        enable_thinking=enable_thinking,
+                                        constraints=constraints)
     client = Anthropic(api_key=cfg.anthropic_api_key)
 
     payload: dict = {

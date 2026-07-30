@@ -31,6 +31,7 @@ def health() -> dict:
         "default_model": settings().selector_model_default,
         "escalation_model": settings().selector_model_escalation,
         "confidence_threshold": settings().confidence_threshold,
+        "demo_mode": settings().demo_mode,
     }
 
 

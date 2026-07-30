@@ -86,6 +86,12 @@ class Settings:
     # savings ("save $4 by adding a 6 km detour?"). CAD per km.
     travel_cost_per_km: float
 
+    # DEMO_MODE=1: deterministic stand-ins replace both LLM boundaries
+    # (recipe parse + product selection) so the public demo runs with no
+    # API key, no cost, and no abuse surface. The query-plan machinery —
+    # SQL templates, gates, stats, trip/week optimizers — runs unchanged.
+    demo_mode: bool
+
     @staticmethod
     def from_env() -> "Settings":
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -115,6 +121,7 @@ class Settings:
             default_lat=float(os.environ.get("DEFAULT_LAT", "49.28")),
             default_lon=float(os.environ.get("DEFAULT_LON", "-123.12")),
             travel_cost_per_km=float(os.environ.get("TRAVEL_COST_PER_KM", "0.50")),
+            demo_mode=os.environ.get("DEMO_MODE", "").lower() in {"1", "true", "yes"},
         )
 
 

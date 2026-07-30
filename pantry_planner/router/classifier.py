@@ -48,6 +48,9 @@ def _catalog_summary(products: list[Product]) -> dict:
 def call_classifier(recipe: Recipe, products: list[Product]) -> PhaseBMetrics:
     """One Haiku call. Meta-cognitive prompt. Structured output via tool use."""
     cfg = settings()
+    if cfg.demo_mode:                       # public demo: fixed triage, no call
+        from .. import demomode
+        return PhaseBMetrics(**demomode.triage())
     client = Anthropic(api_key=cfg.anthropic_api_key)
 
     user_msg = json.dumps({
