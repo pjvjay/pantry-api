@@ -213,6 +213,10 @@ optimizer.
 
 ## Demo mode
 
+**Try it live:**
+[pantry-planner-demo.onrender.com/pantry/](https://pantry-planner-demo.onrender.com/pantry/)
+(free tier — allow ~a minute to wake if idle).
+
 `DEMO_MODE=1` swaps the two Claude call sites — recipe parse and product
 selection — for deterministic stand-ins (`demomode.py`, labeled
 `model_used: "demo-deterministic"`; `/health` reports `demo_mode`). The
