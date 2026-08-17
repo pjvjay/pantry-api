@@ -6,12 +6,36 @@ web layer. Every route delegates to pantry_planner.flow or pantry_planner.db.
 """
 from __future__ import annotations
 
+import contextlib
+import os
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from . import db, flow
 from .config import settings
 from .models import Product, Recipe, ShoppingPlan, WeekPlan
+
+# The MCP Streamable-HTTP endpoint rides this app at /mcp (mounted at
+# the bottom of the file). MCP_HTTP_ENABLED=false turns it off — the
+# endpoint shares the API's no-auth posture, and plan tools spend
+# Anthropic credits.
+MCP_HTTP_ENABLED = os.environ.get("MCP_HTTP_ENABLED", "true").lower() != "false"
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(app: FastAPI):
+    # Starlette never runs a mounted sub-app's lifespan, so the MCP
+    # session manager must be driven from here — without it every /mcp
+    # request 500s even though everything imports cleanly.
+    if MCP_HTTP_ENABLED:
+        from .mcp_server import server as mcp_server
+
+        async with mcp_server.session_manager.run():
+            yield
+    else:
+        yield
+
 
 app = FastAPI(
     title="pantry-planner",
@@ -20,6 +44,7 @@ app = FastAPI(
         "Match recipe ingredients to store products with an LLM-driven pipeline. "
         "Toggle routing strategy via ROUTING_STRATEGY env var."
     ),
+    lifespan=_lifespan,
 )
 
 
@@ -121,3 +146,13 @@ def plan_recipe(slug: str) -> ShoppingPlan:
         return flow.run(slug)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+# MCP Streamable HTTP — mounted last so the REST routes above keep
+# priority; the sub-app serves exactly /mcp (public:
+# https://<host>/pantry/api/mcp). Mounting also instantiates the
+# session manager that _lifespan drives.
+if MCP_HTTP_ENABLED:
+    from .mcp_server import http_app
+
+    app.mount("/", http_app())

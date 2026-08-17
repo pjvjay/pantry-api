@@ -115,7 +115,9 @@ pantry-planner/
 │   ├── selector.py        # main LLM call (structured output)
 │   ├── tracing.py         # Burr tracking + LLM span metadata
 │   ├── flow.py            # Burr state machine (6 actions)
-│   ├── api.py             # FastAPI wrapper
+│   ├── api.py             # FastAPI wrapper (+ /mcp mount)
+│   ├── mcp_server.py      # MCP server: stdio script + HTTP app
+│   ├── origins.py         # country-of-origin: cache → rules → Haiku
 │   ├── demo.py            # CLI entrypoint
 │   ├── nlsearch/          # constrained NL2SQL: parse → query plan → gates
 │   │   ├── plan.py        # QueryPlan/StepResult/PlanAlert formalism
@@ -226,6 +228,72 @@ machinery, gates, and optimizers run unchanged.
 API from one port for single-container hosting — see
 [pantry-platform/demo](https://github.com/pjvjay/pantry-platform/tree/main/demo)
 for the Hugging Face Space image.
+
+## MCP server
+
+The pipeline is also exposed over the [Model Context
+Protocol](https://modelcontextprotocol.io) so any MCP client — Claude
+Desktop, Claude Code, or another agent — can call it as tools. One
+server definition (`pantry_planner/mcp_server.py`), two transports:
+
+| Tool | Cost | What it does |
+| --- | --- | --- |
+| `list_recipes`, `get_recipe` | free | browse the seeded recipe library |
+| `list_products` | free | catalog, with a `search` substring filter |
+| `pipeline_status` | free | active strategy/models/threshold/DB |
+| `get_product_origins` | ≤1 Haiku call, then cached | country of origin per product |
+| `search_products_by_origin` | free by default | filter catalog by origin country |
+| `plan_recipe` | 1–3 Claude calls | full pipeline for a seeded recipe |
+| `plan_from_text` | 2–4 Claude calls | NL2SQL pipeline on pasted recipe text |
+| `plan_week` | ~1 selector call per day | weekly menu optimizer |
+
+**Country-of-origin resolution** (`origins.py`) is deliberately
+low-cost, three tiers, cheapest first: a DB cache (`product_origins`,
+migration 0004) → deterministic keyword/subcategory heuristics tuned to
+a Canadian store (free, covers ~70% of the catalog) → one batch Haiku
+call for the remainder, cached so each product pays for at most one
+call ever. `allow_llm=false` guarantees a zero-cost answer.
+
+**stdio (local clients).** `pip install -e .` provides the
+`pantry-mcp` console script. Claude Desktop config (absolute paths —
+desktop clients launch servers with no PATH and cwd `/`):
+
+```json
+{
+  "mcpServers": {
+    "pantry-planner": {
+      "command": "/path/to/pantry-api/.venv/bin/pantry-mcp",
+      "env": {
+        "ANTHROPIC_API_KEY": "sk-ant-...",
+        "DB_URL": "sqlite:////absolute/path/to/pantry.db"
+      }
+    }
+  }
+}
+```
+
+Claude Code:
+
+```bash
+claude mcp add pantry-planner --env ANTHROPIC_API_KEY=sk-ant-... --env DB_URL=sqlite:////absolute/path/to/pantry.db -- /path/to/pantry-api/.venv/bin/pantry-mcp
+```
+
+Burr traces from stdio runs land in `~/.pantry-planner/burr`
+(override with `BURR_TRACKING_DIR`).
+
+**Streamable HTTP (remote).** The FastAPI app mounts the same server at
+`/mcp` (public: `https://<host>/pantry/api/mcp`) — stateless, plain
+JSON responses, so it works unchanged behind nginx and the K8s ingress.
+
+```bash
+claude mcp add --transport http pantry-remote http://localhost:8000/mcp
+```
+
+⚠️ The HTTP endpoint has **no auth** — same posture as the REST API —
+and the plan tools spend Anthropic credits per call. Don't expose it
+beyond the current demo footprint; set `MCP_HTTP_ENABLED=false` to
+turn the mount off (stdio is unaffected). In `DEMO_MODE=1` the plan
+tools run keyless and deterministic, same as the REST endpoints.
 
 ## How it deploys
 

@@ -70,6 +70,22 @@ class ProductTermRow(Base):
     product_id = Column(Integer, primary_key=True)
 
 
+class ProductOriginRow(Base):
+    """0004_product_origins — mirrors pantry-db migrations.
+
+    Cache of LLM-resolved countries of origin. Heuristic results are NOT
+    cached (deterministic and free to recompute); only answers that cost
+    an API call land here, so each product pays for at most one call ever.
+    """
+    __tablename__ = "product_origins"
+    product_id = Column(Integer, primary_key=True)
+    country = Column(String, nullable=False)
+    confidence = Column(Float, nullable=False, default=0.0)
+    source = Column(String, nullable=False, default="llm")
+    reasoning = Column(String, nullable=False, default="")
+    resolved_at = Column(String, nullable=False, default="")
+
+
 class RecipeRow(Base):
     __tablename__ = "recipes"
     slug = Column(String, primary_key=True)
@@ -146,6 +162,38 @@ def load_all_products() -> list[Product]:
         ]
 
 
+def load_cached_origins(product_ids: list[int]) -> dict[int, ProductOriginRow]:
+    """Read previously LLM-resolved origins for the given products."""
+    if not product_ids:
+        return {}
+    with Session(engine()) as s:
+        rows = (
+            s.query(ProductOriginRow)
+            .filter(ProductOriginRow.product_id.in_(product_ids))
+            .all()
+        )
+        s.expunge_all()
+        return {r.product_id: r for r in rows}
+
+
+def save_origins(origins: list[dict]) -> None:
+    """Upsert LLM-resolved origins. Each dict: product_id, country,
+    confidence, source, reasoning, resolved_at."""
+    if not origins:
+        return
+    with Session(engine()) as s:
+        for o in origins:
+            row = s.get(ProductOriginRow, o["product_id"]) or ProductOriginRow(
+                product_id=o["product_id"])
+            row.country = o["country"]
+            row.confidence = float(o.get("confidence", 0.0))
+            row.source = o.get("source", "llm")
+            row.reasoning = o.get("reasoning", "")
+            row.resolved_at = o.get("resolved_at", "")
+            s.add(row)
+        s.commit()
+
+
 # ─── Seed loader ─────────────────────────────────────────────
 
 def seed_from_json() -> None:
@@ -160,6 +208,7 @@ def seed_from_json() -> None:
         # Clear existing
         s.query(RecipeIngredientRow).delete()
         s.query(RecipeRow).delete()
+        s.query(ProductOriginRow).delete()
         s.query(ProductTermRow).delete()
         s.query(ReviewRow).delete()
         s.query(StoreProductRow).delete()

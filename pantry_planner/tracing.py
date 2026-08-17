@@ -12,6 +12,7 @@ section for each traced run.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from burr.tracking import LocalTrackingClient
@@ -19,13 +20,16 @@ from burr.tracking import LocalTrackingClient
 APP_NAME = "pantry-planner"
 PROJECT_NAME = "pantry-planner"
 
-# The tracking DB lands next to the app. Volume-mounted in docker-compose.
-TRACKING_DB_DIR = Path(".burr")
-TRACKING_DB_DIR.mkdir(exist_ok=True)
+# The tracking DB lands next to the app by default (volume-mounted in
+# docker-compose). BURR_TRACKING_DIR overrides it — the stdio MCP entry
+# point sets a home-dir path because MCP clients launch servers with an
+# arbitrary (possibly read-only) cwd.
+TRACKING_DB_DIR = Path(os.environ.get("BURR_TRACKING_DIR", ".burr"))
 
 
 def make_tracker() -> LocalTrackingClient:
     """Create the tracking client. Each Burr Application should use this."""
+    TRACKING_DB_DIR.mkdir(parents=True, exist_ok=True)
     return LocalTrackingClient(
         project=PROJECT_NAME,
         storage_dir=str(TRACKING_DB_DIR),
