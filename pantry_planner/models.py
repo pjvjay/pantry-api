@@ -45,6 +45,22 @@ class Product(BaseModel):
     substitute: bool = False           # t4 same-subcategory alternative
 
 
+class ProductOrigin(BaseModel):
+    """Country-of-origin resolution for one product (origins.py).
+
+    source records which tier produced the answer:
+      "cache"     — previously LLM-resolved, read back from the DB
+      "heuristic" — deterministic keyword/category rule, zero cost
+      "llm"       — batch Haiku call for products no rule covered
+    """
+    product_id: int
+    product_name: str = ""
+    country: str                  # e.g. "Canada"; "Unknown" when unresolvable
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    source: str                   # "cache" | "heuristic" | "llm"
+    reasoning: str = ""
+
+
 # ─── Selector I/O ─────────────────────────────────────────────
 
 class Selection(BaseModel):
