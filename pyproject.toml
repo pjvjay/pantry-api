@@ -20,6 +20,8 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "pydantic>=2.9.0",
     "python-dotenv>=1.0.0",
+    # MCP server (stdio via the pantry-mcp script; HTTP mounted in api.py)
+    "mcp>=1.10.0",
     # Pin: Burr's tracking UI ships templates that break on Jinja2 3.1.5+
     # (cache-key change makes template lookup raise TypeError). Revisit
     # once Burr updates its templating layer.
@@ -34,6 +36,9 @@ dev = [
     "mypy>=1.13.0",
     "httpx>=0.27.0",
 ]
+
+[project.scripts]
+pantry-mcp = "pantry_planner.mcp_server:main"
 
 [tool.setuptools.packages.find]
 include = ["pantry_planner*"]
