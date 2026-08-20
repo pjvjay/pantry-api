@@ -1,0 +1,39 @@
+# ============================================================
+# pantry-api — pull-request verification
+#
+# build-and-deploy only runs on push to main, so a branch could merge
+# without its tests ever having run against the merge result.
+# Runs the suite on every PR and publishes nothing.
+# ============================================================
+
+name: verify
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      # The suite mocks every LLM call and touches no network, so it needs
+      # no ANTHROPIC_API_KEY.
+      - run: pytest -q
+      # Lint is deliberately NOT run here. The repo's ruff baseline is not
+      # clean, and `ruff ... || true` would paint a green check over real
+      # findings — a check that cannot fail teaches people to ignore it.
+      # Clean the baseline first, then add an enforcing step.
