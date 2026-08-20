@@ -17,7 +17,7 @@ _TMP_DB = None
 EXPECTED_TOOLS = {
     "list_recipes", "get_recipe", "list_products",
     "plan_recipe", "plan_from_text", "plan_week",
-    "get_product_origins", "search_products_by_origin",
+    "get_product_origins", "rank_products_by_origin", "origin_triage",
     "pipeline_status",
 }
 
@@ -118,33 +118,85 @@ async def test_pipeline_status(server):
     assert "***" in status["db"] or status["db"].startswith("sqlite")
 
 
-# ─── Origin tools ────────────────────────────────────────────
+# --- Provenance tools ----------------------------------------
+
+@pytest.fixture()
+def evidence():
+    """Write evidence directly; ingest paths are covered by test_ingest."""
+    from sqlalchemy.orm import Session
+
+    from pantry_planner import db
+    from pantry_planner.db import ProductOriginEvidenceRow, engine
+
+    with Session(engine()) as s:
+        s.query(ProductOriginEvidenceRow).delete()
+        s.commit()
+    rice = next(p for p in db.load_all_products() if p.name == "Basmati Rice 2kg")
+    pb = next(p for p in db.load_all_products()
+              if p.name == "Nestles PBJ")
+    db.save_origin_evidence([
+        dict(product_id=rice.id, source="label-photo", claim_type="product-of",
+             verbatim="Product of India", ingredient_origin="India",
+             manufactured_in="India", confidence="high", importer_only=False,
+             note="", source_ref="rice.jpg", observed_at=""),
+        dict(product_id=pb.id, source="label-photo", claim_type="made-in",
+             verbatim="Made in Canada from imported ingredients",
+             ingredient_origin="United States", manufactured_in="Canada",
+             confidence="high", importer_only=False, note="",
+             source_ref="pb.jpg", observed_at=""),
+    ])
+    yield {"rice": rice.id, "pb": pb.id}
+    with Session(engine()) as s:
+        s.query(ProductOriginEvidenceRow).delete()
+        s.commit()
+
 
 @pytest.mark.asyncio
-async def test_get_product_origins_no_llm(server):
-    res = await server.call_tool(
-        "get_product_origins", {"search": "basmati", "allow_llm": False})
+async def test_get_product_origins_reports_status(server, evidence):
+    res = await server.call_tool("get_product_origins", {"search": "basmati"})
     origins = res.structured_content["result"]
     assert len(origins) == 1
-    assert origins[0]["country"] == "India"
-    assert origins[0]["source"] == "heuristic"
+    assert origins[0]["status"] == "resolved"
+    assert origins[0]["manufactured_in"] == "India"
+    assert origins[0]["verbatim"] == "Product of India"
 
 
 @pytest.mark.asyncio
 async def test_get_product_origins_unknown_id_is_tool_error(server):
     with pytest.raises(ToolError, match="Unknown product ids"):
-        await server.call_tool(
-            "get_product_origins", {"product_ids": [99999], "allow_llm": False})
+        await server.call_tool("get_product_origins", {"product_ids": [99999]})
 
 
 @pytest.mark.asyncio
-async def test_search_products_by_origin(server):
-    res = await server.call_tool(
-        "search_products_by_origin", {"country": "italy"})
-    matches = res.structured_content["result"]
-    assert matches
-    assert all(m["country"] == "Italy" for m in matches)
-    assert any("Passata" in m["product_name"] for m in matches)
+async def test_rank_excludes_on_ingredient_origin(server, evidence):
+    """Made in Canada from American peanuts must not pass a US exclusion."""
+    res = await server.call_tool("rank_products_by_origin", {
+        "preference": ["Canada"], "exclude": ["United States"]})
+    out = res.structured_content
+    excluded_ids = {e["product_id"] for e in out["excluded"]}
+    assert evidence["pb"] in excluded_ids
+    assert evidence["pb"] not in {r["product_id"] for r in out["ranked"]}
+    hit = next(e for e in out["excluded"] if e["product_id"] == evidence["pb"])
+    assert hit["matched_field"] == "ingredient_origin"
+
+
+@pytest.mark.asyncio
+async def test_rank_keeps_unverified_out_of_the_ranking(server, evidence):
+    res = await server.call_tool("rank_products_by_origin",
+                                 {"preference": ["India"]})
+    out = res.structured_content
+    assert out["counts"]["unranked"] > out["counts"]["ranked"]
+    ranked_ids = {r["product_id"] for r in out["ranked"]}
+    assert not ranked_ids & {u["product_id"] for u in out["unranked"]}
+    assert "not evidence" in out["coverage_note"]
+
+
+@pytest.mark.asyncio
+async def test_origin_triage_returns_hints(server):
+    res = await server.call_tool("origin_triage", {})
+    hints = res.structured_content["result"]
+    assert hints
+    assert set(hints[0]) == {"product_id", "product_name", "reason", "status"}
 
 
 # ─── HTTP transport wiring (no server process) ───────────────

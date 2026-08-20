@@ -24,7 +24,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import BaseModel
 
-from .models import ProductOrigin, Recipe, ShoppingPlan, WeekPlan
+from .models import OriginRanking, ProductOrigin, Recipe, ShoppingPlan, WeekPlan
 
 server = MCPServer(
     name="pantry-planner",
@@ -33,8 +33,10 @@ server = MCPServer(
         "Grocery planning over a seeded Canadian store catalog. Browse "
         "recipes and products for free; plan_recipe / plan_from_text run "
         "the full LLM pipeline (slow, costs API credits) and return a "
-        "priced shopping plan. Origin tools resolve where products come "
-        "from — heuristics first, one cached LLM call for the rest."
+        "priced shopping plan. Provenance tools rank products by where "
+        "they come from against a country preference you supply, using "
+        "ingested evidence only - never a guess. Origin coverage is "
+        "partial, so always report how many products were unranked."
     ),
 )
 
@@ -70,16 +72,12 @@ class PipelineStatus(BaseModel):
     demo_mode: bool
 
 
-class OriginMatch(BaseModel):
-    """A product paired with its resolved country of origin."""
+class TriageCandidate(BaseModel):
+    """A product worth photographing next. A hint, never an origin."""
     product_id: int
     product_name: str
-    brand: str
-    category: str | None
-    price: float
-    country: str
-    confidence: float
-    source: str
+    reason: str
+    status: str
 
 
 def _product_summary(p) -> ProductSummary:
@@ -228,18 +226,24 @@ def plan_week(days: int = 5, max_total_budget: float | None = None,
             f"{alert.message if alert else 'constraint infeasible'}") from e
 
 
-# ─── Country-of-origin tools ─────────────────────────────────
+# --- Provenance tools ----------------------------------------
+# Origin here is evidence, never inference. Records are ingested from the
+# companion claude-chrome-container tooling (Open Food Facts lookups and
+# package-label photo reads); nothing in this server guesses a country.
 
 @server.tool()
 def get_product_origins(product_ids: list[int] | None = None,
-                        search: str | None = None,
-                        allow_llm: bool = True) -> list[ProductOrigin]:
-    """Resolve the country of origin for products — by ids, by a name
-    `search` filter, or the whole catalog when neither is given.
-    Cheapest tier wins: DB cache, then free deterministic rules, then
-    ONE batch Haiku call for the remainder (cached afterwards, so the
-    catalog costs at most one small call ever). Set allow_llm=false to
-    guarantee zero cost (unruled products come back "Unknown")."""
+                        search: str | None = None) -> list[ProductOrigin]:
+    """Resolved country-of-origin evidence per product - by ids, by a name
+    `search` filter, or the whole catalog. Free, no LLM calls.
+
+    Read `status` before using `country`: only "resolved" carries usable
+    evidence. "unknown" means no source published an origin, "conflicting"
+    means sources disagreed and no winner was picked, "lookup_failed" means
+    a source did not answer, and "guess" is a name-based hint that must not
+    be treated as provenance. Coverage is thin and biased - most Canadian
+    products resolve to "unknown" - so absence is never evidence of foreign
+    origin."""
     from . import db, origins
 
     products = db.load_all_products()
@@ -253,30 +257,61 @@ def get_product_origins(product_ids: list[int] | None = None,
                 "Call list_products for valid ids.")
     elif search:
         needle = search.lower()
-        products = [
-            p for p in products
-            if needle in f"{p.name} {p.brand} {p.category} {p.subcategory}".lower()
-        ]
-    return origins.resolve_origins(products, allow_llm=allow_llm)
+        products = [p for p in products
+                    if needle in f"{p.name} {p.brand} {p.category}".lower()]
+    resolved = origins.resolve_all([p.id for p in products])
+    return [resolved[p.id] for p in products if p.id in resolved]
 
 
 @server.tool()
-def search_products_by_origin(country: str,
-                              allow_llm: bool = False) -> list[OriginMatch]:
-    """Find catalog products from a given country ("Canada", "Italy",
-    "India", ...; case-insensitive substring). Free by default — only
-    cached and rule-based origins are searched. Set allow_llm=true to
-    first resolve the rest of the catalog with one batch Haiku call."""
-    from . import origins
+def rank_products_by_origin(preference: list[str] | None = None,
+                            exclude: list[str] | None = None,
+                            search: str | None = None) -> OriginRanking:
+    """Rank catalog products by where they come from, against a country
+    preference YOU supply. Free, no LLM calls.
 
-    matches = origins.search_by_origin(country, allow_llm=allow_llm)
-    return [
-        OriginMatch(
-            product_id=p.id, product_name=p.name, brand=p.brand,
-            category=p.category, price=p.price, country=o.country,
-            confidence=o.confidence, source=o.source)
-        for p, o in matches
-    ]
+    `preference` is ordered, most-preferred first (e.g. ["Canada",
+    "Mexico"]). `exclude` filters out products with positive evidence of
+    those origins (e.g. ["United States"]) - a product is never excluded
+    merely for lacking evidence.
+
+    Exclusion checks ingredient origin as well as manufacturing origin,
+    because "Made in Canada" legally permits imported ingredients: peanut
+    butter made in Canada from American peanuts matches an exclusion of the
+    United States, which is intended.
+
+    Within a preferred country, a full origin claim ("Product of Canada",
+    >=98% domestic content) outranks a processing claim ("Made in Canada",
+    ingredients may be imported).
+
+    The result keeps `ranked`, `excluded` and `unranked` separate. Report
+    the `unranked` count - those products have no published origin, and
+    showing only the ranked list would imply a coverage this data does not
+    have."""
+    from . import db, origins
+
+    products = db.load_all_products()
+    if search:
+        needle = search.lower()
+        products = [p for p in products
+                    if needle in f"{p.name} {p.brand} {p.category}".lower()]
+    return origins.rank_products(
+        products, preference=preference or [], exclude=exclude or [])
+
+
+@server.tool()
+def origin_triage() -> list[TriageCandidate]:
+    """Products whose origin is unresolved and which are worth reading a
+    package label for. Free, no LLM calls.
+
+    These are hints derived from names and categories, NOT origins - they
+    say "go check this", never "this is from X". Seafood and fresh produce
+    appear often because their origin is not published online at all; only
+    the printed label carries it."""
+    from . import db, origins
+
+    return [TriageCandidate(**c)
+            for c in origins.triage_candidates(db.load_all_products())]
 
 
 # ─── Status ──────────────────────────────────────────────────

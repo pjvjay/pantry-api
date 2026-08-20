@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 
 from .nlsearch.plan import StepResult  # import-safe: plan.py is pydantic-only
 
-
 # ─── Domain models ────────────────────────────────────────────
 
 class RecipeIngredient(BaseModel):
@@ -45,20 +44,98 @@ class Product(BaseModel):
     substitute: bool = False           # t4 same-subcategory alternative
 
 
-class ProductOrigin(BaseModel):
-    """Country-of-origin resolution for one product (origins.py).
+class OriginEvidence(BaseModel):
+    """One observation about one product from one source.
 
-    source records which tier produced the answer:
-      "cache"     — previously LLM-resolved, read back from the DB
-      "heuristic" — deterministic keyword/category rule, zero cost
-      "llm"       — batch Haiku call for products no rule covered
+    A product may carry several of these, and they may disagree — that is
+    the point. Nothing here is reconciled; `verbatim` is the exact source
+    wording and is never paraphrased.
+    """
+    product_id: int
+    source: str                    # open-food-facts | label-photo | retailer-pdp | guess
+    source_ref: str = ""           # barcode, photo filename or URL
+    claim_type: str = "unknown"    # product-of | made-in | prepared-in | ...
+    verbatim: str = ""
+    ingredient_origin: str = ""    # where the inputs came from
+    manufactured_in: str = ""      # where it was processed
+    confidence: str = "low"        # high | medium | low
+    importer_only: bool = False    # an importer address is NOT an origin
+    note: str = ""
+    observed_at: str = ""
+
+
+class ProductOrigin(BaseModel):
+    """Resolved provenance summary for one product.
+
+    `status` is what ranking keys off:
+      "resolved"      — usable evidence
+      "conflicting"   — sources disagree; deliberately not resolved
+      "unknown"       — a source answered and published nothing
+      "lookup_failed" — no source answered; evidence of nothing
+      "guess"         — name/brand inference only, never rankable
     """
     product_id: int
     product_name: str = ""
-    country: str                  # e.g. "Canada"; "Unknown" when unresolvable
-    confidence: float = Field(..., ge=0.0, le=1.0)
-    source: str                   # "cache" | "heuristic" | "llm"
-    reasoning: str = ""
+    status: str = "unknown"
+    claim_type: str = "unknown"
+    country: str = ""              # best single country, display only
+    ingredient_origin: str = ""
+    manufactured_in: str = ""
+    verbatim: str = ""
+    confidence: str = "low"
+    source: str = ""
+    note: str = ""
+    evidence_count: int = 0
+
+
+class RankedProduct(BaseModel):
+    """A product placed against a caller-supplied country preference."""
+    product_id: int
+    product_name: str
+    price: float = 0.0
+    rank: int                      # 0 = most preferred
+    tier_label: str
+    origin: ProductOrigin
+    matched_country: str = ""      # which preference entry it matched
+    matched_field: str = ""        # ingredient_origin | manufactured_in
+
+
+class ExcludedProduct(BaseModel):
+    """Positively evidenced as coming from an excluded country."""
+    product_id: int
+    product_name: str
+    price: float = 0.0
+    excluded_country: str
+    matched_field: str             # which field carried the match
+    claim_type: str = ""
+    verbatim: str = ""
+    confidence: str = "low"
+
+
+class UnrankedProduct(BaseModel):
+    """Held out of the ranking. Never treated as foreign or as domestic."""
+    product_id: int
+    product_name: str
+    price: float = 0.0
+    reason: str                    # no_evidence | conflicting | lookup_failed | guess_only
+    detail: str = ""
+
+
+class OriginRanking(BaseModel):
+    """Result of ranking a set of products against a preference order.
+
+    The buckets are kept apart on purpose. Merging `unranked` into the
+    ranked list would present "nobody published this" as a provenance
+    verdict, and with coverage as thin as it is that would be the
+    majority of any real catalog.
+    """
+    preference: list[str] = Field(default_factory=list)
+    exclude: list[str] = Field(default_factory=list)
+    ranked: list[RankedProduct] = Field(default_factory=list)
+    excluded: list[ExcludedProduct] = Field(default_factory=list)
+    unranked: list[UnrankedProduct] = Field(default_factory=list)
+    counts: dict[str, int] = Field(default_factory=dict)
+    coverage_note: str = ""
 
 
 # ─── Selector I/O ─────────────────────────────────────────────

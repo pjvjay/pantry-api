@@ -1,9 +1,7 @@
-"""Country-of-origin resolver tests — no LLM calls, no network.
+"""Provenance tests — no LLM calls, no network.
 
-The heuristic tier and the DB cache run for real against a seeded
-SQLite DB; the LLM tier is exercised through a monkeypatched
-call_origin_resolver so tier ordering and caching are verified without
-an API key.
+Origin is evidence-driven now, so these exercise the real path: write
+evidence rows, resolve them, rank against a caller-supplied preference.
 """
 from __future__ import annotations
 
@@ -27,189 +25,256 @@ def seeded_db(tmp_path_factory):
     config.settings.cache_clear()
 
 
-def _product(id=1, name="Mystery Item", brand="", category="pantry",
-             subcategory="", description=""):
-    from pantry_planner.models import Product
+@pytest.fixture(autouse=True)
+def clean_evidence():
+    """Each test starts with an empty evidence table."""
+    from sqlalchemy.orm import Session
 
-    return Product(id=id, name=name, description=description, price=1.0,
-                   category=category, subcategory=subcategory, brand=brand)
+    from pantry_planner.db import ProductOriginEvidenceRow, engine
 
-
-# ─── Tier 1: heuristics ──────────────────────────────────────
-
-def test_keyword_rules():
-    from pantry_planner.origins import heuristic_origin
-
-    cases = {
-        "Basmati Rice 2kg": "India",
-        "Dark Chocolate Cadbury": "United Kingdom",
-        "Canola Oil 1L": "Canada",
-        "Canadian Peanut Butter Cream": "Canada",
-        "Garam Masala 100g": "India",
-        "Passata Strained Tomatoes 680ml": "Italy",
-    }
-    for name, country in cases.items():
-        o = heuristic_origin(_product(name=name))
-        assert o is not None, name
-        assert o.country == country, name
-        assert o.source == "heuristic"
-        assert 0.6 <= o.confidence <= 1.0
+    with Session(engine()) as s:
+        s.query(ProductOriginEvidenceRow).delete()
+        s.commit()
+    yield
 
 
-def test_keyword_rule_beats_subcategory_default():
-    # Parmesan is in the "cheese" subcategory (default: Canada) but the
-    # keyword rule must win with Italy.
-    from pantry_planner.origins import heuristic_origin
-
-    o = heuristic_origin(_product(name="Parmesan Wedge 200g",
-                                  category="dairy", subcategory="cheese"))
-    assert o is not None and o.country == "Italy"
-
-
-def test_subcategory_defaults():
-    from pantry_planner.origins import heuristic_origin
-
-    o = heuristic_origin(_product(name="Roma Tomato", category="produce",
-                                  subcategory="vegetables"))
-    assert o is not None and o.country == "Canada"
-
-    o = heuristic_origin(_product(name="Whole Milk 1L", category="dairy",
-                                  subcategory="milk"))
-    assert o is not None and o.country == "Canada"
+def _ev(product_id=1, **kw):
+    base = dict(product_id=product_id, source="open-food-facts",
+                claim_type="made-in", verbatim="", ingredient_origin="",
+                manufactured_in="", confidence="medium", importer_only=False,
+                note="", source_ref="", observed_at="")
+    base.update(kw)
+    return base
 
 
-def test_plant_based_dairy_not_claimed_by_dairy_default():
-    # Oat/almond/vegan items sit in dairy subcategories but are processed
-    # goods — the supply-management rationale doesn't apply.
-    from pantry_planner.origins import heuristic_origin
-
-    assert heuristic_origin(_product(name="Oat Milk 1L", subcategory="milk")) is None
-    assert heuristic_origin(_product(name="Vegan Cheese Shreds 200g",
-                                     subcategory="cheese")) is None
-
-
-def test_no_rule_returns_none():
-    from pantry_planner.origins import heuristic_origin
-
-    assert heuristic_origin(_product(name="Canned Diced Tomatoes",
-                                     subcategory="canned")) is None
-
-
-# ─── resolve_origins tiering ─────────────────────────────────
-
-def test_resolve_without_llm_marks_unruled_unknown():
+def _product(pid=1):
     from pantry_planner import db
-    from pantry_planner.origins import resolve_origins
+
+    return next(p for p in db.load_all_products() if p.id == pid)
+
+
+# ─── Country matching ────────────────────────────────────────
+
+def test_word_boundary_stops_us_matching_australia():
+    """The naive substring test that 'us' passes inside 'Australia'."""
+    from pantry_planner.origins import country_matches
+
+    assert not country_matches("Australia", "United States")
+    assert not country_matches("Austria", "us")
+    assert country_matches("Made in USA", "United States")
+    assert country_matches("Product of the US", "United States")
+
+
+def test_india_does_not_match_indiana():
+    from pantry_planner.origins import country_matches
+
+    assert not country_matches("Indiana, USA", "India")
+    assert country_matches("Indiana, USA", "United States")
+
+
+def test_us_state_names_resolve_to_united_states():
+    """Measured case: Lindt Excellence 70% is 'New Hampshire, Stratham'."""
+    from pantry_planner.origins import country_matches
+
+    assert country_matches("New Hampshire, Stratham", "United States")
+    assert country_matches("Vermont", "United States")
+
+
+def test_georgia_is_not_treated_as_a_us_state():
+    """Georgia is also a country — an ambiguous name must not fire."""
+    from pantry_planner.origins import country_matches
+
+    assert not country_matches("Georgia", "United States")
+
+
+def test_aliases_and_subnational_canada():
+    from pantry_planner.origins import country_matches
+
+    assert country_matches("Quebec, Canada", "Canada")
+    assert country_matches("British Columbia", "Canada")
+    assert country_matches("Made in England", "United Kingdom")
+
+
+# ─── Evidence resolution ─────────────────────────────────────
+
+def test_agreeing_sources_resolve():
+    from pantry_planner import db
+    from pantry_planner.origins import resolve_all
+
+    db.save_origin_evidence([
+        _ev(manufactured_in="Canada", claim_type="product-of",
+            verbatim="Product of Canada", confidence="high"),
+    ])
+    o = resolve_all([1])[1]
+    assert o.status == "resolved"
+    assert o.claim_type == "product-of"
+    assert o.verbatim == "Product of Canada"
+
+
+def test_disagreeing_sources_are_conflicting_not_resolved():
+    """A conflict is not a country; nothing may pick a winner."""
+    from pantry_planner import db
+    from pantry_planner.origins import resolve_all
+
+    db.save_origin_evidence([
+        _ev(manufactured_in="Italy"),
+        _ev(manufactured_in="Greece"),
+    ])
+    o = resolve_all([1])[1]
+    assert o.status == "conflicting"
+    assert "Greece" in o.manufactured_in and "Italy" in o.manufactured_in
+
+
+def test_no_evidence_is_unknown_not_foreign():
+    from pantry_planner.origins import resolve_all
+
+    assert resolve_all([1])[1].status == "unknown"
+
+
+def test_importer_only_evidence_never_resolves():
+    """An 'Imported by ...' address is not a country of origin."""
+    from pantry_planner import db
+    from pantry_planner.origins import resolve_all
+
+    db.save_origin_evidence([
+        _ev(manufactured_in="Canada", importer_only=True,
+            verbatim="Imported by Acme, Toronto"),
+    ])
+    assert resolve_all([1])[1].status == "unknown"
+
+
+def test_full_claim_outranks_processing_claim_as_representative():
+    from pantry_planner import db
+    from pantry_planner.origins import resolve_all
+
+    db.save_origin_evidence([
+        _ev(manufactured_in="Canada", claim_type="prepared-in",
+            confidence="high"),
+        _ev(manufactured_in="Canada", claim_type="product-of",
+            confidence="medium", verbatim="Product of Canada"),
+    ])
+    assert resolve_all([1])[1].claim_type == "product-of"
+
+
+# ─── Ranking ─────────────────────────────────────────────────
+
+def test_product_of_outranks_made_in_for_same_country():
+    from pantry_planner import db
+    from pantry_planner.origins import rank_products
+
+    db.save_origin_evidence([
+        _ev(product_id=1, manufactured_in="Canada", claim_type="product-of"),
+        _ev(product_id=2, manufactured_in="Canada", claim_type="made-in"),
+    ])
+    r = rank_products([_product(1), _product(2)], preference=["Canada"])
+    assert [x.product_id for x in r.ranked] == [1, 2]
+    assert r.ranked[0].rank < r.ranked[1].rank
+    assert "ingredients may be imported" in r.ranked[1].tier_label
+
+
+def test_made_in_canada_with_us_ingredients_is_excluded():
+    """The Kraft case: American peanuts, Canadian processing.
+
+    A filter reading only the manufacturing country would pass this.
+    """
+    from pantry_planner import db
+    from pantry_planner.origins import rank_products
+
+    db.save_origin_evidence([
+        _ev(product_id=1, manufactured_in="Canada",
+            ingredient_origin="United States", claim_type="made-in",
+            verbatim="Made in Canada from imported ingredients"),
+    ])
+    r = rank_products([_product(1)], preference=["Canada"],
+                      exclude=["United States"])
+    assert not r.ranked
+    assert len(r.excluded) == 1
+    assert r.excluded[0].matched_field == "ingredient_origin"
+    assert r.excluded[0].excluded_country == "United States"
+
+
+def test_exclusion_never_removes_a_product_for_lacking_evidence():
+    from pantry_planner.origins import rank_products
+
+    r = rank_products([_product(1)], preference=["Canada"],
+                      exclude=["United States"])
+    assert not r.excluded
+    assert [u.reason for u in r.unranked] == ["no_evidence"]
+
+
+def test_unranked_never_enters_the_ranking():
+    from pantry_planner import db
+    from pantry_planner.origins import rank_products
+
+    db.save_origin_evidence([_ev(product_id=1, manufactured_in="Canada")])
+    products = [_product(1), _product(2), _product(3)]
+    r = rank_products(products, preference=["Canada"])
+    assert len(r.ranked) == 1
+    assert r.counts["unranked"] == 2
+    ranked_ids = {x.product_id for x in r.ranked}
+    assert not ranked_ids & {u.product_id for u in r.unranked}
+    assert "not evidence" in r.coverage_note
+
+
+def test_preference_order_is_respected():
+    from pantry_planner import db
+    from pantry_planner.origins import rank_products
+
+    db.save_origin_evidence([
+        _ev(product_id=1, manufactured_in="Mexico", claim_type="product-of"),
+        _ev(product_id=2, manufactured_in="Canada", claim_type="product-of"),
+    ])
+    r = rank_products([_product(1), _product(2)],
+                      preference=["Canada", "Mexico"])
+    assert [x.product_id for x in r.ranked] == [2, 1]
+
+
+def test_unpreferred_country_still_ranks_last_not_excluded():
+    from pantry_planner import db
+    from pantry_planner.origins import rank_products
+
+    db.save_origin_evidence([
+        _ev(product_id=1, manufactured_in="Italy", claim_type="product-of"),
+    ])
+    r = rank_products([_product(1)], preference=["Canada"])
+    assert r.ranked[0].tier_label == "Other country"
+    assert not r.excluded
+
+
+def test_conflicting_products_are_held_out_of_ranking():
+    from pantry_planner import db
+    from pantry_planner.origins import rank_products
+
+    db.save_origin_evidence([
+        _ev(product_id=1, manufactured_in="Italy"),
+        _ev(product_id=1, manufactured_in="Greece"),
+    ])
+    r = rank_products([_product(1)], preference=["Italy"])
+    assert not r.ranked
+    assert [u.reason for u in r.unranked] == ["conflicting"]
+
+
+# ─── Triage ──────────────────────────────────────────────────
+
+def test_triage_suggests_unresolved_products_only():
+    from pantry_planner import db
+    from pantry_planner.origins import triage_candidates
 
     products = db.load_all_products()
-    origins = resolve_origins(products, allow_llm=False)
+    before = {c["product_id"] for c in triage_candidates(products)}
+    assert before, "seeded catalog should have triage candidates"
 
-    assert len(origins) == len(products)
-    assert [o.product_id for o in origins] == [p.id for p in products]
-    by_source = {o.source for o in origins}
-    assert "llm" not in by_source and "cache" not in by_source
-    unknown = [o for o in origins if o.country == "Unknown"]
-    resolved = [o for o in origins if o.country != "Unknown"]
-    assert resolved, "heuristics should cover most of the catalog"
-    assert all(o.confidence == 0.0 for o in unknown)
-
-
-def test_llm_tier_called_once_then_cached(monkeypatch):
-    """Unresolved products go to the (mocked) LLM exactly once; a second
-    resolve reads the cache instead of calling again."""
-    from pantry_planner import db, origins
-    from pantry_planner.models import ProductOrigin
-
-    calls = []
-
-    def fake_resolver(products, *, model):
-        calls.append(len(products))
-        return [
-            ProductOrigin(product_id=p.id, product_name=p.name,
-                          country="Testlandia", confidence=0.5,
-                          source="llm", reasoning="mocked")
-            for p in products
-        ], 0.001
-
-    monkeypatch.setattr(origins, "call_origin_resolver", fake_resolver)
-    # allow_llm requires a non-empty key; settings is cached so patch the
-    # cached instance's field via env + cache_clear.
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    from pantry_planner import config
-    config.settings.cache_clear()
-
-    products = db.load_all_products()
-    first = origins.resolve_origins(products, allow_llm=True)
-    assert calls, "LLM tier should have been invoked"
-    assert all(o.country != "Unknown" for o in first)
-    llm_resolved = [o for o in first if o.source == "llm"]
-    assert len(llm_resolved) == calls[0]
-
-    second = origins.resolve_origins(products, allow_llm=True)
-    assert len(calls) == 1, "second resolve must hit the cache, not the LLM"
-    cached = [o for o in second if o.source == "cache"]
-    assert len(cached) == len(llm_resolved)
-    assert all(o.country == "Testlandia" for o in cached)
-
-    config.settings.cache_clear()
+    pid = next(iter(before))
+    db.save_origin_evidence([
+        _ev(product_id=pid, manufactured_in="Canada", claim_type="product-of"),
+    ])
+    after = {c["product_id"] for c in triage_candidates(products)}
+    assert pid not in after
 
 
-def test_search_by_origin_matches_case_insensitive_substring():
-    from pantry_planner.origins import search_by_origin
+def test_triage_returns_hints_never_countries():
+    from pantry_planner import db
+    from pantry_planner.origins import triage_candidates
 
-    italy = search_by_origin("italy")
-    assert italy, "seeded catalog has Italian products"
-    assert all("Italy" == o.country for _, o in italy)
-
-    uk = search_by_origin("kingdom")
-    assert {p.name for p, _ in uk} == {"Dark Chocolate Cadbury",
-                                       "Milk Chocolate Cadbury"}
-
-    assert search_by_origin("Atlantis") == []
-
-
-def test_search_by_origin_default_is_free(monkeypatch):
-    from pantry_planner import origins
-
-    def boom(*a, **k):
-        raise AssertionError("search_by_origin must not call the LLM by default")
-
-    monkeypatch.setattr(origins, "call_origin_resolver", boom)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    from pantry_planner import config
-    config.settings.cache_clear()
-    origins.search_by_origin("canada")
-    config.settings.cache_clear()
-
-
-# ─── LLM tier response hygiene ───────────────────────────────
-
-def test_llm_resolver_ignores_hallucinated_ids(monkeypatch):
-    """call_origin_resolver drops product_ids not present in the input."""
-    from types import SimpleNamespace
-
-    from pantry_planner import origins
-
-    tool_block = SimpleNamespace(
-        type="tool_use",
-        input={"origins": [
-            {"product_id": 1, "country": "Canada", "confidence": 0.8,
-             "reasoning": "ok"},
-            {"product_id": 999, "country": "Atlantis", "confidence": 0.9,
-             "reasoning": "hallucinated"},
-        ]},
-    )
-    resp = SimpleNamespace(
-        content=[tool_block],
-        usage=SimpleNamespace(input_tokens=100, output_tokens=50))
-
-    class FakeClient:
-        def __init__(self, **kw):
-            self.messages = SimpleNamespace(create=lambda **kw: resp)
-
-    monkeypatch.setattr(origins, "Anthropic", FakeClient)
-    got, cost = origins.call_origin_resolver(
-        [_product(id=1, name="Thing")], model="claude-haiku-4-5-20251001")
-    assert [o.product_id for o in got] == [1]
-    assert got[0].country == "Canada"
-    assert cost > 0
+    for c in triage_candidates(db.load_all_products()):
+        assert set(c) == {"product_id", "product_name", "reason", "status"}
