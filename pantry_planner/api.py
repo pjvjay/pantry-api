@@ -14,7 +14,14 @@ from pydantic import BaseModel, Field
 
 from . import db, flow
 from .config import settings
-from .models import Product, Recipe, ShoppingPlan, WeekPlan
+from .models import (
+    OriginRanking,
+    Product,
+    ProductOrigin,
+    Recipe,
+    ShoppingPlan,
+    WeekPlan,
+)
 
 # The MCP Streamable-HTTP endpoint rides this app at /mcp (mounted at
 # the bottom of the file). MCP_HTTP_ENABLED=false turns it off — the
@@ -146,6 +153,67 @@ def plan_recipe(slug: str) -> ShoppingPlan:
         return flow.run(slug)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+# ─── Provenance ──────────────────────────────────────────────
+
+class RankRequest(BaseModel):
+    """Rank the catalog against a country preference the CALLER supplies.
+
+    preference: ordered, most-preferred first (e.g. ["Canada", "Mexico"]).
+    exclude:    countries to filter out. A product is only ever excluded on
+                positive evidence — never for lacking any.
+    """
+
+    preference: list[str] = Field(default_factory=list, max_length=50)
+    exclude: list[str] = Field(default_factory=list, max_length=50)
+    search: str | None = Field(default=None, max_length=200)
+    product_ids: list[int] | None = None
+
+
+@app.get("/origins", response_model=list[ProductOrigin])
+def list_origins(search: str | None = None) -> list[ProductOrigin]:
+    """Resolved provenance per product, from ingested evidence only."""
+    from . import origins
+
+    products = db.load_all_products()
+    if search:
+        needle = search.lower()
+        products = [p for p in products
+                    if needle in f"{p.name} {p.brand} {p.category}".lower()]
+    resolved = origins.resolve_all([p.id for p in products])
+    return [resolved[p.id] for p in products if p.id in resolved]
+
+
+@app.post("/origins/rank", response_model=OriginRanking)
+def rank_by_origin(req: RankRequest) -> OriginRanking:
+    """Rank products by provenance against the caller's preference order.
+
+    Returns four things, kept apart on purpose: ranked, excluded,
+    unranked (no evidence / conflicting / lookup failed) and the counts.
+    Unverified products are never folded into the ranking — with coverage
+    as thin as it is, that would present silence as a verdict.
+    """
+    from . import origins
+
+    products = db.load_all_products()
+    if req.product_ids is not None:
+        wanted = set(req.product_ids)
+        products = [p for p in products if p.id in wanted]
+    elif req.search:
+        needle = req.search.lower()
+        products = [p for p in products
+                    if needle in f"{p.name} {p.brand} {p.category}".lower()]
+    return origins.rank_products(
+        products, preference=req.preference, exclude=req.exclude)
+
+
+@app.get("/origins/triage")
+def origin_triage() -> list[dict]:
+    """Products worth photographing next. Hints, never origins."""
+    from . import origins
+
+    return origins.triage_candidates(db.load_all_products())
 
 
 # MCP Streamable HTTP — mounted last so the REST routes above keep

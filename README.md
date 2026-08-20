@@ -117,7 +117,8 @@ pantry-planner/
 │   ├── flow.py            # Burr state machine (6 actions)
 │   ├── api.py             # FastAPI wrapper (+ /mcp mount)
 │   ├── mcp_server.py      # MCP server: stdio script + HTTP app
-│   ├── origins.py         # country-of-origin: cache → rules → Haiku
+│   ├── origins.py         # provenance: evidence → resolve → rank
+│   ├── ingest.py          # loads claude-chrome-container output
 │   ├── demo.py            # CLI entrypoint
 │   ├── nlsearch/          # constrained NL2SQL: parse → query plan → gates
 │   │   ├── plan.py        # QueryPlan/StepResult/PlanAlert formalism
@@ -294,6 +295,74 @@ and the plan tools spend Anthropic credits per call. Don't expose it
 beyond the current demo footprint; set `MCP_HTTP_ENABLED=false` to
 turn the mount off (stdio is unaffected). In `DEMO_MODE=1` the plan
 tools run keyless and deterministic, same as the REST endpoints.
+
+## Where things come from (provenance)
+
+Products carry country-of-origin **evidence**, and the catalog can be ranked
+against a country preference the caller supplies — a buy-local or boycott
+filter. Nothing here infers an origin.
+
+```bash
+curl -X POST localhost:8000/origins/rank -H 'content-type: application/json' \
+  -d '{"preference":["Canada"],"exclude":["United States"]}'
+```
+
+Three things this gets right that a single `country` column cannot:
+
+**Ingredient origin and manufacturing origin are separate.** "Made in Canada"
+legally permits imported ingredients — peanut butter made in Canada from
+American peanuts is the canonical case. Exclusion checks **both** fields, so
+that product is caught by an exclusion of the United States. A filter reading
+only the manufacturing country passes exactly the items a provenance-conscious
+shopper is trying to avoid.
+
+**Claim wording is preserved and ranked.** Under CFIA rules "Product of Canada"
+(≥98% Canadian content) outranks "Made in Canada" (processed here, ingredients
+may be imported). The verbatim source wording is stored and never paraphrased.
+
+**Absence is never a verdict.** Results come back in separate buckets —
+`ranked`, `excluded`, `unranked` — and products with no published origin are
+held out with a reason and a count. Coverage is thin and biased *against*
+Canadian goods (Open Food Facts began in France), so folding unverified items
+into the ranking would silently turn "nobody published this" into a finding.
+
+Sources, cheapest first: the DB cache, then evidence ingested from the
+[claude-chrome-container](https://github.com/pjvjay/pantry-platform) tooling.
+The old name/brand heuristics survive only as `origin_triage` — a work queue
+of what to photograph next, never as provenance. They were wrong often enough
+to matter: that tooling's reconciliation pass found Lindt Excellence 70% is
+made in **New Hampshire**, not the Switzerland or France a brand guess
+produces.
+
+### Loading evidence
+
+The container is a supervised, hard rate-limited browser agent — it was blocked
+by one retailer after three searches ~18s apart — so it is a batch producer of
+files, never a live dependency of this API. Run it, then ingest what it wrote:
+
+```bash
+# in the container checkout
+./grocery --items "butter,rice" > prices.md      # scraped prices + branch
+./origin --json < prices.md    > origin.json     # Open Food Facts + reconcile
+./label  --json photos/*.jpg   > labels.json     # package photos (vision)
+
+# here
+python -m pantry_planner.ingest grocery prices.md --run-id 2026-08-20
+python -m pantry_planner.ingest origin  origin.json
+python -m pantry_planner.ingest label   labels.json
+python -m pantry_planner.ingest refresh          # recompute summaries
+```
+
+Rows that match no catalog product are reported rather than dropped; scraped
+prices keep a null product reference so the miss stays visible. Evidence is
+append-only — a later lookup disagreeing with an earlier one is a fact about
+the sources, and surfaces as `status: conflicting` rather than overwriting.
+
+Label photographs are the highest-value input by a distance. For imported
+seafood and fresh produce the origin is not published online at all: retailer
+pages carry no country anywhere in the DOM and explicitly tell customers to
+read the package, and Open Food Facts holds those records with empty origin
+fields. Only the printed label answers the question.
 
 ## How it deploys
 

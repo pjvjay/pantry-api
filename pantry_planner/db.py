@@ -9,7 +9,7 @@ import json
 import sys
 from pathlib import Path
 
-from sqlalchemy import Column, Float, Integer, String, create_engine
+from sqlalchemy import Boolean, Column, Float, Integer, String, create_engine
 from sqlalchemy.orm import DeclarativeBase, Session
 
 from .config import settings
@@ -80,10 +80,64 @@ class ProductOriginRow(Base):
     __tablename__ = "product_origins"
     product_id = Column(Integer, primary_key=True)
     country = Column(String, nullable=False)
+    # 0004 kept confidence numeric. Evidence carries high/medium/low, so the
+    # two are mapped at the boundary (see origins._conf_label / _conf_float)
+    # rather than migrating a column that older readers still use.
     confidence = Column(Float, nullable=False, default=0.0)
     source = Column(String, nullable=False, default="llm")
     reasoning = Column(String, nullable=False, default="")
     resolved_at = Column(String, nullable=False, default="")
+    # 0005_origin_evidence
+    status = Column(String, nullable=False, default="unknown")
+    claim_type = Column(String, nullable=False, default="unknown")
+    verbatim = Column(String, nullable=False, default="")
+    ingredient_origin = Column(String, nullable=False, default="")
+    manufactured_in = Column(String, nullable=False, default="")
+    evidence_count = Column(Integer, nullable=False, default=0)
+
+
+class ProductOriginEvidenceRow(Base):
+    """0005_origin_evidence — many rows per product, one per observation.
+
+    Rows are allowed to contradict each other; reconciliation happens at
+    read time so a disagreement stays visible instead of being overwritten.
+    """
+    __tablename__ = "product_origin_evidence"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_id = Column(Integer, nullable=False, index=True)
+    source = Column(String, nullable=False)
+    source_ref = Column(String, nullable=False, default="")
+    claim_type = Column(String, nullable=False, default="unknown")
+    verbatim = Column(String, nullable=False, default="")
+    ingredient_origin = Column(String, nullable=False, default="")
+    manufactured_in = Column(String, nullable=False, default="")
+    confidence = Column(String, nullable=False, default="low")
+    importer_only = Column(Boolean, nullable=False, default=False)
+    note = Column(String, nullable=False, default="")
+    observed_at = Column(String, nullable=False, default="")
+
+
+class PriceObservationRow(Base):
+    """0005_origin_evidence — timestamped readings scraped from store pages.
+
+    Distinct from store_products (the seeded synthetic catalog): `branch` is
+    the store the page actually showed, which is session state resolved from
+    the client IP and cannot be chosen.
+    """
+    __tablename__ = "price_observations"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_id = Column(Integer, nullable=True, index=True)
+    item_query = Column(String, nullable=False, default="")
+    store = Column(String, nullable=False, default="")
+    branch = Column(String, nullable=False, default="")
+    product_name = Column(String, nullable=False, default="")
+    size = Column(String, nullable=False, default="")
+    price = Column(Float, nullable=True)
+    price_text = Column(String, nullable=False, default="")
+    unit_price = Column(String, nullable=False, default="")
+    link = Column(String, nullable=False, default="")
+    observed_at = Column(String, nullable=False, default="")
+    run_id = Column(String, nullable=False, default="")
 
 
 class RecipeRow(Base):
@@ -162,36 +216,87 @@ def load_all_products() -> list[Product]:
         ]
 
 
-def load_cached_origins(product_ids: list[int]) -> dict[int, ProductOriginRow]:
-    """Read previously LLM-resolved origins for the given products."""
-    if not product_ids:
-        return {}
+def load_origin_evidence(product_ids: list[int] | None = None
+                         ) -> dict[int, list[ProductOriginEvidenceRow]]:
+    """All evidence rows, grouped by product. Contradictions are preserved."""
     with Session(engine()) as s:
-        rows = (
-            s.query(ProductOriginRow)
-            .filter(ProductOriginRow.product_id.in_(product_ids))
-            .all()
-        )
+        q = s.query(ProductOriginEvidenceRow)
+        if product_ids is not None:
+            if not product_ids:
+                return {}
+            q = q.filter(ProductOriginEvidenceRow.product_id.in_(product_ids))
+        rows = q.order_by(ProductOriginEvidenceRow.id).all()
         s.expunge_all()
-        return {r.product_id: r for r in rows}
+    out: dict[int, list[ProductOriginEvidenceRow]] = {}
+    for r in rows:
+        out.setdefault(int(r.product_id), []).append(r)
+    return out
 
 
-def save_origins(origins: list[dict]) -> None:
-    """Upsert LLM-resolved origins. Each dict: product_id, country,
-    confidence, source, reasoning, resolved_at."""
+def save_origin_evidence(records: list[dict]) -> int:
+    """Append evidence rows. Returns how many were written.
+
+    Append-only by design: a later lookup disagreeing with an earlier one is
+    a fact about the sources, not a correction to be applied silently.
+    """
+    if not records:
+        return 0
+    with Session(engine()) as s:
+        for r in records:
+            s.add(ProductOriginEvidenceRow(**r))
+        s.commit()
+    return len(records)
+
+
+def load_resolved_origins(product_ids: list[int] | None = None
+                          ) -> dict[int, ProductOriginRow]:
+    """The per-product resolved summary rows."""
+    with Session(engine()) as s:
+        q = s.query(ProductOriginRow)
+        if product_ids is not None:
+            if not product_ids:
+                return {}
+            q = q.filter(ProductOriginRow.product_id.in_(product_ids))
+        rows = q.all()
+        s.expunge_all()
+        return {int(r.product_id): r for r in rows}
+
+
+def save_resolved_origins(origins: list[dict]) -> None:
+    """Upsert resolved summaries keyed by product_id."""
     if not origins:
         return
     with Session(engine()) as s:
         for o in origins:
             row = s.get(ProductOriginRow, o["product_id"]) or ProductOriginRow(
                 product_id=o["product_id"])
-            row.country = o["country"]
-            row.confidence = float(o.get("confidence", 0.0))
-            row.source = o.get("source", "llm")
-            row.reasoning = o.get("reasoning", "")
-            row.resolved_at = o.get("resolved_at", "")
+            for field, value in o.items():
+                if field != "product_id":
+                    setattr(row, field, value)
             s.add(row)
         s.commit()
+
+
+def save_price_observations(observations: list[dict]) -> int:
+    """Append scraped price readings. Returns how many were written."""
+    if not observations:
+        return 0
+    with Session(engine()) as s:
+        for o in observations:
+            s.add(PriceObservationRow(**o))
+        s.commit()
+    return len(observations)
+
+
+def load_price_observations(product_id: int | None = None,
+                            limit: int = 200) -> list[PriceObservationRow]:
+    with Session(engine()) as s:
+        q = s.query(PriceObservationRow)
+        if product_id is not None:
+            q = q.filter(PriceObservationRow.product_id == product_id)
+        rows = q.order_by(PriceObservationRow.id.desc()).limit(limit).all()
+        s.expunge_all()
+        return rows
 
 
 # ─── Seed loader ─────────────────────────────────────────────
@@ -208,6 +313,8 @@ def seed_from_json() -> None:
         # Clear existing
         s.query(RecipeIngredientRow).delete()
         s.query(RecipeRow).delete()
+        s.query(ProductOriginEvidenceRow).delete()
+        s.query(PriceObservationRow).delete()
         s.query(ProductOriginRow).delete()
         s.query(ProductTermRow).delete()
         s.query(ReviewRow).delete()
