@@ -31,6 +31,7 @@ Two rules the shape of this module exists to enforce:
 from __future__ import annotations
 
 import re
+import unicodedata
 
 from .models import (
     ExcludedProduct,
@@ -63,7 +64,9 @@ CONF_ORDER = {"high": 3, "medium": 2, "low": 1}
 _ALIASES: dict[str, set[str]] = {
     "united states": {
         "united states", "united states of america", "usa", "u.s.a", "u.s",
-        "us", "america", "american",
+        "us",
+        # "america"/"american" are deliberately absent: they match
+        # "South America" and "Central America", which are not the US.
         # Sub-national names appear in label transcriptions ("New Hampshire,
         # Stratham"). Georgia is deliberately absent — it is also a country.
         "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
@@ -86,12 +89,27 @@ _ALIASES: dict[str, set[str]] = {
         # origin string naming it alone is not worth a false Canadian match.
     },
     "united kingdom": {
-        "united kingdom", "uk", "u.k", "great britain", "britain", "british",
+        "united kingdom", "uk", "u.k", "great britain", "britain",
         "england", "scotland", "wales", "northern ireland",
+        # "british" is deliberately absent: it matches "British Columbia".
     },
     "netherlands": {"netherlands", "holland", "dutch"},
     "south korea": {"south korea", "korea, south", "republic of korea"},
 }
+
+# Multi-word country names whose components are themselves countries or
+# regions. A shorter name matching INSIDE one of these is a false positive:
+# "Guinea" inside "Papua New Guinea", "Ireland" inside "Northern Ireland".
+_SUPERSETS = (
+    "papua new guinea", "equatorial guinea", "guinea-bissau",
+    "northern ireland", "south africa", "south korea", "north korea",
+    "south sudan", "dominican republic", "trinidad and tobago",
+    "central african republic", "united arab emirates", "new zealand",
+    "united states", "united kingdom", "south america", "central america",
+    "british columbia", "west virginia", "new hampshire", "new jersey",
+    "new mexico", "new york", "north carolina", "south carolina",
+    "north dakota", "south dakota", "rhode island",
+)
 
 # surface form -> canonical country
 _SURFACE_TO_CANON: dict[str, str] = {}
@@ -101,10 +119,21 @@ for _canon, _forms in _ALIASES.items():
     _SURFACE_TO_CANON[_canon] = _canon
 
 
+def _normalize(text: str) -> str:
+    """Lowercase, strip accents, drop periods, collapse whitespace.
+
+    Periods are removed rather than replaced with a space so that "U.S.A."
+    folds to "usa"; replacing them produced "u s a", which matched nothing.
+    Accent folding lets "M\u00e9xico" and "Per\u00fa" match.
+    """
+    t = unicodedata.normalize("NFKD", (text or "").lower())
+    t = "".join(c for c in t if not unicodedata.combining(c))
+    return re.sub(r"\s+", " ", t.replace(".", "")).strip()
+
+
 def canonical_country(name: str) -> str:
     """Fold a surface form to a canonical country name, lowercased."""
-    n = re.sub(r"[.\s]+", " ", (name or "").strip().lower()).strip()
-    n = n.rstrip(".")
+    n = _normalize(name)
     return _SURFACE_TO_CANON.get(n, n)
 
 
@@ -121,11 +150,22 @@ def country_matches(evidence_text: str, country: str) -> bool:
     """
     if not evidence_text or not country:
         return False
-    hay = re.sub(r"[.]", "", evidence_text.lower())
-    for form in _forms_for(country):
-        f = re.sub(r"[.]", "", form)
-        if re.search(rf"(?<![a-z]){re.escape(f)}(?![a-z])", hay):
-            return True
+    hay = _normalize(evidence_text)
+    forms = {_normalize(f) for f in _forms_for(country)}
+    forms.add(canonical_country(country))
+    # Spans covered by a longer name that is NOT one of this country's own
+    # forms. "Guinea" must not fire inside "Papua New Guinea", but
+    # "New Hampshire" is itself a US form and must still count as the US.
+    blocked = [
+        (m.start(), m.end())
+        for s in _SUPERSETS if s not in forms
+        for m in re.finditer(rf"(?<![a-z]){re.escape(s)}(?![a-z])", hay)
+    ]
+    for form in forms:
+        f = _normalize(form)
+        for m in re.finditer(rf"(?<![a-z]){re.escape(f)}(?![a-z])", hay):
+            if not any(b0 <= m.start() and m.end() <= b1 for b0, b1 in blocked):
+                return True
     return False
 
 
@@ -139,16 +179,35 @@ def _conf_float(label: str) -> float:
     return {"high": 0.9, "medium": 0.6, "low": 0.3}.get(label, 0.3)
 
 
+def _row_countries(row, field: str) -> frozenset[str]:
+    """Countries named by ONE evidence row's field.
+
+    Split on separators only. " and " is deliberately not a separator:
+    it would break "Trinidad and Tobago".
+    """
+    val = (getattr(row, field, "") or "").strip()
+    if not val:
+        return frozenset()
+    return frozenset(
+        canonical_country(part) for part in re.split(r"[,;/]", val) if part.strip())
+
+
 def _countries_in(rows, field: str) -> set[str]:
-    out = set()
+    out: set[str] = set()
     for r in rows:
-        val = (getattr(r, field, "") or "").strip()
-        if val:
-            for part in re.split(r"[,;/]| and ", val):
-                part = part.strip()
-                if part:
-                    out.add(canonical_country(part))
+        out |= _row_countries(r, field)
     return out
+
+
+def _rows_disagree(rows, field: str) -> bool:
+    """True when two rows name different countries for the same field.
+
+    A single row listing four countries is a blended product (Bertolli
+    olive oil genuinely lists Italy, Spain, Argentina and Peru) — that is
+    one source being precise, not two sources conflicting.
+    """
+    seen = [c for c in (_row_countries(r, field) for r in rows) if c]
+    return any(a != b for a in seen for b in seen)
 
 
 def resolve_origin(product_id: int, product_name: str, evidence: list
@@ -182,7 +241,8 @@ def resolve_origin(product_id: int, product_name: str, evidence: list
 
     mfg = _countries_in(usable, "manufactured_in")
     ing = _countries_in(usable, "ingredient_origin")
-    if len(mfg) > 1 or len(ing) > 1:
+    if _rows_disagree(usable, "manufactured_in") or _rows_disagree(
+            usable, "ingredient_origin"):
         return ProductOrigin(
             product_id=product_id, product_name=product_name,
             status="conflicting", evidence_count=len(evidence),
@@ -200,12 +260,21 @@ def resolve_origin(product_id: int, product_name: str, evidence: list
         )
 
     best = max(usable, key=strength)
+    # Fields are merged across rows, not read off the strongest one. One
+    # source often knows only where the ingredients came from and another
+    # only where it was processed; keeping just the winner's fields drops
+    # half the provenance and lets an excluded ingredient origin through.
+    ranked_rows = sorted(usable, key=strength, reverse=True)
+    merged_ing = next((r.ingredient_origin.strip() for r in ranked_rows
+                       if (r.ingredient_origin or "").strip()), "")
+    merged_mfg = next((r.manufactured_in.strip() for r in ranked_rows
+                       if (r.manufactured_in or "").strip()), "")
     return ProductOrigin(
         product_id=product_id, product_name=product_name, status="resolved",
         claim_type=best.claim_type or "unknown",
-        country=(best.manufactured_in or best.ingredient_origin or "").strip(),
-        ingredient_origin=(best.ingredient_origin or "").strip(),
-        manufactured_in=(best.manufactured_in or "").strip(),
+        country=(merged_mfg or merged_ing),
+        ingredient_origin=merged_ing,
+        manufactured_in=merged_mfg,
         verbatim=best.verbatim or "", confidence=best.confidence or "low",
         source=best.source, note=best.note or "", evidence_count=len(evidence))
 
@@ -280,9 +349,18 @@ def rank_products(products: list[Product], *, preference: list[str] | None = Non
             reason = {"unknown": "no_evidence", "conflicting": "conflicting",
                       "lookup_failed": "lookup_failed", "guess": "guess_only",
                       }.get(origin.status, "no_evidence")
+            detail = origin.note
+            # Unresolved is not the same as clean. If any evidence names an
+            # excluded country — a conflicting record, say — surface it here
+            # rather than letting the product pass unremarked.
+            flagged = _match_exclusion(origin, exclude)
+            if flagged:
+                detail = (f"WARNING: some evidence names {flagged[0]} "
+                          f"({flagged[1]}), but sources are unresolved. "
+                          f"{detail}").strip()
             unranked.append(UnrankedProduct(
                 product_id=p.id, product_name=p.name, price=p.price,
-                reason=reason, detail=origin.note))
+                reason=reason, detail=detail))
             continue
 
         hit = _match_exclusion(origin, exclude)

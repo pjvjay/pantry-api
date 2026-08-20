@@ -233,19 +233,38 @@ def load_origin_evidence(product_ids: list[int] | None = None
     return out
 
 
+# An observation is identified by what it says and where it came from —
+# not by when it was read. Re-ingesting the same file must be a no-op.
+_EVIDENCE_KEY = ("product_id", "source", "source_ref", "claim_type",
+                 "verbatim", "ingredient_origin", "manufactured_in")
+
+
 def save_origin_evidence(records: list[dict]) -> int:
-    """Append evidence rows. Returns how many were written.
+    """Append evidence rows, skipping exact duplicates. Returns rows written.
 
     Append-only by design: a later lookup disagreeing with an earlier one is
-    a fact about the sources, not a correction to be applied silently.
+    a fact about the sources, not a correction to be applied silently. But an
+    identical re-read is not new evidence — evidence_count is surfaced as
+    corroboration, so duplicates would overstate how well-supported a
+    provenance claim is.
     """
     if not records:
         return 0
+    written = 0
     with Session(engine()) as s:
+        existing = {
+            tuple(getattr(r, k) for k in _EVIDENCE_KEY)
+            for r in s.query(ProductOriginEvidenceRow).all()
+        }
         for r in records:
+            key = tuple(r.get(k) for k in _EVIDENCE_KEY)
+            if key in existing:
+                continue
+            existing.add(key)
             s.add(ProductOriginEvidenceRow(**r))
+            written += 1
         s.commit()
-    return len(records)
+    return written
 
 
 def load_resolved_origins(product_ids: list[int] | None = None

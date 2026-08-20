@@ -232,3 +232,39 @@ def test_refresh_writes_summary_rows_with_status_counts():
                 if r.manufactured_in == "India")
     assert rice.status == "resolved"
     assert rice.claim_type == "product-of"
+
+
+# ─── Regressions found by adversarial review ─────────────────
+
+def test_single_token_query_does_not_match_an_unrelated_product():
+    """'Milk 2L' reduces to {milk} and covered 100% of itself against
+    'Milk Chocolate Cadbury', attaching a milk label to a chocolate bar."""
+    from pantry_planner import db
+    from pantry_planner.ingest import match_product
+
+    products = db.load_all_products()
+    assert match_product("Milk 2L", products) is None
+    assert match_product("Cheese", products) is None
+    # genuine multi-token matches still resolve
+    assert match_product("Whole Milk", products).name == "Whole Milk 1L"
+    assert match_product("Basmati Rice 2kg", products).name == "Basmati Rice 2kg"
+
+
+def test_ambiguous_names_decline_rather_than_guess():
+    from pantry_planner import db
+    from pantry_planner.ingest import match_product
+
+    products = [p for p in db.load_all_products() if "Ground Beef" in p.name]
+    assert len(products) > 1
+    assert match_product("Ground Beef", products) is None
+
+
+def test_reingesting_the_same_file_is_a_noop():
+    """evidence_count is surfaced as corroboration, so duplicates would
+    overstate how well-supported a provenance claim is."""
+    from pantry_planner.ingest import ingest_origin_json
+
+    first = ingest_origin_json(ORIGIN_JSON)
+    second = ingest_origin_json(ORIGIN_JSON)
+    assert first["written"] == 2
+    assert second["written"] == 0
