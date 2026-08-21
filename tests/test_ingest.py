@@ -268,3 +268,37 @@ def test_reingesting_the_same_file_is_a_noop():
     second = ingest_origin_json(ORIGIN_JSON)
     assert first["written"] == 2
     assert second["written"] == 0
+
+
+def test_one_token_query_is_rejected_even_with_a_single_candidate():
+    """The guard was gated on min(query, catalog) tokens, which exempted
+    exactly the one-token query it was written to catch."""
+    from pantry_planner import db
+    from pantry_planner.ingest import match_product
+
+    only_chocolate = [p for p in db.load_all_products()
+                      if p.name == "Milk Chocolate Cadbury"]
+    assert match_product("Milk 2L", only_chocolate) is None
+
+
+def test_plural_names_still_match_singular_catalog_entries():
+    from pantry_planner import db
+    from pantry_planner.ingest import match_product
+
+    products = db.load_all_products()
+    assert match_product("Roma Tomatoes", products).name == "Roma Tomato"
+    assert match_product("Yellow Onions", products).name == "Yellow Onion"
+
+
+def test_corrected_label_reread_is_not_discarded_as_a_duplicate():
+    """importer_only/confidence are part of an observation's identity."""
+    from pantry_planner import db
+
+    row = dict(product_id=1, source="label-photo", source_ref="pb.jpg",
+               claim_type="made-in", verbatim="Made in Canada",
+               ingredient_origin="", manufactured_in="Canada",
+               confidence="low", importer_only=False, note="", observed_at="")
+    assert db.save_origin_evidence([row]) == 1
+    assert db.save_origin_evidence([row]) == 0          # true duplicate
+    corrected = {**row, "importer_only": True}
+    assert db.save_origin_evidence([corrected]) == 1    # a correction

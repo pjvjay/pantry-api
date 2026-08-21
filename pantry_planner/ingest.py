@@ -39,8 +39,22 @@ MATCH_THRESHOLD = 0.5
 
 # ─── Matching catalog products to scraped names ──────────────
 
+def _stem(word: str) -> str:
+    """Crude singular fold, matching the container's own tokenizer.
+
+    Retailer listings and catalogs disagree on number — "Bananas" vs
+    "Banana", "Roma Tomatoes" vs "Roma Tomato" — and without this the
+    two-shared-token rule drops produce that used to match.
+    """
+    if len(word) > 3 and word.endswith("es") and word[-3] in "oshxz":
+        return word[:-2]          # tomatoes -> tomato, boxes -> box
+    if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+        return word[:-1]
+    return word
+
+
 def _tokens(text: str) -> set[str]:
-    return {w for w in re.sub(r"[^a-z0-9 ]", " ", (text or "").lower()).split()
+    return {_stem(w) for w in re.sub(r"[^a-z0-9 ]", " ", (text or "").lower()).split()
             if len(w) > 2}
 
 
@@ -82,7 +96,10 @@ def match_product(name: str, products: list[Product]) -> Product | None:
         shared = max(_shared(name, p.name), _shared(name, f"{p.brand} {p.name}"))
         if score < MATCH_THRESHOLD:
             continue
-        if shared < 2 and min(len(_tokens(name)), len(_tokens(p.name))) >= 2:
+        # Gate on the CATALOG name, not on min(): a one-token query was
+        # exempting itself from the very rule meant to catch it, so
+        # "Milk 2L" still matched "Milk Chocolate Cadbury".
+        if shared < 2 and len(_tokens(p.name)) >= 2:
             continue
         scored.append((score, shared, p))
 

@@ -235,8 +235,12 @@ def load_origin_evidence(product_ids: list[int] | None = None
 
 # An observation is identified by what it says and where it came from —
 # not by when it was read. Re-ingesting the same file must be a no-op.
+# importer_only and confidence are part of the identity: a corrected
+# re-read of the same label ("that address was the importer after all")
+# changes the answer and must not be discarded as a duplicate.
 _EVIDENCE_KEY = ("product_id", "source", "source_ref", "claim_type",
-                 "verbatim", "ingredient_origin", "manufactured_in")
+                 "verbatim", "ingredient_origin", "manufactured_in",
+                 "importer_only", "confidence")
 
 
 def save_origin_evidence(records: list[dict]) -> int:

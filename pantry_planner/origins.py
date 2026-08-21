@@ -237,7 +237,9 @@ def resolve_origin(product_id: int, product_name: str, evidence: list
             note = f"heuristic guess only: {g.note or g.manufactured_in}"
         return ProductOrigin(
             product_id=product_id, product_name=product_name, status=status,
-            evidence_count=len(evidence), note=note)
+            evidence_count=len(evidence), note=note,
+            seen_countries=sorted(_countries_in(evidence, "manufactured_in")
+                                  | _countries_in(evidence, "ingredient_origin")))
 
     mfg = _countries_in(usable, "manufactured_in")
     ing = _countries_in(usable, "ingredient_origin")
@@ -248,6 +250,7 @@ def resolve_origin(product_id: int, product_name: str, evidence: list
             status="conflicting", evidence_count=len(evidence),
             ingredient_origin=", ".join(c.title() for c in sorted(ing)),
             manufactured_in=", ".join(c.title() for c in sorted(mfg)),
+            seen_countries=sorted(mfg | ing),
             note="sources disagree; not ranked")
 
     # Strongest claim wins as the representative row: a transcribed label
@@ -259,24 +262,40 @@ def resolve_origin(product_id: int, product_name: str, evidence: list
             1 if e.source == "label-photo" else 0,
         )
 
-    best = max(usable, key=strength)
-    # Fields are merged across rows, not read off the strongest one. One
+    # Fields are merged across rows, not read off the strongest one: one
     # source often knows only where the ingredients came from and another
-    # only where it was processed; keeping just the winner's fields drops
-    # half the provenance and lets an excluded ingredient origin through.
+    # only where it was processed, and keeping just the winner's fields
+    # drops half the provenance.
+    #
+    # But a merged field must carry ITS OWN row's claim. Attaching the
+    # strongest row's claim_type to a country supplied by a different row
+    # turns "Made in Canada" into "Product of Canada" — promoting a
+    # processing country into the >=98%-domestic-content tier, which is
+    # the precise misreading this module exists to prevent.
     ranked_rows = sorted(usable, key=strength, reverse=True)
-    merged_ing = next((r.ingredient_origin.strip() for r in ranked_rows
-                       if (r.ingredient_origin or "").strip()), "")
-    merged_mfg = next((r.manufactured_in.strip() for r in ranked_rows
-                       if (r.manufactured_in or "").strip()), "")
+    ing_row = next((r for r in ranked_rows
+                    if (r.ingredient_origin or "").strip()), None)
+    mfg_row = next((r for r in ranked_rows
+                    if (r.manufactured_in or "").strip()), None)
+
+    # The representative row is whichever supplied the country shown first,
+    # so the flat verbatim/confidence/source are a receipt for the flat
+    # claim_type rather than a mix of two sources.
+    rep = mfg_row or ing_row or max(usable, key=strength)
     return ProductOrigin(
         product_id=product_id, product_name=product_name, status="resolved",
-        claim_type=best.claim_type or "unknown",
-        country=(merged_mfg or merged_ing),
-        ingredient_origin=merged_ing,
-        manufactured_in=merged_mfg,
-        verbatim=best.verbatim or "", confidence=best.confidence or "low",
-        source=best.source, note=best.note or "", evidence_count=len(evidence))
+        claim_type=rep.claim_type or "unknown",
+        country=((mfg_row.manufactured_in if mfg_row else
+                  ing_row.ingredient_origin if ing_row else "") or "").strip(),
+        ingredient_origin=((ing_row.ingredient_origin if ing_row else "") or "").strip(),
+        manufactured_in=((mfg_row.manufactured_in if mfg_row else "") or "").strip(),
+        ingredient_claim=(ing_row.claim_type or "") if ing_row else "",
+        manufactured_claim=(mfg_row.claim_type or "") if mfg_row else "",
+        verbatim=rep.verbatim or "", confidence=rep.confidence or "low",
+        source=rep.source, note=rep.note or "",
+        seen_countries=sorted(_countries_in(evidence, "manufactured_in")
+                              | _countries_in(evidence, "ingredient_origin")),
+        evidence_count=len(evidence))
 
 
 def resolve_all(product_ids: list[int] | None = None) -> dict[int, ProductOrigin]:
@@ -353,11 +372,12 @@ def rank_products(products: list[Product], *, preference: list[str] | None = Non
             # Unresolved is not the same as clean. If any evidence names an
             # excluded country — a conflicting record, say — surface it here
             # rather than letting the product pass unremarked.
-            flagged = _match_exclusion(origin, exclude)
-            if flagged:
-                detail = (f"WARNING: some evidence names {flagged[0]} "
-                          f"({flagged[1]}), but sources are unresolved. "
-                          f"{detail}").strip()
+            named = [c for c in exclude
+                     if any(country_matches(sc, c) for sc in origin.seen_countries)]
+            if named:
+                detail = (f"WARNING: some evidence names {', '.join(named)}, "
+                          f"but it is not usable as provenance "
+                          f"({reason}). {detail}").strip()
             unranked.append(UnrankedProduct(
                 product_id=p.id, product_name=p.name, price=p.price,
                 reason=reason, detail=detail))
@@ -374,9 +394,14 @@ def rank_products(products: list[Product], *, preference: list[str] | None = Non
             continue
 
         pref = _match_preference(origin, preference)
-        full = origin.claim_type in FULL_CLAIMS
         if pref is not None:
             idx, country, field = pref
+            # The claim that belongs to the matched field — not the summary
+            # claim, which may describe the other one.
+            field_claim = (origin.manufactured_claim
+                           if field == "manufactured_in"
+                           else origin.ingredient_claim) or origin.claim_type
+            full = field_claim in FULL_CLAIMS
             rank = idx * 2 + (0 if full else 1)
             qualifier = ("origin" if full
                          else "processed here, ingredients may be imported")
@@ -386,6 +411,7 @@ def rank_products(products: list[Product], *, preference: list[str] | None = Non
             rank = len(preference) * 2
             label = "Other country"
             matched_country, matched_field = "", ""
+            full = origin.claim_type in FULL_CLAIMS
 
         ranked.append(RankedProduct(
             product_id=p.id, product_name=p.name, price=p.price, rank=rank,
