@@ -86,6 +86,17 @@ class ProductOrigin(BaseModel):
     source: str = ""
     note: str = ""
     evidence_count: int = 0
+    # Per-field claim attribution. Fields are merged across evidence rows,
+    # so a single claim_type cannot describe both: one source may assert
+    # "Product of Italy" about the ingredients while another says only
+    # "Made in Canada" about the processing. Ranking reads the claim that
+    # belongs to the field it actually matched.
+    ingredient_claim: str = ""
+    manufactured_claim: str = ""
+    # Countries named anywhere in this product's evidence, including rows
+    # too weak to resolve (importer addresses, conflicting records). Used
+    # to warn rather than to rank — never treated as provenance.
+    seen_countries: list[str] = Field(default_factory=list)
 
 
 class RankedProduct(BaseModel):

@@ -39,28 +39,78 @@ MATCH_THRESHOLD = 0.5
 
 # ─── Matching catalog products to scraped names ──────────────
 
+def _stem(word: str) -> str:
+    """Crude singular fold, matching the container's own tokenizer.
+
+    Retailer listings and catalogs disagree on number — "Bananas" vs
+    "Banana", "Roma Tomatoes" vs "Roma Tomato" — and without this the
+    two-shared-token rule drops produce that used to match.
+    """
+    if len(word) > 3 and word.endswith("es") and word[-3] in "oshxz":
+        return word[:-2]          # tomatoes -> tomato, boxes -> box
+    if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+        return word[:-1]
+    return word
+
+
 def _tokens(text: str) -> set[str]:
-    return {w for w in re.sub(r"[^a-z0-9 ]", " ", (text or "").lower()).split()
+    return {_stem(w) for w in re.sub(r"[^a-z0-9 ]", " ", (text or "").lower()).split()
             if len(w) > 2}
 
 
 def overlap(a: str, b: str) -> float:
-    """Shared significant tokens over the smaller token set."""
+    """Shared significant tokens over the smaller token set.
+
+    Kept because retailer listings are verbose ("No Name Basmati Rice, 2
+    kg" vs a catalog "Basmati Rice 2kg") and a symmetric measure punishes
+    that. On its own it is far too permissive — see match_product.
+    """
     ta, tb = _tokens(a), _tokens(b)
     if not ta or not tb:
         return 0.0
     return len(ta & tb) / min(len(ta), len(tb))
 
 
+def _shared(a: str, b: str) -> int:
+    return len(_tokens(a) & _tokens(b))
+
+
 def match_product(name: str, products: list[Product]) -> Product | None:
-    """Best catalog product for a scraped name, or None below threshold."""
-    best: Product | None = None
-    best_score = 0.0
+    """Best catalog product for a scraped name, or None if unsure.
+
+    Coverage alone is not enough: a single-token query like "Milk 2L"
+    reduces to {milk} and covers 100% of itself against "Milk Chocolate
+    Cadbury". Attaching a milk label's origin to a chocolate bar is a
+    silent, confidently wrong answer, so two further conditions apply:
+
+      * at least TWO significant tokens must be shared whenever both
+        names have two or more to give
+      * the top score must be unambiguous. Near-ties across different
+        products ("Ground Beef Lean" vs "Ground Beef Medium 900g") mean
+        the name does not identify one product, and guessing is worse
+        than declining.
+    """
+    scored: list[tuple[float, int, Product]] = []
     for p in products:
         score = max(overlap(name, p.name), overlap(name, f"{p.brand} {p.name}"))
-        if score > best_score:
-            best, best_score = p, score
-    return best if best_score >= MATCH_THRESHOLD else None
+        shared = max(_shared(name, p.name), _shared(name, f"{p.brand} {p.name}"))
+        if score < MATCH_THRESHOLD:
+            continue
+        # Gate on the CATALOG name, not on min(): a one-token query was
+        # exempting itself from the very rule meant to catch it, so
+        # "Milk 2L" still matched "Milk Chocolate Cadbury".
+        if shared < 2 and len(_tokens(p.name)) >= 2:
+            continue
+        scored.append((score, shared, p))
+
+    if not scored:
+        return None
+    scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
+    if len(scored) > 1:
+        (s0, n0, _), (s1, n1, _) = scored[0], scored[1]
+        if abs(s0 - s1) < 1e-9 and n0 == n1:
+            return None          # ambiguous — decline rather than guess
+    return scored[0][2]
 
 
 def _now() -> str:

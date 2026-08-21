@@ -278,3 +278,152 @@ def test_triage_returns_hints_never_countries():
 
     for c in triage_candidates(db.load_all_products()):
         assert set(c) == {"product_id", "product_name", "reason", "status"}
+
+
+# ─── Regressions found by adversarial review ─────────────────
+
+def test_split_evidence_merges_across_rows():
+    """One source knows the ingredients, another the processing.
+
+    Reading fields off only the strongest row dropped half the
+    provenance and let an excluded ingredient origin through — the exact
+    case this module exists to catch.
+    """
+    from pantry_planner import db
+    from pantry_planner.origins import rank_products, resolve_all
+
+    db.save_origin_evidence([
+        _ev(source="open-food-facts", ingredient_origin="United States",
+            claim_type="made-in", confidence="medium"),
+        _ev(source="label-photo", manufactured_in="Canada",
+            claim_type="made-in", verbatim="Made in Canada", confidence="high"),
+    ])
+    o = resolve_all([1])[1]
+    assert o.status == "resolved"
+    assert o.ingredient_origin == "United States"
+    assert o.manufactured_in == "Canada"
+
+    r = rank_products([_product(1)], preference=["Canada"],
+                      exclude=["United States"])
+    assert not r.ranked
+    assert r.excluded[0].matched_field == "ingredient_origin"
+
+
+def test_single_record_listing_many_countries_is_a_blend_not_a_conflict():
+    """Bertolli genuinely lists Italy, Spain, Argentina and Peru."""
+    from pantry_planner import db
+    from pantry_planner.origins import resolve_all
+
+    db.save_origin_evidence([
+        _ev(claim_type="product-of", manufactured_in="Italy",
+            ingredient_origin="Italy, Spain, Argentina and Peru"),
+    ])
+    assert resolve_all([1])[1].status == "resolved"
+
+
+def test_demonyms_do_not_over_match():
+    from pantry_planner.origins import country_matches
+
+    assert not country_matches("British Columbia, Canada", "United Kingdom")
+    assert country_matches("British Columbia, Canada", "Canada")
+    assert not country_matches("South America", "United States")
+    assert not country_matches("Central America", "United States")
+
+
+def test_component_country_names_do_not_fire_inside_longer_ones():
+    from pantry_planner.origins import country_matches
+
+    assert not country_matches("Papua New Guinea", "Guinea")
+    assert not country_matches("Northern Ireland", "Ireland")
+    assert country_matches("Northern Ireland", "United Kingdom")
+
+
+def test_dotted_and_accented_forms_match():
+    from pantry_planner.origins import country_matches
+
+    for form in ("U.S.A.", "U.S.", "usa", "us"):
+        assert country_matches("Made in USA", form), form
+    assert country_matches("Hecho en Mexico", "México")
+
+
+def test_unresolved_product_warns_when_evidence_names_an_excluded_country():
+    """Unresolved is not the same as clean — silence would read as a pass."""
+    from pantry_planner import db
+    from pantry_planner.origins import rank_products
+
+    db.save_origin_evidence([
+        _ev(manufactured_in="United States", claim_type="made-in"),
+        _ev(manufactured_in="Canada", claim_type="made-in"),
+    ])
+    r = rank_products([_product(1)], preference=["Canada"],
+                      exclude=["United States"])
+    assert r.unranked[0].reason == "conflicting"
+    assert "WARNING" in r.unranked[0].detail
+    assert "United States" in r.unranked[0].detail
+
+
+# ─── Regressions found by pre-merge review ───────────────────
+
+def test_merged_field_keeps_its_own_claim_not_the_strongest_rows():
+    """A processing country must not inherit a full origin claim.
+
+    OFF supplying "Product of Italy" about the ingredients and a label
+    supplying "Made in Canada" about the processing previously resolved to
+    claim_type='product-of' with country='Canada', promoting Canada into
+    the ">=98% domestic content" tier it had not earned.
+    """
+    from pantry_planner import db
+    from pantry_planner.origins import rank_products, resolve_all
+
+    db.save_origin_evidence([
+        _ev(source="open-food-facts", claim_type="product-of",
+            ingredient_origin="Italy", confidence="medium"),
+        _ev(source="label-photo", claim_type="made-in",
+            manufactured_in="Canada", verbatim="Made in Canada",
+            confidence="high"),
+    ])
+    o = resolve_all([1])[1]
+    assert o.manufactured_claim == "made-in"
+    assert o.ingredient_claim == "product-of"
+
+    r = rank_products([_product(1)], preference=["Canada", "Italy"])
+    top = r.ranked[0]
+    assert top.rank == 1, "must be the processing tier, not the origin tier"
+    assert "ingredients may be imported" in top.tier_label
+
+
+def test_receipt_matches_the_claim_it_describes():
+    """verbatim/source/confidence must come from the row behind the claim."""
+    from pantry_planner import db
+    from pantry_planner.origins import resolve_all
+
+    db.save_origin_evidence([
+        _ev(source="open-food-facts", claim_type="product-of",
+            ingredient_origin="Italy", verbatim="Origin: Italy",
+            confidence="medium"),
+        _ev(source="label-photo", claim_type="made-in",
+            manufactured_in="Canada", verbatim="Made in Canada",
+            confidence="high"),
+    ])
+    o = resolve_all([1])[1]
+    assert o.claim_type == "made-in"
+    assert o.verbatim == "Made in Canada"
+    assert o.source == "label-photo"
+
+
+def test_importer_only_evidence_still_warns_when_it_names_an_excluded_country():
+    """Unresolved is not clean — an importer address naming an excluded
+    country must be surfaced rather than passing silently."""
+    from pantry_planner import db
+    from pantry_planner.origins import rank_products
+
+    db.save_origin_evidence([
+        _ev(source="label-photo", claim_type="packaged-in",
+            manufactured_in="United States", importer_only=True,
+            verbatim="Imported by Acme Foods, Buffalo NY"),
+    ])
+    r = rank_products([_product(1)], preference=["Canada"],
+                      exclude=["United States"])
+    assert not r.ranked and not r.excluded
+    assert "WARNING" in r.unranked[0].detail
+    assert "United States" in r.unranked[0].detail
