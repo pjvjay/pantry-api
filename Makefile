@@ -1,4 +1,4 @@
-.PHONY: venv install dev seed demo test lint eval eval-cascade eval-three-phase burr-ui clean
+.PHONY: venv install dev seed demo test lint eval eval-cascade eval-three-phase eval-origins burr-ui clean
 
 # Portable across macOS/Linux: use python3 outside a venv; venv exposes `python`
 PYTHON ?= python3
@@ -37,6 +37,9 @@ eval-cascade:
 
 eval-three-phase:
 	ROUTING_STRATEGY=three_phase $(PYTHON) -m evals.run
+
+eval-origins:
+	$(PYTHON) -m evals.origin_eval
 
 eval-compare:
 	$(PYTHON) -m evals.router_eval
