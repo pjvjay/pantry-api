@@ -104,6 +104,16 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
             flat.append((ri, li))
             specs.append(IngredientSpec(name=ing.name))
 
+    # An empty library has a correct answer further down (the days == 0
+    # gate), but retrieval crashed before it could ever be reached. Check
+    # here so the clean 409 actually fires.
+    if not specs:
+        execution.aborted = PlanAlert(
+            stage="w1_options", code=GateCode.unavailable_within_constraints,
+            message="The recipe library is empty, so there is nothing to plan.",
+            details=[])
+        raise PlanAborted(execution)
+
     with Session(db.engine()) as s:
         pools = _batched_pools(s, specs, c, lat, lon, max_distance_km,
                                execution, "w1_options", "library retrieval")
