@@ -59,7 +59,17 @@ the rule above it. NEVER let a lower rule override a higher one:
      better-rated brand when prices are close, and say so in the
      reasoning. Never let it override rules 1-3.
 
-7. Products carry their best store offer ("store", offer "price",
+7. ORIGIN, when a product carries one. "origin" gives the country, the
+   claim type, and the ingredient origin where they differ. Products
+   positively evidenced as coming from an excluded country have already
+   been removed from the pool — you will never see one. Use origin only to
+   break ties among equally-good matches (rules 1-3), preferring a listed
+   preference order when the constraints carry one. A product with NO
+   origin block is simply unmeasured: that is NOT evidence it is foreign or
+   domestic, so never penalise or reward it for the absence, and never
+   assert a country you were not given.
+
+8. Products carry their best store offer ("store", offer "price",
    "distance_km"). A product flagged "substitute": true is a same-aisle
    alternative fetched because the direct pool was thin — choose it only
    when no direct match fits, and flag the swap in the reasoning.

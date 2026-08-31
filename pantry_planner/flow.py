@@ -71,18 +71,27 @@ def load_recipe(state: State, recipe_slug: str) -> tuple[dict, State]:
     return result, state.update(recipe=recipe)
 
 
-@action(reads=[], writes=["products"])
-def load_products(state: State) -> tuple[dict, State]:
+@action(reads=["recipe"], writes=["products", "origins", "origin_dropped"])
+def load_products(state: State, exclude: list | None = None,
+                  preference: list | None = None) -> tuple[dict, State]:
     products = db.load_all_products()
-    result = {"product_count": len(products)}
-    return result, state.update(products=products)
+    recipe = state.get("recipe")
+    kept, dropped, origins = apply_origin_constraint(
+        products, recipe.ingredients if recipe else [],
+        exclude=exclude, preference=preference)
+    result = {"product_count": len(kept), "origin_dropped": len(dropped)}
+    return result, state.update(products=kept, origins=origins,
+                                origin_dropped=dropped)
 
 
 @action(reads=[], writes=["recipe", "products", "parsed_input", "location",
-                          "plan_trace", "brand_stats", "retrieval_stats"])
+                          "plan_trace", "brand_stats", "retrieval_stats",
+                          "origins", "origin_dropped"])
 def parse_and_retrieve(state: State, recipe_text: str,
                        lat: float | None = None,
-                       lon: float | None = None) -> tuple[dict, State]:
+                       lon: float | None = None,
+                       exclude: list | None = None,
+                       preference: list | None = None) -> tuple[dict, State]:
     """NL2SQL entrypoint: pasted recipe text → query-plan execution
     (t1 existence → t2 options → t3 brand stats → t4 lookups) producing an
     ad-hoc Recipe + store-priced candidate pools. Replaces load_recipe +
@@ -91,14 +100,19 @@ def parse_and_retrieve(state: State, recipe_text: str,
     from . import nlsearch
 
     r = nlsearch.run_query_plan(recipe_text, lat=lat, lon=lon)
+    kept, dropped, origins = apply_origin_constraint(
+        r.products, r.recipe.ingredients, exclude=exclude,
+        preference=preference)
     result = {
         "ingredient_count": len(r.recipe.ingredients),
-        "product_count": len(r.products),
+        "product_count": len(kept),
+        "origin_dropped": len(dropped),
         "plan_steps": [s.step_id for s in r.execution.steps],
         "parse_cost_usd": r.parsed.cost_usd,
     }
     return result, state.update(
-        recipe=r.recipe, products=r.products, parsed_input=r.parsed,
+        recipe=r.recipe, products=kept, origins=origins,
+        origin_dropped=dropped, parsed_input=r.parsed,
         location={"lat": r.lat, "lon": r.lon, "max_km": r.max_km},
         plan_trace=r.execution.steps, brand_stats=r.brand_stats,
         retrieval_stats=r.stats)
@@ -136,6 +150,7 @@ def select_products(state: State) -> tuple[dict, State]:
         model=preselect.model,
         enable_thinking=False,
         constraints=_selector_constraints(parsed, state.get("brand_stats")),
+        origins_by_id=state.get("origins") or {},
     )
 
     span = llm_span(
@@ -265,6 +280,9 @@ def build_plan(state: State) -> tuple[dict, State]:
     decision: EscalationDecision = state["escalation_decision"]
     ingredients_by_line = {i.line_no: i for i in recipe.ingredients}
 
+    from . import origins as origins_mod
+    origins_map = state.get("origins") or {}
+
     line_items: list[PlanLineItem] = []
     total_cost = 0.0
     for s in final.selections:
@@ -287,6 +305,7 @@ def build_plan(state: State) -> tuple[dict, State]:
             model_used=final.model_used,
             store_name=prod.store_name,
             store_price=prod.store_price,
+            origin=origins_mod.origin_receipt(origins_map.get(prod.id)),
         ))
         total_cost += charged
 
@@ -299,6 +318,10 @@ def build_plan(state: State) -> tuple[dict, State]:
         routing_strategy=get_router().name,
         preselected_model=preselect.model,
         escalated=decision.escalate,
+        origin_coverage=origins_mod.basket_coverage(
+            [(li.product_id, li.price) for li in line_items],
+            origins=origins_map or None,
+            excluded_lines=len(state.get("origin_dropped") or [])),
         total_llm_cost_usd=round(
             preselect.routing_cost_usd + final.cost_usd
             + (parsed.cost_usd if parsed else 0.0), 6
@@ -315,10 +338,59 @@ def build_plan(state: State) -> tuple[dict, State]:
 
 # ─── Application builder ─────────────────────────────────────
 
+# ─── Origin constraint ───────────────────────────────────────
+# Applied AFTER retrieval and BEFORE selection: the model is never shown a
+# product the user has excluded, so it cannot pick one, and the plan cannot
+# quietly contain one. Products with no evidence are kept — absence is not a
+# verdict — and the coverage figure on the finished plan is what stops that
+# leniency from reading as a clean bill of health.
+
+def apply_origin_constraint(products, ingredients, *, exclude, preference):
+    """Filter a candidate pool on origin. Returns (kept, dropped, origins).
+
+    Raises PlanAborted(excluded_by_origin) when the exclusion empties an
+    ingredient's pool entirely — reporting WHICH ingredient and what was
+    removed, in the same shape the price/diet/distance gates already use.
+    """
+    from . import origins as origins_mod
+    from .nlsearch.plan import GateCode, PlanAlert, PlanExecution
+    from .nlsearch.planner import PlanAborted
+
+    # Resolved unconditionally: provenance receipts and the coverage figure
+    # are worth carrying even when the caller set no filter — a basket you
+    # can audit afterwards is the point.
+    origins = origins_mod.resolve_all([p.id for p in products])
+    if not exclude:
+        return products, [], origins
+
+    kept, dropped = origins_mod.filter_pool(
+        products, exclude=exclude, origins=origins)
+
+    if dropped and not kept:
+        details = [{
+            "name": getattr(i, "name", str(i)),
+            "reason": "every candidate is evidenced as coming from an "
+                      "excluded country",
+            "suggestions": [
+                f"{p.name} (${p.price:.2f}) — {country} via {field}"
+                for p, country, field in dropped[:5]
+            ],
+        } for i in (ingredients or [])]
+        raise PlanAborted(PlanExecution(steps=[], aborted=PlanAlert(
+            stage="origin_filter", code=GateCode.excluded_by_origin,
+            message=(f"Excluding {', '.join(exclude)} removed every remaining "
+                     f"candidate. Relax the exclusion, or accept one of the "
+                     f"removed products listed below."),
+            details=details)))
+    return kept, dropped, origins
+
+
 def build_application(recipe_slug: str | None = None,
                       recipe_text: str | None = None,
                       lat: float | None = None,
-                      lon: float | None = None) -> Application:
+                      lon: float | None = None,
+                      exclude: list | None = None,
+                      preference: list | None = None) -> Application:
     """Construct the Burr Application for one run.
 
     Two entry variants sharing the router/selector/plan tail:
@@ -358,7 +430,9 @@ def build_application(recipe_slug: str | None = None,
         builder = (
             ApplicationBuilder()
             .with_actions(parse_and_retrieve.bind(recipe_text=recipe_text,
-                                                  lat=lat, lon=lon),
+                                                  lat=lat, lon=lon,
+                                                  exclude=exclude,
+                                                  preference=preference),
                           *common_actions)
             .with_transitions(("parse_and_retrieve", "preselect_model"),
                               *shared_tail)
@@ -369,7 +443,9 @@ def build_application(recipe_slug: str | None = None,
         builder = (
             ApplicationBuilder()
             .with_actions(load_recipe.bind(recipe_slug=recipe_slug),
-                          load_products, *common_actions)
+                          load_products.bind(exclude=exclude,
+                                             preference=preference),
+                          *common_actions)
             .with_transitions(("load_recipe", "load_products"),
                               ("load_products", "preselect_model"),
                               *shared_tail)
@@ -379,21 +455,29 @@ def build_application(recipe_slug: str | None = None,
     return builder.with_tracker(make_tracker()).build()
 
 
-def run(recipe_slug: str) -> ShoppingPlan:
-    """Run the classic pipeline end-to-end. Returns the final ShoppingPlan."""
-    app = build_application(recipe_slug=recipe_slug)
+def run(recipe_slug: str, *, exclude: list | None = None,
+        preference: list | None = None) -> ShoppingPlan:
+    """Run the classic pipeline end-to-end. Returns the final ShoppingPlan.
+
+    `exclude` removes candidates positively evidenced as coming from those
+    countries; `preference` is passed to the selector as soft guidance.
+    """
+    app = build_application(recipe_slug=recipe_slug, exclude=exclude,
+                            preference=preference)
     _action, _result, state = app.run(halt_after=["build_plan"])
     return state["plan"]
 
 
 def run_nl(recipe_text: str, lat: float | None = None,
-           lon: float | None = None) -> ShoppingPlan:
+           lon: float | None = None, *, exclude: list | None = None,
+           preference: list | None = None) -> ShoppingPlan:
     """Run the NL2SQL pipeline on pasted recipe text.
 
     Raises nlsearch.UnparseableRecipe when no ingredient list is found
     (API → 422 with guidance) and nlsearch.PlanAborted when a query-plan
     gate fires (API → 409 with the PlanAlert + trace).
     """
-    app = build_application(recipe_text=recipe_text, lat=lat, lon=lon)
+    app = build_application(recipe_text=recipe_text, lat=lat, lon=lon,
+                            exclude=exclude, preference=preference)
     _action, _result, state = app.run(halt_after=["build_plan"])
     return state["plan"]

@@ -9,7 +9,7 @@ from __future__ import annotations
 import contextlib
 import os
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from . import db, flow
@@ -93,6 +93,10 @@ class NLPlanRequest(BaseModel):
     recipe_text: str = Field(max_length=8000)   # public endpoint: bound the paste
     lat: float | None = None
     lon: float | None = None
+    # Provenance: exclude removes candidates positively evidenced as coming
+    # from these countries; preference is soft guidance to the selector.
+    exclude_origin: list[str] = Field(default_factory=list, max_length=50)
+    preference: list[str] = Field(default_factory=list, max_length=50)
 
 
 @app.post("/plan/nl", response_model=ShoppingPlan)
@@ -104,7 +108,9 @@ def plan_nl(req: NLPlanRequest) -> ShoppingPlan:
     from .nlsearch import PlanAborted, UnparseableRecipe
 
     try:
-        return flow.run_nl(req.recipe_text, lat=req.lat, lon=req.lon)
+        return flow.run_nl(req.recipe_text, lat=req.lat, lon=req.lon,
+                           exclude=req.exclude_origin,
+                           preference=req.preference)
     except UnparseableRecipe:
         raise HTTPException(status_code=422, detail=(
             "Couldn't find an ingredient list in that text. Paste a recipe "
@@ -127,6 +133,8 @@ class WeekPlanRequest(BaseModel):
     lat: float | None = None
     lon: float | None = None
     max_distance_km: float | None = None
+    exclude_origin: list[str] = Field(default_factory=list, max_length=50)
+    preference: list[str] = Field(default_factory=list, max_length=50)
 
 
 @app.post("/plan/week", response_model=WeekPlan)
@@ -141,16 +149,23 @@ def plan_week(req: WeekPlanRequest) -> WeekPlan:
         return weekplan.plan_week(
             days=req.days, max_total_budget=req.max_total_budget,
             exclude_tags=req.exclude_tags, lat=req.lat, lon=req.lon,
-            max_distance_km=req.max_distance_km)
+            max_distance_km=req.max_distance_km,
+            exclude_origin=req.exclude_origin, preference=req.preference)
     except PlanAborted as e:
         raise HTTPException(status_code=409, detail=e.execution.model_dump(mode="json"))
 
 
 @app.post("/plan/{slug}", response_model=ShoppingPlan)
-def plan_recipe(slug: str) -> ShoppingPlan:
-    """Run the pipeline for one recipe. Returns the shopping plan."""
+def plan_recipe(slug: str, exclude_origin: list[str] | None = Query(default=None),
+                preference: list[str] | None = Query(default=None)) -> ShoppingPlan:
+    """Run the pipeline for one recipe. Returns the shopping plan.
+
+    `exclude_origin` removes candidates positively evidenced as coming from
+    those countries — never candidates that merely lack evidence. The
+    returned plan carries per-line provenance and a spend-weighted coverage
+    figure saying how much of the basket was actually checked."""
     try:
-        return flow.run(slug)
+        return flow.run(slug, exclude=exclude_origin, preference=preference)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
