@@ -35,7 +35,9 @@ import unicodedata
 
 from .models import (
     ExcludedProduct,
+    OriginCoverage,
     OriginRanking,
+    OriginReceipt,
     Product,
     ProductOrigin,
     RankedProduct,
@@ -423,7 +425,13 @@ def rank_products(products: list[Product], *, preference: list[str] | None = Non
     unranked.sort(key=lambda u: (u.reason, u.product_name))
 
     total = len(products)
-    note = (f"{len(ranked)} of {total} products carry origin evidence. "
+    # Evidenced = ranked + excluded. An excluded product is the most
+    # thoroughly evidenced kind there is; counting only `ranked` reported
+    # "0 of 4 carry origin evidence" when all four did, and understated what
+    # is known precisely when the filter was working hardest.
+    evidenced = len(ranked) + len(excluded)
+    note = (f"{evidenced} of {total} products carry origin evidence "
+            f"({len(excluded)} excluded by your filter). "
             f"{len(unranked)} are unverified and are NOT ranked — no source "
             f"published an origin for them, which is not evidence that they "
             f"are foreign or domestic.")
@@ -478,3 +486,103 @@ def triage_candidates(products: list[Product],
                             "status": o.status if o else "unknown"})
                 break
     return out
+
+
+# ─── Planning-facing surface ─────────────────────────────────
+# Everything above answers "how do these products rank?". The planners ask a
+# different question — "may I put this in a basket?" — and until this module
+# answered it, origin evidence had no effect on any plan.
+
+def origin_receipt(origin: ProductOrigin | None) -> OriginReceipt | None:
+    """Compress a resolved origin into the receipt carried on a plan line."""
+    if origin is None:
+        return None
+    return OriginReceipt(
+        status=origin.status, country=origin.country,
+        claim_type=origin.claim_type,
+        ingredient_origin=origin.ingredient_origin,
+        manufactured_in=origin.manufactured_in,
+        source=origin.source, confidence=origin.confidence,
+        verbatim=origin.verbatim)
+
+
+def filter_pool(products: list[Product], *, exclude: list[str] | None = None,
+                origins: dict[int, ProductOrigin] | None = None
+                ) -> tuple[list[Product], list[tuple[Product, str, str]]]:
+    """Split a candidate pool into (kept, dropped) on origin evidence.
+
+    Only positive evidence drops a product. A product with no evidence is
+    KEPT — absence is not a verdict — which is why the caller must also
+    report coverage: silently keeping the unmeasured is how missing data
+    becomes a competitive advantage.
+
+    Dropped entries carry (product, excluded_country, matched_field) so the
+    caller can say what was removed and why.
+    """
+    exclude = [e for e in (exclude or []) if e.strip()]
+    if not exclude:
+        return list(products), []
+    if origins is None:
+        origins = resolve_all([p.id for p in products])
+
+    kept: list[Product] = []
+    dropped: list[tuple[Product, str, str]] = []
+    for p in products:
+        origin = origins.get(p.id)
+        hit = _match_exclusion(origin, exclude) if (
+            origin and origin.status == "resolved") else None
+        if hit:
+            dropped.append((p, hit[0], hit[1]))
+        else:
+            kept.append(p)
+    return kept, dropped
+
+
+def basket_coverage(lines: list[tuple[int, float]], *,
+                    origins: dict[int, ProductOrigin] | None = None,
+                    excluded_lines: int = 0,
+                    floor: float | None = None) -> OriginCoverage:
+    """Coverage for a chosen basket: (product_id, charged_price) per line.
+
+    Count- and spend-weighted are both reported because they diverge: the
+    one line somebody photographed is often the cheapest thing in the cart.
+    """
+    from .config import settings
+
+    if floor is None:
+        floor = settings().origin_min_coverage
+    if origins is None:
+        origins = resolve_all([pid for pid, _ in lines])
+
+    total = len(lines)
+    spend_total = sum(price for _, price in lines)
+    known = [(pid, price) for pid, price in lines
+             if (o := origins.get(pid)) is not None and o.status == "resolved"]
+    spend_known = sum(price for _, price in known)
+
+    count_fraction = (len(known) / total) if total else 0.0
+    spend_fraction = (spend_known / spend_total) if spend_total else 0.0
+    # Spend is the binding measure: it is what the money actually did.
+    meets = spend_fraction >= floor if total else True
+
+    if not total:
+        note = "Empty basket."
+    elif meets:
+        note = (f"Origin known for {len(known)} of {total} lines "
+                f"({spend_fraction:.0%} of spend).")
+    else:
+        note = (f"UNVERIFIED BASKET — origin known for only {len(known)} of "
+                f"{total} lines ({spend_fraction:.0%} of spend, floor "
+                f"{floor:.0%}). The unknown lines are not evidence of foreign "
+                f"origin, but this basket has not been checked well enough to "
+                f"call it clean.")
+    if excluded_lines:
+        note += f" {excluded_lines} candidate(s) were excluded by origin."
+
+    return OriginCoverage(
+        lines_total=total, lines_known=len(known),
+        lines_excluded_origin=excluded_lines,
+        count_fraction=round(count_fraction, 4),
+        spend_total=round(spend_total, 2), spend_known=round(spend_known, 2),
+        spend_fraction=round(spend_fraction, 4),
+        meets_floor=meets, floor=floor, note=note)

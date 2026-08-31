@@ -1,6 +1,5 @@
 """
-System prompts + tool schemas for the LLM calls (selector, classifier,
-origin resolver).
+System prompts + tool schemas for the LLM calls (selector, classifier).
 
 Kept as constants (not templates) because there's nothing to interpolate —
 the messages carry the recipe + product data. Prompts stay in one file so
@@ -59,7 +58,17 @@ the rule above it. NEVER let a lower rule override a higher one:
      better-rated brand when prices are close, and say so in the
      reasoning. Never let it override rules 1-3.
 
-7. Products carry their best store offer ("store", offer "price",
+7. ORIGIN, when a product carries one. "origin" gives the country, the
+   claim type, and the ingredient origin where they differ. Products
+   positively evidenced as coming from an excluded country have already
+   been removed from the pool — you will never see one. Use origin only to
+   break ties among equally-good matches (rules 1-3), preferring a listed
+   preference order when the constraints carry one. A product with NO
+   origin block is simply unmeasured: that is NOT evidence it is foreign or
+   domestic, so never penalise or reward it for the absence, and never
+   assert a country you were not given.
+
+8. Products carry their best store offer ("store", offer "price",
    "distance_km"). A product flagged "substitute": true is a same-aisle
    alternative fetched because the direct pool was thin — choose it only
    when no direct match fits, and flag the swap in the reasoning.
@@ -198,74 +207,6 @@ CLASSIFIER_TOOL = {
             "reasoning": {
                 "type": "string",
                 "description": "1-3 sentences explaining the assessment.",
-            },
-        },
-    },
-}
-
-
-# ─── Country-of-origin resolver (origins.py LLM fallback) ─────
-# Only products that no deterministic heuristic rule covered reach this
-# call, in one cheap Haiku batch. Results are cached in the DB so each
-# product pays for at most one call ever.
-ORIGIN_SYSTEM = """\
-You determine the most likely country of origin for grocery products
-sold in a Canadian supermarket (Vancouver, BC).
-
-For each product, infer where the item was most likely grown, raised,
-or produced — NOT where the brand is headquartered, unless that is the
-best available signal. Reason from:
-  - The product itself (e.g. basmati rice is overwhelmingly grown in
-    India/Pakistan; canola oil sold in Canada is Canadian)
-  - Naming conventions and protected designations (parmesan, passata)
-  - What Canadian supermarkets typically stock for that category
-    (fresh produce, dairy, and eggs are usually domestic)
-
-Rules:
-  - country: the single most likely country, in English ("Canada",
-    "India", "Italy"). Never a region or "imported".
-  - confidence: 0.9+ only for near-certain cases; 0.5-0.7 for category-
-    typical guesses; below 0.4 use country "Unknown".
-  - reasoning: one short sentence.
-
-Return your answers via the submit_origins tool, one entry per product,
-in the same order as the input.
-"""
-
-
-ORIGIN_TOOL = {
-    "name": "submit_origins",
-    "description": "Submit the inferred country of origin for each product.",
-    "input_schema": {
-        "type": "object",
-        "required": ["origins"],
-        "properties": {
-            "origins": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "required": ["product_id", "country", "confidence", "reasoning"],
-                    "properties": {
-                        "product_id": {
-                            "type": "integer",
-                            "description": "ID of the product from the input.",
-                        },
-                        "country": {
-                            "type": "string",
-                            "description": "Most likely country of origin, in English.",
-                        },
-                        "confidence": {
-                            "type": "number",
-                            "minimum": 0.0,
-                            "maximum": 1.0,
-                            "description": "How confident the inference is.",
-                        },
-                        "reasoning": {
-                            "type": "string",
-                            "description": "One sentence explaining the inference.",
-                        },
-                    },
-                },
             },
         },
     },

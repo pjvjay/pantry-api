@@ -97,6 +97,8 @@ def build_existence_sql(ingredients: list[IngredientSpec]) -> tuple[str, dict]:
     if not term_rows:                        # fully tokenless recipe: no matches
         params["noterm"] = ""
         term_rows = ["(-1, :noterm, 1)"]
+    if not count_rows:                       # sibling of the guard above —
+        count_rows = ["(-1, 0, 0)"]          # an empty VALUES () is a syntax error
     sql = (
         f"WITH ing_terms(ing_no, term, base) AS (VALUES {', '.join(term_rows)}),\n"
         f" ing_counts(ing_no, n_base, n_all) AS (VALUES {', '.join(count_rows)}),\n"
@@ -165,6 +167,16 @@ def build_options_sql(c: Constraints, ingredients: list[IngredientSpec],
         rank_join = ""
         rank_order = "b.store_price ASC, b.id ASC"
 
+    # A VALUES list must never be empty: `AS (VALUES )` is a syntax error, and
+    # it is reachable — an empty recipe library, or a recipe whose only
+    # ingredient name yields no significant tokens, both crashed /plan/week
+    # with a 500. A sentinel row that can never join is the safe empty set.
+    if not term_rows:
+        params["noterm"] = ""
+        term_rows = ["(-1, :noterm)"]
+    if not count_rows:
+        count_rows = ["(-1, 0)"]
+
     sql = (
         f"WITH ing_terms(ing_no, term) AS (VALUES {', '.join(term_rows)}),\n"
         f" ing_counts(ing_no, ntok) AS (VALUES {', '.join(count_rows)})"
@@ -206,7 +218,7 @@ def build_stats_sql(pool_ids: list[int]) -> tuple[str, dict]:
     subqueries (joining stores x reviews directly would multiply rows and
     inflate COUNT); regrouped per ingredient/brand in Python."""
     params = {f"pid{i}": pid for i, pid in enumerate(pool_ids)}
-    in_list = ", ".join(f":pid{i}" for i in range(len(pool_ids)))
+    in_list = ", ".join(f":pid{i}" for i in range(len(pool_ids))) or "NULL"
     sql = (
         "SELECT p.id AS product_id, p.name AS name, p.brand AS brand,\n"
         "       ps.min_price AS min_price, ps.avg_price AS avg_price,\n"
@@ -262,7 +274,10 @@ def build_price_matrix_sql(product_ids: list[int], lat: float, lon: float,
     distance — the input to the deterministic split-trip enumeration."""
     params: dict = {f"mp{i}": pid for i, pid in enumerate(product_ids)}
     _location_params(params, lat, lon)
-    in_list = ", ".join(f":mp{i}" for i in range(len(product_ids)))
+    # "IN ()" parses on SQLite and is a syntax error on Postgres — an empty
+    # basket here would crash only in production. IN (NULL) matches nothing
+    # on both.
+    in_list = ", ".join(f":mp{i}" for i in range(len(product_ids))) or "NULL"
     where = [f"sp.product_id IN ({in_list})"]
     if max_km is not None:
         params["maxdist2"] = max_km * max_km

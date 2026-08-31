@@ -150,22 +150,32 @@ def list_products(search: str | None = None) -> list[ProductSummary]:
 # ─── Planning tools (SLOW — run the LLM pipeline) ────────────
 
 @server.tool()
-def plan_recipe(slug: str) -> ShoppingPlan:
+def plan_recipe(slug: str, exclude_origin: list[str] | None = None,
+                preference: list[str] | None = None) -> ShoppingPlan:
     """Run the full shopping-plan pipeline for a seeded recipe: an LLM
     matches every ingredient to the best-value product, with a model
     router escalating hard cases. SLOW (10-60s) and costs real Claude
-    API credits. Get slugs from list_recipes first."""
+    API credits. Get slugs from list_recipes first.
+
+    `exclude_origin` drops candidates positively evidenced as coming from
+    those countries (e.g. ["United States"]) before the model ever sees
+    them — never candidates that merely lack evidence. `preference` is soft
+    guidance. The plan carries per-line provenance and `origin_coverage`:
+    read its `spend_fraction` and `meets_floor` before describing a basket
+    as clean, because unverified lines are not verified-clean lines."""
     from . import flow
 
     try:
-        return flow.run(slug)
+        return flow.run(slug, exclude=exclude_origin, preference=preference)
     except ValueError as e:
         raise ToolError(f"{e}. Call list_recipes for valid slugs.") from e
 
 
 @server.tool()
 def plan_from_text(recipe_text: str, lat: float | None = None,
-                   lon: float | None = None) -> ShoppingPlan:
+                   lon: float | None = None,
+                   exclude_origin: list[str] | None = None,
+                   preference: list[str] | None = None) -> ShoppingPlan:
     """Plan a shopping basket from PASTED RECIPE TEXT — include the full
     ingredient list (quantities optional) and any shopping notes
     (budget, dietary exclusions); lat/lon optionally set the shopping
@@ -175,7 +185,8 @@ def plan_from_text(recipe_text: str, lat: float | None = None,
     from .nlsearch import PlanAborted, UnparseableRecipe
 
     try:
-        return flow.run_nl(recipe_text, lat=lat, lon=lon)
+        return flow.run_nl(recipe_text, lat=lat, lon=lon,
+                           exclude=exclude_origin, preference=preference)
     except UnparseableRecipe as e:
         raise ToolError(
             "Couldn't find an ingredient list in that text. Paste a recipe "
@@ -202,7 +213,9 @@ def plan_from_text(recipe_text: str, lat: float | None = None,
 def plan_week(days: int = 5, max_total_budget: float | None = None,
               exclude_tags: list[str] | None = None,
               lat: float | None = None, lon: float | None = None,
-              max_distance_km: float | None = None) -> WeekPlan:
+              max_distance_km: float | None = None,
+              exclude_origin: list[str] | None = None,
+              preference: list[str] | None = None) -> WeekPlan:
     """Plan `days` dinners from the recipe library under an optional
     budget, rewarding ingredient overlap (a shared product is bought
     once). Returns per-day plans, the merged shopping list, overlap
@@ -217,7 +230,8 @@ def plan_week(days: int = 5, max_total_budget: float | None = None,
         return weekplan.plan_week(
             days=days, max_total_budget=max_total_budget,
             exclude_tags=exclude_tags or [], lat=lat, lon=lon,
-            max_distance_km=max_distance_km)
+            max_distance_km=max_distance_km,
+            exclude_origin=exclude_origin, preference=preference)
     except PlanAborted as e:
         alert = e.execution.aborted
         raise ToolError(

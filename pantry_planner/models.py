@@ -99,6 +99,47 @@ class ProductOrigin(BaseModel):
     seen_countries: list[str] = Field(default_factory=list)
 
 
+class OriginReceipt(BaseModel):
+    """The provenance behind one chosen plan line.
+
+    Carried on the line item so a basket can be audited without a second
+    lookup: which country, on what claim, from which source, how sure.
+    """
+    status: str = "unknown"
+    country: str = ""
+    claim_type: str = ""
+    ingredient_origin: str = ""
+    manufactured_in: str = ""
+    source: str = ""
+    confidence: str = ""
+    verbatim: str = ""
+
+
+class OriginCoverage(BaseModel):
+    """How much of a basket's provenance is actually known.
+
+    Reported BOTH count-weighted and spend-weighted, because they diverge
+    hard: a basket can be 20% covered by count and 4% by spend when the one
+    verified line is the cheapest item in it. Spend-weighting is the honest
+    denominator for "how much of this purchase did we actually check".
+
+    `meets_floor` is false when coverage is below ORIGIN_MIN_COVERAGE. A
+    plan below the floor is not wrong, but it must not be presented as
+    clean: with no floor, missing data becomes a competitive advantage,
+    because the cheapest candidate is usually the one nobody measured.
+    """
+    lines_total: int = 0
+    lines_known: int = 0
+    lines_excluded_origin: int = 0
+    count_fraction: float = 0.0
+    spend_total: float = 0.0
+    spend_known: float = 0.0
+    spend_fraction: float = 0.0
+    meets_floor: bool = True
+    floor: float = 0.0
+    note: str = ""
+
+
 class RankedProduct(BaseModel):
     """A product placed against a caller-supplied country preference."""
     product_id: int
@@ -252,6 +293,8 @@ class PlanLineItem(BaseModel):
     # Query-plan path: which store the price comes from
     store_name: str = ""
     store_price: float | None = None
+    # Provenance of this line, when origin evidence exists for it
+    origin: OriginReceipt | None = None
 
 
 class ShoppingPlan(BaseModel):
@@ -270,6 +313,8 @@ class ShoppingPlan(BaseModel):
     candidate_count: int = 0
     # Split-trip optimizer: stops-vs-cost frontier for the chosen basket
     trip_options: list[TripOption] = Field(default_factory=list)
+    # Provenance of the basket as a whole (None when no origin filter ran)
+    origin_coverage: OriginCoverage | None = None
 
 
 # ─── Weekly menu optimizer (5A) ───────────────────────────────
@@ -282,6 +327,7 @@ class WeekItem(BaseModel):
     store_name: str
     price: float
     used_by: list[str]                 # recipe names
+    origin: OriginReceipt | None = None
 
 
 class DayPlan(BaseModel):
@@ -301,4 +347,5 @@ class WeekPlan(BaseModel):
     notes: list[str] = Field(default_factory=list)
     plan_trace: list[StepResult] = Field(default_factory=list)
     trip_options: list[TripOption] = Field(default_factory=list)
+    origin_coverage: OriginCoverage | None = None
     total_llm_cost_usd: float = 0.0

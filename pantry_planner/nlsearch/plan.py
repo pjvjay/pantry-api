@@ -29,6 +29,7 @@ class GateCode(str, Enum):
     missing_ingredients = "missing_ingredients"                    # t1 abort
     unavailable_within_constraints = "unavailable_within_constraints"  # t2 abort
     budget_infeasible = "budget_infeasible"                        # t2 abort (floor)
+    excluded_by_origin = "excluded_by_origin"    # every candidate came from an excluded country
 
 
 class QueryStep(BaseModel):
