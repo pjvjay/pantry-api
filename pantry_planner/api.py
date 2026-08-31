@@ -67,6 +67,23 @@ def health() -> dict:
     }
 
 
+@app.get("/metrics")
+def metrics():
+    """Prometheus exposition. Free, no LLM calls, safe to scrape often.
+
+    /health says the process is up. This says whether it is doing its job:
+    LLM spend, plan outcomes by gate code, and origin coverage — which is
+    the series that matters most, because if coverage collapses the origin
+    filter silently stops protecting anyone."""
+    from fastapi.responses import Response
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+    from . import metrics as m
+
+    m.refresh_db_gauges()
+    return Response(generate_latest(m.REGISTRY), media_type=CONTENT_TYPE_LATEST)
+
+
 @app.get("/recipes", response_model=list[Recipe])
 def list_recipes() -> list[Recipe]:
     return db.load_all_recipes()
@@ -107,11 +124,17 @@ def plan_nl(req: NLPlanRequest) -> ShoppingPlan:
     returns 409 with the alert and the trace up to the failed step."""
     from .nlsearch import PlanAborted, UnparseableRecipe
 
+    from . import metrics as m
+
     try:
-        return flow.run_nl(req.recipe_text, lat=req.lat, lon=req.lon,
+        plan = flow.run_nl(req.recipe_text, lat=req.lat, lon=req.lon,
                            exclude=req.exclude_origin,
                            preference=req.preference)
+        m.record_plan("nl", "ok")
+        m.record_coverage(plan.origin_coverage)
+        return plan
     except UnparseableRecipe:
+        m.record_plan("nl", "unparseable")
         raise HTTPException(status_code=422, detail=(
             "Couldn't find an ingredient list in that text. Paste a recipe "
             "with its ingredients (quantities optional), e.g.:\n"
@@ -119,6 +142,8 @@ def plan_nl(req: NLPlanRequest) -> ShoppingPlan:
             "- 400g spaghetti\n- 500g ground beef\n- 1 can crushed tomatoes\n"
             "Notes: under $30, no dairy"))
     except PlanAborted as e:
+        code = e.execution.aborted.code.value if e.execution.aborted else "unknown"
+        m.record_plan("nl", "gated", gate=code)
         raise HTTPException(status_code=409, detail=e.execution.model_dump(mode="json"))
 
 
@@ -164,10 +189,16 @@ def plan_recipe(slug: str, exclude_origin: list[str] | None = Query(default=None
     those countries — never candidates that merely lack evidence. The
     returned plan carries per-line provenance and a spend-weighted coverage
     figure saying how much of the basket was actually checked."""
+    from . import metrics as m
+
     try:
-        return flow.run(slug, exclude=exclude_origin, preference=preference)
+        plan = flow.run(slug, exclude=exclude_origin, preference=preference)
     except ValueError as e:
+        m.record_plan("recipe", "not_found")
         raise HTTPException(status_code=404, detail=str(e))
+    m.record_plan("recipe", "ok")
+    m.record_coverage(plan.origin_coverage)
+    return plan
 
 
 # ─── Provenance ──────────────────────────────────────────────

@@ -161,6 +161,8 @@ def select_products(state: State) -> tuple[dict, State]:
         cost_usd=result.cost_usd,
         latency_ms=result.latency_ms,
     )
+    from . import metrics as _m
+    _m.record_llm(span)
     return {"llm_call": span, "n_selections": len(result.selections)}, \
         state.update(initial_result=result)
 

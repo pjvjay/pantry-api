@@ -138,8 +138,8 @@ def test_unverified_basket_is_labelled_not_presented_as_clean():
 
 def test_coverage_is_spend_weighted_not_just_counted():
     """A basket can be well covered by count and barely covered by spend."""
-    from pantry_planner.origins import basket_coverage
     from pantry_planner import db
+    from pantry_planner.origins import basket_coverage
 
     products = db.load_all_products()
     cheap, dear = products[0].id, products[1].id
