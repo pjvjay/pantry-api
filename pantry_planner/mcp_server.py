@@ -80,6 +80,21 @@ class TriageCandidate(BaseModel):
     status: str
 
 
+def _check_countries(*lists) -> None:
+    """Unknown country names are an error the agent must see, not a silent
+    no-op filter that reports success. Suggests the closest spellings."""
+    from .origins import validate_countries
+
+    names = [n for lst in lists for n in (lst or [])]
+    unknown = validate_countries(names)
+    if unknown:
+        parts = [f"{k!r} (did you mean: {', '.join(v) or 'no close match'})"
+                 for k, v in unknown.items()]
+        raise ToolError("Unrecognised country name(s): " + "; ".join(parts)
+                        + ". Use a country name or common alias such as "
+                          "'United States', 'USA' or 'Canada'.")
+
+
 def _product_summary(p) -> ProductSummary:
     return ProductSummary(
         id=p.id, name=p.name, brand=p.brand, category=p.category,
@@ -163,6 +178,7 @@ def plan_recipe(slug: str, exclude_origin: list[str] | None = None,
     guidance. The plan carries per-line provenance and `origin_coverage`:
     read its `spend_fraction` and `meets_floor` before describing a basket
     as clean, because unverified lines are not verified-clean lines."""
+    _check_countries(exclude_origin, preference)
     from . import flow
 
     try:
@@ -181,6 +197,7 @@ def plan_from_text(recipe_text: str, lat: float | None = None,
     (budget, dietary exclusions); lat/lon optionally set the shopping
     location. Parses the text, runs a staged SQL retrieval plan, then
     the LLM selector. SLOW (10-60s) and costs real Claude API credits."""
+    _check_countries(exclude_origin, preference)
     from . import flow
     from .nlsearch import PlanAborted, UnparseableRecipe
 
@@ -223,6 +240,7 @@ def plan_week(days: int = 5, max_total_budget: float | None = None,
     recipes containing those dietary tags (e.g. ["dairy", "gluten"]).
     SLOW (runs the LLM selector per day) and costs real Claude API
     credits — roughly one plan_recipe per day planned."""
+    _check_countries(exclude_origin, preference)
     from . import weekplan
     from .nlsearch import PlanAborted
 
@@ -302,6 +320,7 @@ def rank_products_by_origin(preference: list[str] | None = None,
     the `unranked` count - those products have no published origin, and
     showing only the ranked list would imply a coverage this data does not
     have."""
+    _check_countries(preference, exclude)
     from . import db, origins
 
     products = db.load_all_products()

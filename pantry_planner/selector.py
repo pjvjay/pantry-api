@@ -76,6 +76,7 @@ def call_selector(
     enable_thinking: bool = False,
     constraints: dict | None = None,
     origins_by_id: dict | None = None,
+    preference: list[str] | None = None,
 ) -> SelectorResult:
     """Make one main-selector call. Returns structured selections.
 
@@ -87,7 +88,9 @@ def call_selector(
         from . import demomode
         return demomode.select_products(ingredients, products, model=model,
                                         enable_thinking=enable_thinking,
-                                        constraints=constraints)
+                                        constraints=constraints,
+                                        origins_by_id=origins_by_id,
+                                        preference=preference)
     client = Anthropic(api_key=cfg.anthropic_api_key)
 
     payload: dict = {

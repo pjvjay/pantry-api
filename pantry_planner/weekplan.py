@@ -63,6 +63,10 @@ def _batched_pools(session: Session, specs: list[IngredientSpec], c: Constraints
     return pools
 
 
+def _charged(p) -> float:
+    return p.store_price if p.store_price is not None else p.price
+
+
 def _week_coverage(shopping, origins_map, dropped):
     """Spend-weighted origin coverage of the merged week basket."""
     from . import origins as origins_mod
@@ -145,29 +149,55 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
         from . import origins as origins_mod
         all_ids = {p.id for pool in pools.values() for p in pool}
         origins_map = origins_mod.resolve_all(list(all_ids))
-        origin_dropped = 0
+        origin_requested = bool(exclude_origin or preference)
+        dropped_ids: set[int] = set()
+        # global ingredient index -> (ingredient name, removed candidates).
+        # Tracked per ingredient so the gate can name what the exclusion
+        # emptied and list what was removed — not parse it back out of a
+        # note string, which produced wrong names and empty suggestions.
+        origin_emptied: dict[int, tuple[str, list]] = {}
         if exclude_origin:
             for g, pool in list(pools.items()):
+                if not pool:
+                    continue
                 kept, dropped = origins_mod.filter_pool(
                     pool, exclude=exclude_origin, origins=origins_map)
-                origin_dropped += len(dropped)
+                dropped_ids.update(p.id for p, _c, _f in dropped)
                 pools[g] = kept
-            if origin_dropped:
+                if dropped and not kept:
+                    origin_emptied[g] = (specs[g].name, dropped)
+            if dropped_ids:
                 notes.append(
-                    f"origin filter removed {origin_dropped} candidate(s) "
+                    f"origin filter removed {len(dropped_ids)} candidate(s) "
                     f"evidenced as from {', '.join(exclude_origin)}")
+        if preference:
+            # Soft: reorder within each pool so the deterministic greedy
+            # below sees preferred-origin candidates first at equal match.
+            for g, pool in pools.items():
+                pools[g] = sorted(pool, key=lambda p: (
+                    origins_mod.preference_rank(origins_map.get(p.id), preference),
+                    p.store_price if p.store_price is not None else p.price,
+                    p.id))
+        origin_dropped = len(dropped_ids)
 
         # regroup per recipe; drop recipes that still miss an ingredient
         by_recipe: dict[int, dict[int, list]] = {}
         for g, (ri, li) in enumerate(flat):
             by_recipe.setdefault(ri, {})[li] = pools.get(g, [])
         candidates: list[tuple[Recipe, dict[int, list]]] = []
+        g_of = {(ri, li): g for g, (ri, li) in enumerate(flat)}
         for ri, r in enumerate(recipes):
             missing = [r.ingredients[li].name
                        for li, pool in by_recipe[ri].items() if not pool]
             if missing:
-                notes.append(f"skipped {r.name}: no match for "
-                             f"{', '.join(missing)} under current constraints")
+                by_origin = [r.ingredients[li].name for li, pool in by_recipe[ri].items()
+                             if not pool and g_of[(ri, li)] in origin_emptied]
+                if by_origin:
+                    notes.append(f"skipped {r.name}: every candidate for "
+                                 f"{', '.join(by_origin)} is from an excluded origin")
+                else:
+                    notes.append(f"skipped {r.name}: no match for "
+                                 f"{', '.join(missing)} under current constraints")
             else:
                 candidates.append((r, by_recipe[ri]))
         if len(candidates) < days:
@@ -177,16 +207,24 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
             # Attribute the cause. If the origin filter is what emptied the
             # library, say so and say what it cost — a generic "relax a
             # dietary filter" sends the user to the wrong knob.
-            if origin_dropped:
+            if origin_emptied:
                 execution.aborted = PlanAlert(
                     stage="origin_filter", code=GateCode.excluded_by_origin,
                     message=(f"Excluding {', '.join(exclude_origin or [])} "
-                             f"removed {origin_dropped} candidate(s) and left "
-                             f"no complete recipe. Relax the exclusion, or "
-                             f"accept one of the removed products."),
-                    details=[{"name": n.split(": ", 1)[-1], "reason": n,
-                              "suggestions": []}
-                             for n in notes if n.startswith("skipped ")][:5])
+                             f"left no candidate for "
+                             f"{', '.join(sorted({n for n, _ in origin_emptied.values()}))}"
+                             f", so no complete recipe remains. Relax the "
+                             f"exclusion, or accept one of the removed products "
+                             f"listed per ingredient."),
+                    details=[{
+                        "name": name,
+                        "reason": (f"all {len(removed)} candidate(s) are evidenced "
+                                   f"as coming from an excluded country"),
+                        "suggestions": [
+                            f"{p.name} (${_charged(p):.2f}) — {country} via {field}"
+                            for p, country, field in removed[:5]],
+                    } for name, removed in
+                        {n: r for n, r in origin_emptied.values()}.items()][:8])
             else:
                 execution.aborted = PlanAlert(
                     stage="w2_fallback",
@@ -317,11 +355,15 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
                    f"{len(best.stores)} stop(s), ${best.total_cost:.2f} total")
                   if best else "no trip options"))
 
+    coverage = None
+    origin_status = "not_requested"
+    if origin_requested:
+        coverage = _week_coverage(shopping, origins_map, origin_dropped)
+        origin_status = "verified" if coverage.meets_floor else "unverified"
     return WeekPlan(days=day_plans, shopping_list=shopping, total_cost=total,
                     standalone_cost=standalone,
                     overlap_savings=round(standalone - total, 2),
                     budget=max_total_budget, notes=notes,
                     plan_trace=execution.steps, trip_options=trip_options,
-                    origin_coverage=_week_coverage(shopping, origins_map,
-                                                   origin_dropped),
+                    origin_coverage=coverage, origin_status=origin_status,
                     total_llm_cost_usd=round(llm_cost, 6))

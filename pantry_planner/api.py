@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -53,6 +54,25 @@ app = FastAPI(
     ),
     lifespan=_lifespan,
 )
+
+
+def _check_countries(*lists: list[str] | None) -> None:
+    """Reject unrecognised country names up front.
+
+    A filter that accepts "Amerca", excludes nothing and returns 200 has
+    reported success on a request it did not honour. For a boycott tool that
+    is the worst available outcome, so it is a 422 with the closest matches.
+    """
+    from .origins import validate_countries
+
+    names = [n for lst in lists for n in (lst or [])]
+    unknown = validate_countries(names)
+    if unknown:
+        raise HTTPException(status_code=422, detail={
+            "error": "unrecognised country name(s)",
+            "unknown": unknown,
+            "hint": "Use a country name or common alias, e.g. 'United States', 'USA', 'Canada'.",
+        })
 
 
 @app.get("/health")
@@ -122,10 +142,10 @@ def plan_nl(req: NLPlanRequest) -> ShoppingPlan:
     (existence → options → brand stats → lookups), route, select. Returns
     the plan + interpretation + the full per-step SQL trace. A gate abort
     returns 409 with the alert and the trace up to the failed step."""
+    from . import metrics as m
     from .nlsearch import PlanAborted, UnparseableRecipe
 
-    from . import metrics as m
-
+    _check_countries(req.exclude_origin, req.preference)
     try:
         plan = flow.run_nl(req.recipe_text, lat=req.lat, lon=req.lon,
                            exclude=req.exclude_origin,
@@ -170,6 +190,7 @@ def plan_week(req: WeekPlanRequest) -> WeekPlan:
     from . import weekplan
     from .nlsearch import PlanAborted
 
+    _check_countries(req.exclude_origin, req.preference)
     try:
         return weekplan.plan_week(
             days=req.days, max_total_budget=req.max_total_budget,
@@ -181,8 +202,9 @@ def plan_week(req: WeekPlanRequest) -> WeekPlan:
 
 
 @app.post("/plan/{slug}", response_model=ShoppingPlan)
-def plan_recipe(slug: str, exclude_origin: list[str] | None = Query(default=None),
-                preference: list[str] | None = Query(default=None)) -> ShoppingPlan:
+def plan_recipe(slug: str,
+                exclude_origin: Annotated[list[str] | None, Query()] = None,
+                preference: Annotated[list[str] | None, Query()] = None) -> ShoppingPlan:
     """Run the pipeline for one recipe. Returns the shopping plan.
 
     `exclude_origin` removes candidates positively evidenced as coming from
@@ -191,6 +213,7 @@ def plan_recipe(slug: str, exclude_origin: list[str] | None = Query(default=None
     figure saying how much of the basket was actually checked."""
     from . import metrics as m
 
+    _check_countries(exclude_origin, preference)
     try:
         plan = flow.run(slug, exclude=exclude_origin, preference=preference)
     except ValueError as e:
@@ -242,6 +265,7 @@ def rank_by_origin(req: RankRequest) -> OriginRanking:
     """
     from . import origins
 
+    _check_countries(req.preference, req.exclude)
     products = db.load_all_products()
     if req.product_ids is not None:
         wanted = set(req.product_ids)

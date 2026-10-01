@@ -18,7 +18,7 @@ _TMP_DB = None
 def seeded_db(tmp_path_factory):
     global _TMP_DB
     _TMP_DB = tmp_path_factory.mktemp("db") / "test.db"
-    os.environ["DB_URL"] = f"sqlite:///{_TMP_DB}"
+    os.environ["DB_URL"] = os.environ.get("PANTRY_TEST_DB_URL") or f"sqlite:///{_TMP_DB}"
     from pantry_planner import config, db
 
     config.settings.cache_clear()

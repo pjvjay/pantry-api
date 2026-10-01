@@ -18,7 +18,7 @@ _TMP_DB = None
 def seeded_db(tmp_path_factory):
     global _TMP_DB
     _TMP_DB = tmp_path_factory.mktemp("db") / "test.db"
-    os.environ["DB_URL"] = f"sqlite:///{_TMP_DB}"
+    os.environ["DB_URL"] = os.environ.get("PANTRY_TEST_DB_URL") or f"sqlite:///{_TMP_DB}"
     os.environ["DEMO_MODE"] = "1"
     from pantry_planner import config, db
 
@@ -60,8 +60,9 @@ def test_plan_week_empty_library_returns_409_not_500():
 
     _empty_library()
     try:
-        with TestClient(api.app) as c:
-            r = c.post("/plan/week", json={"days": 5})
+        # No `with`: that runs the MCP lifespan, whose session manager can
+        # start only once per process. /plan/week does not need it.
+        r = TestClient(api.app).post("/plan/week", json={"days": 5})
         assert r.status_code == 409, f"got {r.status_code}: {r.text[:200]}"
     finally:
         db.seed_from_json()

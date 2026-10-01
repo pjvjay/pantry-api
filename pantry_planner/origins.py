@@ -113,6 +113,45 @@ _SUPERSETS = (
     "north dakota", "south dakota", "rhode island",
 )
 
+# Recognised country names. A filter that silently accepts "Amerca" and
+# excludes nothing has reported success on a request it did not honour —
+# the worst available outcome for a boycott tool. Data, not policy: this is
+# the UN member/observer list plus common short forms; aliases above fold
+# into it. Keep lowercase.
+KNOWN_COUNTRIES: frozenset[str] = frozenset({
+    "afghanistan", "albania", "algeria", "andorra", "angola", "antigua and barbuda",
+    "argentina", "armenia", "australia", "austria", "azerbaijan", "bahamas", "bahrain",
+    "bangladesh", "barbados", "belarus", "belgium", "belize", "benin", "bhutan", "bolivia",
+    "bosnia and herzegovina", "botswana", "brazil", "brunei", "bulgaria", "burkina faso",
+    "burundi", "cabo verde", "cape verde", "cambodia", "cameroon", "canada",
+    "central african republic", "chad", "chile", "china", "colombia", "comoros", "congo",
+    "democratic republic of the congo", "costa rica", "cote d'ivoire", "ivory coast",
+    "croatia", "cuba", "cyprus", "czechia", "czech republic", "denmark", "djibouti",
+    "dominica", "dominican republic", "ecuador", "egypt", "el salvador", "equatorial guinea",
+    "eritrea", "estonia", "eswatini", "swaziland", "ethiopia", "fiji", "finland", "france",
+    "gabon", "gambia", "georgia", "germany", "ghana", "greece", "grenada", "guatemala",
+    "guinea", "guinea-bissau", "guyana", "haiti", "honduras", "hungary", "iceland", "india",
+    "indonesia", "iran", "iraq", "ireland", "israel", "italy", "jamaica", "japan", "jordan",
+    "kazakhstan", "kenya", "kiribati", "north korea", "south korea", "kosovo", "kuwait",
+    "kyrgyzstan", "laos", "latvia", "lebanon", "lesotho", "liberia", "libya", "liechtenstein",
+    "lithuania", "luxembourg", "madagascar", "malawi", "malaysia", "maldives", "mali", "malta",
+    "marshall islands", "mauritania", "mauritius", "mexico", "micronesia", "moldova", "monaco",
+    "mongolia", "montenegro", "morocco", "mozambique", "myanmar", "burma", "namibia", "nauru",
+    "nepal", "netherlands", "new zealand", "nicaragua", "niger", "nigeria", "north macedonia",
+    "macedonia", "norway", "oman", "pakistan", "palau", "palestine", "panama",
+    "papua new guinea", "paraguay", "peru", "philippines", "poland", "portugal", "qatar",
+    "romania", "russia", "rwanda", "saint kitts and nevis", "saint lucia",
+    "saint vincent and the grenadines", "samoa", "san marino", "sao tome and principe",
+    "saudi arabia", "senegal", "serbia", "seychelles", "sierra leone", "singapore", "slovakia",
+    "slovenia", "solomon islands", "somalia", "south africa", "south sudan", "spain",
+    "sri lanka", "sudan", "suriname", "sweden", "switzerland", "syria", "taiwan", "tajikistan",
+    "tanzania", "thailand", "timor-leste", "east timor", "togo", "tonga", "trinidad and tobago",
+    "tunisia", "turkey", "turkiye", "turkmenistan", "tuvalu", "uganda", "ukraine",
+    "united arab emirates", "united kingdom", "united states", "uruguay", "uzbekistan",
+    "vanuatu", "vatican city", "venezuela", "vietnam", "yemen", "zambia", "zimbabwe",
+    "hong kong", "puerto rico", "greenland", "faroe islands",
+})
+
 # surface form -> canonical country
 _SURFACE_TO_CANON: dict[str, str] = {}
 for _canon, _forms in _ALIASES.items():
@@ -137,6 +176,59 @@ def canonical_country(name: str) -> str:
     """Fold a surface form to a canonical country name, lowercased."""
     n = _normalize(name)
     return _SURFACE_TO_CANON.get(n, n)
+
+
+# Words people type that are not country names but obviously point at one.
+# Not aliases (they caused false matches: "South America"), only hints for
+# the did-you-mean list.
+_SUGGESTION_HINTS = {"america": "united states", "american": "united states",
+                     "britain": "united kingdom", "england": "united kingdom",
+                     "holland": "netherlands"}
+
+
+def preference_rank(origin: ProductOrigin | None, preference: list[str]) -> int:
+    """Soft origin preference as a sort key: lower is more preferred.
+
+    Same scale as rank_products: a full origin claim on a preferred country
+    beats a processing claim on it; an unknown or non-preferred origin sits
+    at the end, tied with each other, so absence is neither punished nor
+    rewarded. Shared by the demo selector and the week planner so the two
+    deterministic paths agree.
+    """
+    worst = len(preference) * 2
+    if not preference or origin is None or origin.status != "resolved":
+        return worst
+    hit = _match_preference(origin, preference)
+    if hit is None:
+        return worst
+    idx, _country, field = hit
+    claim = (origin.manufactured_claim if field == "manufactured_in"
+             else origin.ingredient_claim) or origin.claim_type
+    return idx * 2 + (0 if claim in FULL_CLAIMS else 1)
+
+
+def validate_countries(names: list[str]) -> dict[str, list[str]]:
+    """Map each UNRECOGNISED name to its closest known spellings.
+
+    Empty dict means every name is understood. Callers turn a non-empty
+    result into a 422 / ToolError rather than running a filter that would
+    quietly match nothing.
+    """
+    import difflib
+
+    unknown: dict[str, list[str]] = {}
+    universe = sorted(KNOWN_COUNTRIES | set(_SURFACE_TO_CANON) | set(_SUGGESTION_HINTS))
+    for raw in names or []:
+        n = canonical_country(raw)
+        if not n or n in KNOWN_COUNTRIES or n in _SURFACE_TO_CANON:
+            continue
+        seen: list[str] = []
+        for s in difflib.get_close_matches(n, universe, n=5, cutoff=0.6):
+            canon = _SUGGESTION_HINTS.get(s, _SURFACE_TO_CANON.get(s, s)).title()
+            if canon not in seen:
+                seen.append(canon)
+        unknown[raw] = seen[:3]
+    return unknown
 
 
 def _forms_for(country: str) -> set[str]:
@@ -529,8 +621,18 @@ def filter_pool(products: list[Product], *, exclude: list[str] | None = None,
     dropped: list[tuple[Product, str, str]] = []
     for p in products:
         origin = origins.get(p.id)
-        hit = _match_exclusion(origin, exclude) if (
-            origin and origin.status == "resolved") else None
+        hit = None
+        if origin and origin.status == "resolved":
+            hit = _match_exclusion(origin, exclude)
+        elif origin and origin.status == "conflicting":
+            # Sources disagree, but one of them positively names an excluded
+            # country. For a filter whose job is to keep that country out,
+            # "some evidence says USA" is a reason to drop, not a loophole:
+            # only a product with NO such evidence is kept on absence.
+            for c in exclude:
+                if any(country_matches(sc, c) for sc in origin.seen_countries):
+                    hit = (c, "conflicting_evidence")
+                    break
         if hit:
             dropped.append((p, hit[0], hit[1]))
         else:

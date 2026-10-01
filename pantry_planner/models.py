@@ -313,8 +313,14 @@ class ShoppingPlan(BaseModel):
     candidate_count: int = 0
     # Split-trip optimizer: stops-vs-cost frontier for the chosen basket
     trip_options: list[TripOption] = Field(default_factory=list)
-    # Provenance of the basket as a whole (None when no origin filter ran)
+    # Provenance of the basket as a whole. Only computed when the caller
+    # asked an origin question (exclude or preference); otherwise None, so a
+    # plan nobody asked about origin for is not stamped UNVERIFIED.
     origin_coverage: OriginCoverage | None = None
+    # not_requested | verified | unverified — the one field to read before
+    # describing a basket as clean. "unverified" means coverage is below the
+    # floor, not that anything excluded shipped.
+    origin_status: str = "not_requested"
 
 
 # ─── Weekly menu optimizer (5A) ───────────────────────────────
@@ -348,4 +354,5 @@ class WeekPlan(BaseModel):
     plan_trace: list[StepResult] = Field(default_factory=list)
     trip_options: list[TripOption] = Field(default_factory=list)
     origin_coverage: OriginCoverage | None = None
+    origin_status: str = "not_requested"
     total_llm_cost_usd: float = 0.0

@@ -26,7 +26,7 @@ EXPECTED_TOOLS = {
 def seeded_db(tmp_path_factory):
     global _TMP_DB
     _TMP_DB = tmp_path_factory.mktemp("db") / "test.db"
-    os.environ["DB_URL"] = f"sqlite:///{_TMP_DB}"
+    os.environ["DB_URL"] = os.environ.get("PANTRY_TEST_DB_URL") or f"sqlite:///{_TMP_DB}"
     from pantry_planner import config, db
 
     config.settings.cache_clear()
@@ -115,7 +115,16 @@ async def test_pipeline_status(server):
     status = res.structured_content
     assert status["status"] == "ok"
     assert status["routing_strategy"] in {"cascade", "three_phase"}
-    assert "***" in status["db"] or status["db"].startswith("sqlite")
+    # The invariant is "no plaintext password", not "looks like SQLite":
+    # the same suite runs against Postgres in CI, where the URL carries
+    # credentials and must come back redacted — and a passwordless URL is
+    # legitimately returned as-is.
+    db = status["db"]
+    if "://" in db and "@" in db:
+        creds = db.split("://", 1)[1].rsplit("@", 1)[0]
+        assert ":" not in creds or creds.endswith(":***"), f"password leaked: {db}"
+    else:
+        assert db.startswith("sqlite")
 
 
 # --- Provenance tools ----------------------------------------

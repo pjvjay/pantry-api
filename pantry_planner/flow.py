@@ -38,11 +38,13 @@ from .selector import call_selector, merge_selections
 from .tracing import llm_span, make_tracker
 
 
-def _selector_constraints(parsed, brand_stats: dict | None = None) -> dict | None:
+def _selector_constraints(parsed, brand_stats: dict | None = None,
+                          preference: list | None = None) -> dict | None:
     """Condense the NL parse into the binding-constraints object the
-    selector prompt understands. None on the classic path."""
+    selector prompt understands. On the classic path only the origin
+    preference (if any) is carried."""
     if parsed is None:
-        return None
+        return {"origin_preference": list(preference)} if preference else None
     c = parsed.constraints
     quantities = {
         ing.name: f"{ing.quantity:g} {ing.unit}"
@@ -57,6 +59,8 @@ def _selector_constraints(parsed, brand_stats: dict | None = None) -> dict | Non
         # t3's per-ingredient brand aggregates (options/avg price/avg rating/
         # review count) — context for the final mapping, not a hard rule
         "brand_statistics": brand_stats or None,
+        # ordered, most-preferred first; soft guidance for rule 7
+        "origin_preference": list(preference) if preference else None,
     }
     out = {k: v for k, v in out.items() if v is not None}
     return out or None
@@ -71,22 +75,28 @@ def load_recipe(state: State, recipe_slug: str) -> tuple[dict, State]:
     return result, state.update(recipe=recipe)
 
 
-@action(reads=["recipe"], writes=["products", "origins", "origin_dropped"])
+@action(reads=["recipe"], writes=["products", "origins", "origin_dropped", "preference",
+                                 "origin_requested"])
 def load_products(state: State, exclude: list | None = None,
                   preference: list | None = None) -> tuple[dict, State]:
     products = db.load_all_products()
     recipe = state.get("recipe")
+    cfg = settings()
+    pools = _ingredient_pools(recipe, cfg.default_lat, cfg.default_lon) if recipe else {}
+    names = {i: ing.name for i, ing in enumerate(recipe.ingredients)} if recipe else {}
     kept, dropped, origins = apply_origin_constraint(
-        products, recipe.ingredients if recipe else [],
-        exclude=exclude, preference=preference)
+        products, pools, names, exclude=exclude, preference=preference)
     result = {"product_count": len(kept), "origin_dropped": len(dropped)}
     return result, state.update(products=kept, origins=origins,
-                                origin_dropped=dropped)
+                                origin_dropped=dropped,
+                                preference=list(preference or []),
+                                origin_requested=bool(exclude or preference))
 
 
 @action(reads=[], writes=["recipe", "products", "parsed_input", "location",
                           "plan_trace", "brand_stats", "retrieval_stats",
-                          "origins", "origin_dropped"])
+                          "origins", "origin_dropped", "preference",
+                          "origin_requested"])
 def parse_and_retrieve(state: State, recipe_text: str,
                        lat: float | None = None,
                        lon: float | None = None,
@@ -100,9 +110,9 @@ def parse_and_retrieve(state: State, recipe_text: str,
     from . import nlsearch
 
     r = nlsearch.run_query_plan(recipe_text, lat=lat, lon=lon)
+    names = {i: ing.name for i, ing in enumerate(r.recipe.ingredients)}
     kept, dropped, origins = apply_origin_constraint(
-        r.products, r.recipe.ingredients, exclude=exclude,
-        preference=preference)
+        r.products, r.pools, names, exclude=exclude, preference=preference)
     result = {
         "ingredient_count": len(r.recipe.ingredients),
         "product_count": len(kept),
@@ -112,7 +122,9 @@ def parse_and_retrieve(state: State, recipe_text: str,
     }
     return result, state.update(
         recipe=r.recipe, products=kept, origins=origins,
-        origin_dropped=dropped, parsed_input=r.parsed,
+        origin_dropped=dropped, preference=list(preference or []),
+        origin_requested=bool(exclude or preference),
+        parsed_input=r.parsed,
         location={"lat": r.lat, "lon": r.lon, "max_km": r.max_km},
         plan_trace=r.execution.steps, brand_stats=r.brand_stats,
         retrieval_stats=r.stats)
@@ -137,7 +149,8 @@ def preselect_model(state: State) -> tuple[dict, State]:
     return result, state.update(preselect_result=preselect)
 
 
-@action(reads=["recipe", "products", "preselect_result"], writes=["initial_result"])
+@action(reads=["recipe", "products", "preselect_result", "origins", "preference"],
+        writes=["initial_result"])
 def select_products(state: State) -> tuple[dict, State]:
     recipe: Recipe = state["recipe"]
     products: list[Product] = state["products"]
@@ -149,8 +162,10 @@ def select_products(state: State) -> tuple[dict, State]:
         products,
         model=preselect.model,
         enable_thinking=False,
-        constraints=_selector_constraints(parsed, state.get("brand_stats")),
+        constraints=_selector_constraints(parsed, state.get("brand_stats"),
+                                          preference=state.get("preference")),
         origins_by_id=state.get("origins") or {},
+        preference=state.get("preference") or [],
     )
 
     span = llm_span(
@@ -311,6 +326,18 @@ def build_plan(state: State) -> tuple[dict, State]:
         ))
         total_cost += charged
 
+    # Coverage is an answer to an origin question. Computing it for every
+    # plan stamped "UNVERIFIED" on baskets nobody asked about, which made the
+    # label noise instead of signal.
+    coverage = None
+    origin_status = "not_requested"
+    if state.get("origin_requested"):
+        coverage = origins_mod.basket_coverage(
+            [(li.product_id, li.price) for li in line_items],
+            origins=origins_map or None,
+            excluded_lines=len(state.get("origin_dropped") or []))
+        origin_status = "verified" if coverage.meets_floor else "unverified"
+
     parsed = state.get("parsed_input")   # NL path only
     plan = ShoppingPlan(
         recipe_slug=recipe.slug,
@@ -320,10 +347,8 @@ def build_plan(state: State) -> tuple[dict, State]:
         routing_strategy=get_router().name,
         preselected_model=preselect.model,
         escalated=decision.escalate,
-        origin_coverage=origins_mod.basket_coverage(
-            [(li.product_id, li.price) for li in line_items],
-            origins=origins_map or None,
-            excluded_lines=len(state.get("origin_dropped") or [])),
+        origin_coverage=coverage,
+        origin_status=origin_status,
         total_llm_cost_usd=round(
             preselect.routing_cost_usd + final.cost_usd
             + (parsed.cost_usd if parsed else 0.0), 6
@@ -341,50 +366,102 @@ def build_plan(state: State) -> tuple[dict, State]:
 # ─── Application builder ─────────────────────────────────────
 
 # ─── Origin constraint ───────────────────────────────────────
-# Applied AFTER retrieval and BEFORE selection: the model is never shown a
-# product the user has excluded, so it cannot pick one, and the plan cannot
-# quietly contain one. Products with no evidence are kept — absence is not a
-# verdict — and the coverage figure on the finished plan is what stops that
-# leniency from reading as a clean bill of health.
+# Applied AFTER retrieval and BEFORE selection, PER INGREDIENT. The first
+# version gated only when the entire candidate pool was empty, so when the
+# exclusion removed every garlic the planner quietly mapped "Garlic" to
+# whatever was left — a 200 with the wrong product. A plan line must come
+# from its own ingredient's candidates or not be made at all.
 
-def apply_origin_constraint(products, ingredients, *, exclude, preference):
-    """Filter a candidate pool on origin. Returns (kept, dropped, origins).
+def _ingredient_pools(recipe, lat, lon):
+    """Per-ingredient term-matched candidates, keyed by ingredient index.
 
-    Raises PlanAborted(excluded_by_origin) when the exclusion empties an
-    ingredient's pool entirely — reporting WHICH ingredient and what was
-    removed, in the same shape the price/diet/distance gates already use.
+    The classic path has no retrieval step of its own (the selector sees the
+    whole catalog), so this borrows the week planner's single-pass retrieval
+    purely to know WHICH products are candidates for WHICH ingredient. That
+    is what lets the gate name the ingredient the exclusion emptied.
+    """
+    from sqlalchemy import text
+    from sqlalchemy.orm import Session
+
+    from .nlsearch.planner import _row_to_product
+    from .nlsearch.schemas import Constraints, IngredientSpec
+    from .nlsearch.sql_builder import build_options_sql
+
+    specs = [IngredientSpec(name=i.name) for i in recipe.ingredients]
+    if not specs:
+        return {}
+    sql, params = build_options_sql(Constraints(), specs, relaxed=set(),
+                                    lat=lat, lon=lon)
+    pools: dict[int, list] = {}
+    with Session(db.engine()) as s:
+        for row in s.execute(text(sql), params).mappings():
+            pools.setdefault(row["ing_no"], []).append(_row_to_product(row))
+    return pools
+
+
+def apply_origin_constraint(products, pools, names, *, exclude, preference):
+    """Filter `products` on origin and gate per ingredient.
+
+    products : what the selector will be shown (filtered copy returned)
+    pools    : ingredient key -> candidate list, used ONLY for gating
+    names    : ingredient key -> display name
+
+    Returns (kept_products, dropped, origins). `dropped` is deduplicated by
+    product. Raises PlanAborted(excluded_by_origin) naming EVERY ingredient
+    whose pool had candidates and lost all of them, each with the removed
+    products as suggestions — that is the trade the user is being asked to
+    make, stated rather than silently made for them.
+
+    Products with no evidence are kept: absence is not a verdict. The
+    coverage figure on the finished plan is what stops that leniency from
+    reading as a clean basket.
     """
     from . import origins as origins_mod
     from .nlsearch.plan import GateCode, PlanAlert, PlanExecution
     from .nlsearch.planner import PlanAborted
 
-    # Resolved unconditionally: provenance receipts and the coverage figure
-    # are worth carrying even when the caller set no filter — a basket you
-    # can audit afterwards is the point.
-    origins = origins_mod.resolve_all([p.id for p in products])
+    pool_ids = {p.id for pool in pools.values() for p in pool}
+    all_ids = sorted(pool_ids | {p.id for p in products})
+    # Resolved unconditionally: receipts and coverage are worth carrying
+    # even with no filter — a basket you can audit afterwards is the point.
+    origins = origins_mod.resolve_all(all_ids)
     if not exclude:
-        return products, [], origins
+        return list(products), [], origins
 
-    kept, dropped = origins_mod.filter_pool(
+    kept_products, dropped = origins_mod.filter_pool(
         products, exclude=exclude, origins=origins)
+    dropped_by_id = {p.id: (p, c, f) for p, c, f in dropped}
 
-    if dropped and not kept:
+    emptied: list[tuple[str, list]] = []
+    for key, pool in pools.items():
+        if not pool:
+            continue                      # nothing to lose; not an origin casualty
+        kept_pool, dropped_pool = origins_mod.filter_pool(
+            pool, exclude=exclude, origins=origins)
+        for p, c, f in dropped_pool:
+            dropped_by_id.setdefault(p.id, (p, c, f))
+        if not kept_pool:
+            emptied.append((names.get(key, str(key)), dropped_pool))
+
+    if emptied:
         details = [{
-            "name": getattr(i, "name", str(i)),
-            "reason": "every candidate is evidenced as coming from an "
-                      "excluded country",
+            "name": name,
+            "reason": (f"all {len(removed)} candidate(s) are evidenced as "
+                       f"coming from an excluded country"),
             "suggestions": [
-                f"{p.name} (${p.price:.2f}) — {country} via {field}"
-                for p, country, field in dropped[:5]
+                f"{p.name} (${(p.store_price if p.store_price is not None else p.price):.2f})"
+                f" — {country} via {field}"
+                for p, country, field in removed[:5]
             ],
-        } for i in (ingredients or [])]
+        } for name, removed in emptied]
+        affected = ", ".join(n for n, _ in emptied)
         raise PlanAborted(PlanExecution(steps=[], aborted=PlanAlert(
             stage="origin_filter", code=GateCode.excluded_by_origin,
-            message=(f"Excluding {', '.join(exclude)} removed every remaining "
-                     f"candidate. Relax the exclusion, or accept one of the "
-                     f"removed products listed below."),
+            message=(f"Excluding {', '.join(exclude)} left no candidate for: "
+                     f"{affected}. Relax the exclusion, or accept one of the "
+                     f"removed products listed per ingredient."),
             details=details)))
-    return kept, dropped, origins
+    return kept_products, list(dropped_by_id.values()), origins
 
 
 def build_application(recipe_slug: str | None = None,
