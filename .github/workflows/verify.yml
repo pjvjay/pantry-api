@@ -77,9 +77,16 @@ jobs:
       - name: Prove the suite actually ran against Postgres
         # A hollow run leaves these tables absent or empty. Fail loudly
         # rather than let a green check stand for a backend never touched.
+        # Floors, not just "> 0": a single seeding module would satisfy > 0
+        # while every other module silently ran on SQLite. The seed is 62
+        # products / 7 recipes, and store_products only exists once the
+        # synthetic store seed ran — so these three together mean the whole
+        # seed path executed against Postgres.
         run: |
-          n=$(psql -h 127.0.0.1 -U pantry -d pantry -tAc "select count(*) from products")
-          echo "products rows in Postgres after the suite: $n"
-          test "$n" -gt 0 || { echo "::error::suite did not touch Postgres"; exit 1; }
-          psql -h 127.0.0.1 -U pantry -d pantry -tAc \
-            "select to_regclass('product_origin_evidence') is not null" | grep -q t
+          q() { psql -h 127.0.0.1 -U pantry -d pantry -tAc "$1"; }
+          p=$(q "select count(*) from products"); r=$(q "select count(*) from recipes")
+          s=$(q "select count(*) from store_products")
+          echo "rows in Postgres after the suite: products=$p recipes=$r store_products=$s"
+          test "$p" -ge 62 && test "$r" -ge 7 && test "$s" -gt 0 \
+            || { echo "::error::suite did not fully exercise Postgres"; exit 1; }
+          q "select to_regclass('product_origin_evidence') is not null" | grep -q t

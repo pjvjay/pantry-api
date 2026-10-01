@@ -84,7 +84,7 @@ def load_products(state: State, exclude: list | None = None,
     cfg = settings()
     pools = _ingredient_pools(recipe, cfg.default_lat, cfg.default_lon) if recipe else {}
     names = {i: ing.name for i, ing in enumerate(recipe.ingredients)} if recipe else {}
-    kept, dropped, origins = apply_origin_constraint(
+    kept, dropped, origins, _pools = apply_origin_constraint(
         products, pools, names, exclude=exclude, preference=preference)
     result = {"product_count": len(kept), "origin_dropped": len(dropped)}
     return result, state.update(products=kept, origins=origins,
@@ -109,10 +109,26 @@ def parse_and_retrieve(state: State, recipe_text: str,
     keys. Gate aborts raise nlsearch.PlanAborted → API 409."""
     from . import nlsearch
 
-    r = nlsearch.run_query_plan(recipe_text, lat=lat, lon=lon)
+    # With an exclusion active, retrieve wider than the usual cheapest-8 so
+    # the 9th-cheapest non-excluded product is still there after filtering;
+    # the pool is trimmed back to the normal size below.
+    from .nlsearch.sql_builder import PER_INGREDIENT_LIMIT
+    limit = 10_000 if exclude else PER_INGREDIENT_LIMIT
+    r = nlsearch.run_query_plan(recipe_text, lat=lat, lon=lon,
+                                per_ingredient_limit=limit)
     names = {i: ing.name for i, ing in enumerate(r.recipe.ingredients)}
-    kept, dropped, origins = apply_origin_constraint(
+    kept, dropped, origins, kept_pools = apply_origin_constraint(
         r.products, r.pools, names, exclude=exclude, preference=preference)
+    if exclude and kept_pools:
+        def price(p):
+            return p.store_price if p.store_price is not None else p.price
+        seen: set[int] = set()
+        kept = []
+        for direct, alts in kept_pools.values():
+            for p in sorted(direct, key=price)[:PER_INGREDIENT_LIMIT] + alts:
+                if p.id not in seen:
+                    seen.add(p.id)
+                    kept.append(p)
     result = {
         "ingredient_count": len(r.recipe.ingredients),
         "product_count": len(kept),
@@ -405,18 +421,24 @@ def _ingredient_pools(recipe, lat, lon):
                 out.setdefault(row["ing_no"], []).append(_row_to_product(row))
         return out
 
-    pools = fetch(specs)
-    # Head-noun fallback, the same relaxation the week planner's w2 applies:
-    # strict token-AND makes "Cheddar Cheese" miss "Cheddar Shredded 320g",
-    # which the selector would happily choose. The gate's idea of a candidate
-    # must be at least as broad as the selector's, or it aborts plans that
-    # were possible.
-    heads = [IngredientSpec(name=tokens(s.name)[-1]) if tokens(s.name) else s
-             for s in specs]
-    for g, pool in fetch(heads).items():
-        seen = {p.id for p in pools.get(g, [])}
-        pools.setdefault(g, []).extend(p for p in pool if p.id not in seen)
-    return pools
+    direct = fetch(specs)
+    # Head-noun matches are offered as ALTERNATIVES when the gate fires —
+    # never counted as candidates. Unioning them into the candidate set let
+    # "Basmati Rice" survive on Gluten-Free Penne and ship it with a 200.
+    heads = []
+    for s in specs:
+        toks = tokens(s.name)
+        heads.append(IngredientSpec(name=toks[-1]) if len(toks) > 1 else None)
+    head_specs = [h for h in heads if h is not None]
+    relaxed_by_g: dict[int, list] = {}
+    if head_specs:
+        fetched = fetch(head_specs)
+        gi = [g for g, h in enumerate(heads) if h is not None]
+        for i, g in enumerate(gi):
+            seen = {p.id for p in direct.get(g, [])}
+            relaxed_by_g[g] = [p for p in fetched.get(i, []) if p.id not in seen]
+    return {g: {"direct": direct.get(g, []), "relaxed": relaxed_by_g.get(g, [])}
+            for g in range(len(specs)) if direct.get(g) or relaxed_by_g.get(g)}
 
 
 def apply_origin_constraint(products, pools, names, *, exclude, preference):
@@ -440,53 +462,70 @@ def apply_origin_constraint(products, pools, names, *, exclude, preference):
     from .nlsearch.plan import GateCode, PlanAlert, PlanExecution
     from .nlsearch.planner import PlanAborted
 
-    pool_ids = {p.id for pool in pools.values() for p in pool}
+    def _members(pool):
+        if isinstance(pool, dict):
+            return list(pool.get("direct", [])) + list(pool.get("relaxed", []))
+        return list(pool)
+
+    pool_ids = {p.id for pool in pools.values() for p in _members(pool)}
     all_ids = sorted(pool_ids | {p.id for p in products})
     # Resolved unconditionally: receipts and coverage are worth carrying
     # even with no filter — a basket you can audit afterwards is the point.
     origins = origins_mod.resolve_all(all_ids)
     if not exclude:
-        return list(products), [], origins
+        return list(products), [], origins, {}
 
     kept_products, dropped = origins_mod.filter_pool(
         products, exclude=exclude, origins=origins)
     dropped_by_id = {p.id: (p, c, f) for p, c, f in dropped}
 
-    emptied: list[tuple[str, list]] = []
+    def split(pool):
+        """(direct candidates, alternatives). Classic pools are dicts; NL pools
+        are flat lists where t4 substitutes carry substitute=True."""
+        if isinstance(pool, dict):
+            return list(pool.get("direct", [])), list(pool.get("relaxed", []))
+        return [p for p in pool if not p.substitute], [p for p in pool if p.substitute]
+
+    emptied: list[tuple[str, list, list]] = []
+    kept_pools: dict = {}
     for key, pool in pools.items():
-        direct = [p for p in pool if not p.substitute]
-        if not direct:
-            continue                      # nothing to lose; not an origin casualty
-        kept_pool, dropped_pool = origins_mod.filter_pool(
-            pool, exclude=exclude, origins=origins)
-        for p, c, f in dropped_pool:
+        direct, alternatives = split(pool)
+        kept_direct, dropped_direct = origins_mod.filter_pool(
+            direct, exclude=exclude, origins=origins)
+        kept_alt, dropped_alt = origins_mod.filter_pool(
+            alternatives, exclude=exclude, origins=origins)
+        for p, c, f in dropped_direct + dropped_alt:
             dropped_by_id.setdefault(p.id, (p, c, f))
-        # Substitutes are same-aisle padding (t4), not candidates for THIS
-        # ingredient. If every direct candidate is gone, the ingredient is
-        # emptied no matter how many onions remain in garlic's pool.
-        if not any(not p.substitute for p in kept_pool):
-            emptied.append((names.get(key, str(key)),
-                            [d for d in dropped_pool if not d[0].substitute]))
+        kept_pools[key] = (kept_direct, kept_alt)
+        if direct and not kept_direct:
+            # Every candidate for THIS ingredient is gone. Whatever remains
+            # in the pool is a same-aisle alternative, not the ingredient —
+            # offered below as a stated trade, never silently substituted.
+            emptied.append((names.get(key, str(key)), dropped_direct, kept_alt))
 
     if emptied:
+        def price(p):
+            return p.store_price if p.store_price is not None else p.price
         details = [{
             "name": name,
             "reason": (f"all {len(removed)} candidate(s) are evidenced as "
                        f"coming from an excluded country"),
             "suggestions": [
-                f"{p.name} (${(p.store_price if p.store_price is not None else p.price):.2f})"
-                f" — {country} via {field}"
+                f"{p.name} (${price(p):.2f}) — {country} via {field}"
                 for p, country, field in removed[:5]
+            ] + [
+                f"still available, not a direct match: {p.name} (${price(p):.2f})"
+                for p in sorted(alts, key=price)[:3]
             ],
-        } for name, removed in emptied]
-        affected = ", ".join(n for n, _ in emptied)
+        } for name, removed, alts in emptied]
+        affected = ", ".join(n for n, _, _ in emptied)
         raise PlanAborted(PlanExecution(steps=[], aborted=PlanAlert(
             stage="origin_filter", code=GateCode.excluded_by_origin,
             message=(f"Excluding {', '.join(exclude)} left no candidate for: "
                      f"{affected}. Relax the exclusion, or accept one of the "
                      f"removed products listed per ingredient."),
             details=details)))
-    return kept_products, list(dropped_by_id.values()), origins
+    return kept_products, list(dropped_by_id.values()), origins, kept_pools
 
 
 def build_application(recipe_slug: str | None = None,

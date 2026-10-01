@@ -29,7 +29,8 @@ from .plan import (GateCode, PlanAlert, PlanExecution, QueryPlan, QueryStep,
                    StepKind, StepResult)
 from .query_parser import parse_input, validate_parsed
 from .schemas import ParsedInput, RecipeSpec, RetrievalStats
-from .sql_builder import (THIN_POOL, build_existence_sql, build_options_sql,
+from .sql_builder import (PER_INGREDIENT_LIMIT, THIN_POOL, build_existence_sql,
+                          build_options_sql,
                           build_stats_sql, build_substitute_sql,
                           build_suggestions_sql, inline_for_display)
 from .vocab import db_vocab
@@ -179,7 +180,8 @@ def _brand_regroup(pools: dict[int, list[Product]],
 
 
 def execute_plan(parsed: ParsedInput, plan: QueryPlan, *,
-                 lat: float, lon: float, max_km: float | None) -> PlanRunResult:
+                 lat: float, lon: float, max_km: float | None,
+                 per_ingredient_limit: int = PER_INGREDIENT_LIMIT) -> PlanRunResult:
     recipe = build_recipe(parsed.recipe)        # raises UnparseableRecipe -> 422
     ingredients = parsed.recipe.ingredients
     c = parsed.constraints
@@ -221,7 +223,8 @@ def execute_plan(parsed: ParsedInput, plan: QueryPlan, *,
                 details=details))
 
         # ── t2: options under constraints ──
-        sql, params = build_options_sql(c, ingredients, relaxed, lat, lon, max_km)
+        sql, params = build_options_sql(c, ingredients, relaxed, lat, lon, max_km,
+                                        per_ingredient_limit=per_ingredient_limit)
         rows, ms = _timed(s, sql, params)
         pools: dict[int, list[Product]] = {}
         for row in rows:
@@ -331,7 +334,8 @@ def execute_plan(parsed: ParsedInput, plan: QueryPlan, *,
 
 
 def run_query_plan(text_input: str, *, parsed: ParsedInput | None = None,
-                   lat: float | None = None, lon: float | None = None) -> PlanRunResult:
+                   lat: float | None = None, lon: float | None = None,
+                   per_ingredient_limit: int = PER_INGREDIENT_LIMIT) -> PlanRunResult:
     """Full NL2SQL retrieval. `parsed` injectable for tests (skips the LLM)."""
     from ..config import settings
 
@@ -348,4 +352,5 @@ def run_query_plan(text_input: str, *, parsed: ParsedInput | None = None,
     return execute_plan(parsed, plan,
                         lat=lat if lat is not None else cfg.default_lat,
                         lon=lon if lon is not None else cfg.default_lon,
-                        max_km=max_km)
+                        max_km=max_km,
+                        per_ingredient_limit=per_ingredient_limit)

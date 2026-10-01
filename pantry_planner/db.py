@@ -5,6 +5,7 @@ Tiny persistence layer — SQLite by default, seeded from JSON on demand.
 """
 from __future__ import annotations
 
+import functools
 import json
 import sys
 from pathlib import Path
@@ -157,8 +158,21 @@ class RecipeIngredientRow(Base):
 
 # ─── Engine / session helpers ────────────────────────────────
 
+@functools.lru_cache(maxsize=8)
+def _engine_for(url: str):
+    return create_engine(url, echo=False, future=True)
+
+
 def engine():
-    return create_engine(settings().db_url, echo=False, future=True)
+    """One Engine per DB URL.
+
+    Previously every call built a fresh Engine, so every Session() was a new
+    connect+auth handshake and a lingering backend on Postgres — invisible on
+    SQLite, ~3x slower per query on Postgres, and ten idle backends after a
+    single plan. Keyed by URL (not a singleton) because tests point DB_URL at
+    a different SQLite file per module.
+    """
+    return _engine_for(settings().db_url)
 
 
 def init_schema() -> None:
