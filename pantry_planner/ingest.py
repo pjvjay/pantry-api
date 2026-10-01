@@ -26,13 +26,26 @@ counted as unmatched so the miss stays visible.
 """
 from __future__ import annotations
 
+import getpass
 import json
 import re
 import sys
 from datetime import UTC, datetime
 
 from .models import Product
-from .origins import FULL_CLAIMS
+from .origins import FULL_CLAIMS, PROCESSING_CLAIMS
+
+# ─── Origin submissions (the MCP write path) ─────────────────
+CLAIM_TYPES = sorted(FULL_CLAIMS | PROCESSING_CLAIMS)
+CONFIDENCES = ("high", "medium", "low")
+SUBMISSION_STATUSES = ("pending", "approved", "rejected")
+VERBATIM_MIN, VERBATIM_MAX = 3, 500
+NOTE_MAX, SOURCE_REF_MAX, COUNTRY_MAX = 1000, 300, 80
+REJECT_NOTE_MIN = 3
+# What the submission dedupes on: the same reading of the same label. Not
+# confidence or note — a second agent reading the same words with a
+# different confidence is the same claim, and the queue should hold it once.
+_SUBMISSION_KEY = ("product_id", "claim_type", "country", "verbatim", "importer_only")
 
 MATCH_THRESHOLD = 0.5
 
@@ -318,12 +331,230 @@ def refresh_resolved(product_ids: list[int] | None = None) -> dict:
     return {"products": len(resolved), "by_status": counts}
 
 
+# ─── Origin submissions ──────────────────────────────────────
+# The MCP server's write path and the CLI share these three functions, so
+# a claim is validated, deduplicated and approved the same way whichever
+# door it came through. Every ValueError names the field it is about: the
+# caller (an agent, usually) has to be told what to fix.
+
+def _submission_dict(row, product_name: str, *, duplicate: bool = False) -> dict:
+    return {
+        "id": int(row.id), "product_id": int(row.product_id),
+        "product_name": product_name, "status": str(row.status),
+        "claim_type": str(row.claim_type), "country": str(row.country),
+        "ingredient_origin": str(row.ingredient_origin or ""),
+        "manufactured_in": str(row.manufactured_in or ""),
+        "verbatim": str(row.verbatim), "confidence": str(row.confidence),
+        "importer_only": bool(row.importer_only), "note": str(row.note or ""),
+        "source_ref": str(row.source_ref or ""),
+        "submitted_by": str(row.submitted_by or ""),
+        "submitted_at": str(row.submitted_at or ""),
+        "reviewed_by": str(row.reviewed_by or ""),
+        "reviewed_at": str(row.reviewed_at or ""),
+        "review_note": str(row.review_note or ""),
+        "evidence_id": int(row.evidence_id) if row.evidence_id is not None else None,
+        "duplicate": duplicate,
+    }
+
+
+def _bounded(record: dict, field: str, limit: int) -> str:
+    value = str(record.get(field) or "")
+    if len(value) > limit:
+        raise ValueError(f"{field}: at most {limit} characters, got {len(value)}")
+    return value
+
+
+def submit_origin(record: dict, *, submitted_by: str) -> dict:
+    """Queue a label reading for review. Returns the row plus `duplicate`.
+
+    Validates every field by name, canonicalises the country ("usa" →
+    "United States") and derives the two origin fields exactly as
+    ingest_label_json does: a full claim asserts ingredient content too, a
+    processing claim only says where it was processed.
+
+    Dedupes on (product, claim, country, verbatim, importer_only): a
+    pending twin is returned with duplicate=True; a rejected twin is
+    returned as-is (status rejected, review_note) so the agent sees the
+    earlier verdict instead of re-queueing the same words; an approved twin
+    is returned with duplicate=True because it is already evidence.
+    """
+    from sqlalchemy.orm import Session
+
+    from . import db
+    from .origins import _title, canonical_country, validate_countries
+
+    try:
+        product_id = int(record.get("product_id"))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise ValueError("product_id: an integer product id is required") from None
+    claim_type = str(record.get("claim_type") or "").strip().lower()
+    if claim_type not in CLAIM_TYPES:
+        raise ValueError(f"claim_type: {claim_type!r} is not one of {', '.join(CLAIM_TYPES)}")
+    raw_country = _bounded(record, "country", COUNTRY_MAX).strip()
+    if not raw_country:
+        raise ValueError("country: a country name is required")
+    unknown = validate_countries([raw_country])
+    if unknown:
+        hints = ", ".join(unknown[raw_country]) or "no close match"
+        raise ValueError(f"country: {raw_country!r} is not recognised (did you mean: {hints})")
+    country = _title(canonical_country(raw_country))
+    verbatim = str(record.get("verbatim") or "").strip()
+    if not VERBATIM_MIN <= len(verbatim) <= VERBATIM_MAX:
+        raise ValueError(f"verbatim: {VERBATIM_MIN}-{VERBATIM_MAX} characters of the exact "
+                         f"printed wording, got {len(verbatim)}")
+    confidence = str(record.get("confidence") or "medium").strip().lower()
+    if confidence not in CONFIDENCES:
+        raise ValueError(f"confidence: {confidence!r} is not one of {', '.join(CONFIDENCES)}")
+    note = _bounded(record, "note", NOTE_MAX).strip()
+    source_ref = _bounded(record, "source_ref", SOURCE_REF_MAX).strip()
+    importer_only = bool(record.get("importer_only"))
+
+    with Session(db.engine()) as s:
+        product = s.get(db.ProductRow, product_id)
+        if product is None:
+            raise ValueError(f"product_id: unknown product id {product_id}")
+        product_name = str(product.name)
+        twin = (s.query(db.OriginSubmissionRow)
+                .filter_by(product_id=product_id, claim_type=claim_type,
+                           country=country, verbatim=verbatim,
+                           importer_only=importer_only)
+                .order_by(db.OriginSubmissionRow.id.desc())
+                .first())
+        if twin is not None:
+            return _submission_dict(twin, product_name, duplicate=True)
+        row = db.OriginSubmissionRow(
+            product_id=product_id, claim_type=claim_type, country=country,
+            ingredient_origin=country if claim_type in FULL_CLAIMS else "",
+            manufactured_in=country, verbatim=verbatim, confidence=confidence,
+            importer_only=importer_only, note=note, source_ref=source_ref,
+            submitted_by=submitted_by, submitted_at=_now(), status="pending")
+        s.add(row)
+        s.commit()
+        s.refresh(row)
+        return _submission_dict(row, product_name)
+
+
+def review_submission(submission_id: int, decision: str, *, reviewed_by: str,
+                      note: str = "") -> dict:
+    """Approve or reject a pending submission.
+
+    Approval copies the claim into product_origin_evidence as source
+    "agent-label" (so the resolver treats it like a transcribed label),
+    refreshes the product's resolved summary, and records the evidence row's
+    id on the submission. The submission itself is never moved or deleted:
+    it is the audit trail. A rejection needs a note a later reader can act
+    on. Reviewing a non-pending row is an error naming its current status.
+    """
+    from sqlalchemy.orm import Session
+
+    from . import db
+
+    decision = (decision or "").strip().lower()
+    if decision not in {"approve", "reject"}:
+        raise ValueError(f"decision: {decision!r} must be 'approve' or 'reject'")
+    note = note.strip()
+    if len(note) > NOTE_MAX:
+        raise ValueError(f"note: at most {NOTE_MAX} characters, got {len(note)}")
+    if decision == "reject" and len(note) < REJECT_NOTE_MIN:
+        raise ValueError(f"note: a rejection needs a review note of at least "
+                         f"{REJECT_NOTE_MIN} characters saying why")
+
+    with Session(db.engine()) as s:
+        row = s.get(db.OriginSubmissionRow, submission_id)
+        if row is None:
+            raise ValueError(f"Unknown submission id {submission_id}")
+        if str(row.status) != "pending":
+            raise ValueError(f"Submission {submission_id} is already {row.status}"
+                             f" (reviewed by {row.reviewed_by or 'unknown'})")
+        product = s.get(db.ProductRow, int(row.product_id))
+        product_name = str(product.name) if product is not None else ""
+        product_id = int(row.product_id)
+        evidence_id = None
+        if decision == "approve":
+            rec = {
+                "product_id": product_id, "source": "agent-label",
+                "source_ref": str(row.source_ref or "") or f"submission:{submission_id}",
+                "claim_type": str(row.claim_type), "verbatim": str(row.verbatim),
+                "ingredient_origin": str(row.ingredient_origin or ""),
+                "manufactured_in": str(row.manufactured_in or ""),
+                "confidence": str(row.confidence),
+                "importer_only": bool(row.importer_only),
+                "note": (f"{row.note or ''} [submission {submission_id} by "
+                         f"{row.submitted_by}; approved by {reviewed_by}]").strip(),
+                "observed_at": _now(),
+            }
+            db.save_origin_evidence([rec])
+            refresh_resolved([product_id])
+            ev = (s.query(db.ProductOriginEvidenceRow)
+                  .filter_by(**{k: rec[k] for k in db._EVIDENCE_KEY})
+                  .order_by(db.ProductOriginEvidenceRow.id.desc())
+                  .first())
+            evidence_id = int(ev.id) if ev is not None else None
+        # setattr, as save_resolved_origins does: db.py's legacy Column
+        # declarations type the attributes as Column[...] under mypy.
+        for field, value in {
+            "status": "approved" if decision == "approve" else "rejected",
+            "reviewed_by": reviewed_by, "reviewed_at": _now(),
+            "review_note": note, "evidence_id": evidence_id,
+        }.items():
+            setattr(row, field, value)
+        s.add(row)
+        s.commit()
+        s.refresh(row)
+        return _submission_dict(row, product_name)
+
+
+def list_submissions(status: str | None = "pending", limit: int = 50,
+                     offset: int = 0) -> tuple[list[dict], int]:
+    """A page of submissions (oldest first — it is a queue) and the total
+    matching `status` (None = every status)."""
+    from sqlalchemy import func
+    from sqlalchemy.orm import Session
+
+    from . import db
+
+    if status is not None and status not in SUBMISSION_STATUSES:
+        raise ValueError(f"status: {status!r} is not one of {', '.join(SUBMISSION_STATUSES)}")
+    with Session(db.engine()) as s:
+        q = s.query(db.OriginSubmissionRow)
+        if status is not None:
+            q = q.filter(db.OriginSubmissionRow.status == status)
+        total = int(q.with_entities(func.count(db.OriginSubmissionRow.id)).scalar() or 0)
+        rows = q.order_by(db.OriginSubmissionRow.id).offset(offset).limit(limit).all()
+        ids = {int(r.product_id) for r in rows}
+        names: dict[int, str] = {}
+        if ids:
+            names = {int(p.id): str(p.name) for p in
+                     s.query(db.ProductRow).filter(db.ProductRow.id.in_(ids)).all()}
+        return [_submission_dict(r, names.get(int(r.product_id), "")) for r in rows], total
+
+
+def pending_submission_count(product_id: int) -> int:
+    from sqlalchemy import func
+    from sqlalchemy.orm import Session
+
+    from . import db
+
+    with Session(db.engine()) as s:
+        return int(s.query(func.count(db.OriginSubmissionRow.id))
+                   .filter(db.OriginSubmissionRow.product_id == product_id,
+                           db.OriginSubmissionRow.status == "pending").scalar() or 0)
+
+
 # ─── CLI ─────────────────────────────────────────────────────
+
+def _flag(argv: list[str], name: str, default: str) -> str:
+    return argv[argv.index(name) + 1] if name in argv and argv.index(name) + 1 < len(argv) \
+        else default
+
 
 def main(argv: list[str]) -> int:
     usage = ("Usage: python -m pantry_planner.ingest "
              "{origin|label|grocery} <file>  [--run-id ID]\n"
-             "       python -m pantry_planner.ingest refresh\n\n"
+             "       python -m pantry_planner.ingest refresh\n"
+             "       python -m pantry_planner.ingest submissions [pending|approved|rejected]\n"
+             "       python -m pantry_planner.ingest review <id> approve|reject "
+             "[--note TEXT] [--by NAME]\n\n"
              "Files come from the claude-chrome-container tooling:\n"
              "  ./origin --json > origin.json\n"
              "  ./label  --json photos/*.jpg > labels.json\n"
@@ -335,6 +566,28 @@ def main(argv: list[str]) -> int:
     cmd = argv[0]
     if cmd == "refresh":
         print(json.dumps(refresh_resolved(), indent=2))
+        return 0
+    if cmd == "submissions":
+        status = argv[1] if len(argv) > 1 else "pending"
+        try:
+            items, total = list_submissions(None if status == "all" else status, limit=1000)
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            return 2
+        print(json.dumps({"items": items, "total": total}, indent=2))
+        return 0
+    if cmd == "review":
+        if len(argv) < 3:
+            print(usage, file=sys.stderr)
+            return 2
+        try:
+            out = review_submission(int(argv[1]), argv[2],
+                                    reviewed_by=_flag(argv, "--by", getpass.getuser()),
+                                    note=_flag(argv, "--note", ""))
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            return 2
+        print(json.dumps(out, indent=2))
         return 0
 
     if len(argv) < 2:

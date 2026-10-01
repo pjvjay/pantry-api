@@ -19,6 +19,7 @@ EXPECTED_TOOLS = {
     "find_product", "get_product",
     "plan_recipe", "plan_from_text", "plan_week",
     "get_product_origins", "rank_products_by_origin", "origin_triage",
+    "submit_origin_evidence", "list_origin_submissions", "review_origin_submission",
     "pipeline_status",
 }
 
@@ -116,6 +117,9 @@ async def test_pipeline_status(server):
     status = res.structured_content
     assert status["status"] == "ok"
     assert status["routing_strategy"] in {"cascade", "three_phase"}
+    assert status["mcp_auth"] in {"required", "anonymous"}
+    # In-process is the operator's own process: writes are always allowed.
+    assert status["write_tools"] == "enabled"
     # The invariant is "no plaintext password", not "looks like SQLite":
     # the same suite runs against Postgres in CI, where the URL carries
     # credentials and must come back redacted — and a passwordless URL is

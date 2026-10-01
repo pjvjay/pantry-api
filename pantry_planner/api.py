@@ -36,10 +36,13 @@ async def _lifespan(app: FastAPI):
     # Starlette never runs a mounted sub-app's lifespan, so the MCP
     # session manager must be driven from here — without it every /mcp
     # request 500s even though everything imports cleanly.
+    # Drive the manager of the app mounted below, not whichever one the
+    # SDK built last: every streamable_http_app() call installs a fresh
+    # session manager on the server, so a later call elsewhere (a test
+    # inspecting routes) would otherwise leave the mounted app's own
+    # manager never started and every /mcp request a 500.
     if MCP_HTTP_ENABLED:
-        from .mcp_server import server as mcp_server
-
-        async with mcp_server.session_manager.run():
+        async with _MCP_SESSION_MANAGER.run():
             yield
     else:
         yield
@@ -300,5 +303,8 @@ def origin_triage() -> list[dict]:
 # session manager that _lifespan drives.
 if MCP_HTTP_ENABLED:
     from .mcp_server import http_app
+    from .mcp_server import server as _mcp_server
 
-    app.mount("/", http_app())
+    _MCP_APP = http_app()
+    _MCP_SESSION_MANAGER = _mcp_server.session_manager   # the one _MCP_APP serves
+    app.mount("/", _MCP_APP)

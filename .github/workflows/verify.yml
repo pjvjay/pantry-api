@@ -90,3 +90,4 @@ jobs:
           test "$p" -ge 62 && test "$r" -ge 7 && test "$s" -gt 0 \
             || { echo "::error::suite did not fully exercise Postgres"; exit 1; }
           q "select to_regclass('product_origin_evidence') is not null" | grep -q t
+          q "select to_regclass('origin_submissions') is not null" | grep -q t

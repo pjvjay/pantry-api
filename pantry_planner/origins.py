@@ -52,6 +52,10 @@ from .models import (
 #                        may be imported and must be qualified as such
 FULL_CLAIMS = {"product-of", "grown-in", "farmed-in", "harvested-in", "caught-in"}
 PROCESSING_CLAIMS = {"made-in", "prepared-in", "packaged-in"}
+# Sources that are a transcription of the printed package: the container's
+# label-photo reads and reviewer-approved agent submissions (ingest.
+# review_submission). Both outrank a crowd-sourced record at equal claim.
+LABEL_SOURCES = frozenset({"label-photo", "agent-label"})
 NON_CLAIMS = {"unknown", "conflicting", "none", "imported"}
 
 CONF_ORDER = {"high": 3, "medium": 2, "low": 1}
@@ -441,7 +445,7 @@ def resolve_origin(product_id: int, product_name: str, evidence: list
         return (
             1 if (e.claim_type or "") in FULL_CLAIMS else 0,
             CONF_ORDER.get(e.confidence or "low", 1),
-            1 if e.source == "label-photo" else 0,
+            1 if e.source in LABEL_SOURCES else 0,
         )
 
     # Fields are merged across rows, not read off the strongest one: one

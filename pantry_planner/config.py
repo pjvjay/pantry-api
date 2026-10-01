@@ -56,6 +56,37 @@ def redact_db_url(url: str) -> str:
     return url
 
 
+# MCP bearer tokens: "label:secret[,label:secret...]". The label is what a
+# submission records as its submitter/reviewer, so it should name a person
+# or a client, never the secret. Parsed here so a weak token fails the
+# process at startup rather than quietly protecting nothing.
+MCP_TOKEN_MIN_LENGTH = 16
+
+
+def parse_mcp_auth_tokens(raw: str) -> tuple[tuple[str, str], ...]:
+    """Parse MCP_AUTH_TOKENS into (label, secret) pairs.
+
+    Entries are comma-separated and whitespace-stripped; empty entries are
+    ignored; an entry without a colon (or with an empty label) is labelled
+    `token-<n>` by its 1-based position. A secret shorter than
+    MCP_TOKEN_MIN_LENGTH raises — a guessable token is worse than none,
+    because it reads as protection. The error never contains the secret.
+    """
+    out: list[tuple[str, str]] = []
+    for n, entry in enumerate(
+            (e.strip() for e in raw.split(",") if e.strip()), start=1):
+        label, sep, secret = entry.partition(":")
+        if not sep:
+            label, secret = "", entry
+        label, secret = label.strip() or f"token-{n}", secret.strip()
+        if len(secret) < MCP_TOKEN_MIN_LENGTH:
+            raise ValueError(
+                f"MCP_AUTH_TOKENS entry {n} ({label!r}): secret must be at least "
+                f"{MCP_TOKEN_MIN_LENGTH} characters, got {len(secret)}")
+        out.append((label, secret))
+    return tuple(out)
+
+
 @dataclass(frozen=True)
 class Settings:
     # Auth
@@ -98,6 +129,11 @@ class Settings:
     # SQL templates, gates, stats, trip/week optimizers — runs unchanged.
     demo_mode: bool
 
+    # MCP_AUTH_TOKENS: (label, secret) pairs accepted as bearer tokens on
+    # /mcp. Empty → the endpoint is anonymous and write tools refuse over
+    # HTTP (stdio is the operator's own process and stays trusted).
+    mcp_auth_tokens: tuple[tuple[str, str], ...]
+
     @staticmethod
     def from_env() -> "Settings":
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -130,6 +166,7 @@ class Settings:
             default_lon=float(os.environ.get("DEFAULT_LON", "-123.12")),
             travel_cost_per_km=float(os.environ.get("TRAVEL_COST_PER_KM", "0.50")),
             demo_mode=os.environ.get("DEMO_MODE", "").lower() in {"1", "true", "yes"},
+            mcp_auth_tokens=parse_mcp_auth_tokens(os.environ.get("MCP_AUTH_TOKENS", "")),
         )
 
 

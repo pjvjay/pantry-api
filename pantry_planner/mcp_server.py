@@ -22,7 +22,8 @@ import os
 from pathlib import Path
 from typing import Annotated
 
-from mcp.server.mcpserver import MCPServer
+from mcp.server.auth.middleware.auth_context import get_access_token
+from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
@@ -36,6 +37,13 @@ from .models import OriginRanking, ProductOrigin, Recipe, ShoppingPlan, WeekPlan
 _READ = ToolAnnotations(read_only_hint=True, open_world_hint=False)
 _PLAN = ToolAnnotations(read_only_hint=True, open_world_hint=False,
                         idempotent_hint=False)
+# Write tools: they add to a review queue or copy a reviewed claim into
+# evidence; nothing is ever deleted. Submitting is idempotent (the queue
+# dedupes the same reading), reviewing is not (a second review errors).
+_SUBMIT = ToolAnnotations(read_only_hint=False, destructive_hint=False,
+                          open_world_hint=False, idempotent_hint=True)
+_REVIEW = ToolAnnotations(read_only_hint=False, destructive_hint=False,
+                          open_world_hint=False, idempotent_hint=False)
 
 # REST-parity input bounds (api.py): the MCP endpoint is as public as the
 # REST one, so a paste, a list or a page size is capped the same way.
@@ -88,6 +96,8 @@ class PipelineStatus(BaseModel):
     db: str
     anthropic_key_configured: bool
     demo_mode: bool
+    mcp_auth: str               # "required" (tokens configured) | "anonymous"
+    write_tools: str            # "enabled" | "disabled" for THIS caller
 
 
 class TriageCandidate(BaseModel):
@@ -161,6 +171,37 @@ class ProductDetail(BaseModel):
     avg_rating: float | None
 
 
+class Submission(BaseModel):
+    """One origin reading in the review queue. `status` is "pending" until
+    a reviewer acts; only "approved" has become evidence (`evidence_id`)."""
+    id: int
+    product_id: int
+    product_name: str
+    status: str
+    claim_type: str
+    country: str
+    ingredient_origin: str
+    manufactured_in: str
+    verbatim: str
+    confidence: str
+    importer_only: bool
+    note: str
+    source_ref: str
+    submitted_by: str
+    submitted_at: str
+    reviewed_by: str
+    reviewed_at: str
+    review_note: str
+    evidence_id: int | None
+    duplicate: bool = False     # True when this call inserted nothing
+
+
+class SubmissionPage(BaseModel):
+    items: list[Submission]
+    total: int
+    next_offset: int | None
+
+
 def _check_countries(*lists) -> None:
     """Unknown country names are an error the agent must see, not a silent
     no-op filter that reports success. Suggests the closest spellings."""
@@ -174,6 +215,38 @@ def _check_countries(*lists) -> None:
         raise ToolError("Unrecognised country name(s): " + "; ".join(parts)
                         + ". Use a country name or common alias such as "
                           "'United States', 'USA' or 'Canada'.")
+
+
+def _principal(ctx: Context | None) -> tuple[str, str]:
+    """(label, transport) for the caller of the current tool.
+
+    No request object means the tool is running in the operator's own
+    process — stdio, or an in-process call — and is trusted as "local".
+    Over HTTP the label is the bearer token's, or "anonymous" when the
+    endpoint runs without MCP_AUTH_TOKENS. Headers are never read here:
+    they are client input, not an identity assertion.
+    """
+    try:
+        req = ctx.request_context.request if ctx is not None else None
+    except ValueError:          # "Context is not available outside of a request"
+        req = None
+    if req is None:
+        return ("local", "stdio")
+    tok = get_access_token()
+    return (tok.client_id, "http") if tok is not None else ("anonymous", "http")
+
+
+def _require_write(ctx: Context | None) -> str:
+    """The label to record as submitter/reviewer, or a ToolError when the
+    caller is anonymous over HTTP: an open endpoint must not be able to
+    fill the review queue."""
+    label, transport = _principal(ctx)
+    if transport == "http" and label == "anonymous":
+        raise ToolError(
+            "Submissions are disabled on this endpoint: the operator has not "
+            "configured MCP_AUTH_TOKENS. Run the server over stdio, or ask the "
+            "operator for a token.")
+    return label
 
 
 def _gate_message(e) -> str:
@@ -362,7 +435,7 @@ def get_product(product_id: int, lat: float | None = None,
     from sqlalchemy import func, text
     from sqlalchemy.orm import Session
 
-    from . import db, origins
+    from . import db, ingest, origins
     from .nlsearch.sql_builder import DIST_EXPR, _location_params
 
     lat, lon = _location(lat, lon)
@@ -411,7 +484,7 @@ def get_product(product_id: int, lat: float | None = None,
             unit_uom=str(row.unit_uom or ""), list_price=float(row.price),
             offers=offers, origin=origins.resolve_all([product_id])[product_id],
             evidence=evidence,
-            pending_submissions=0,  # wired to origin_submissions when that table lands
+            pending_submissions=ingest.pending_submission_count(product_id),
             review_count=int(n_reviews),
             avg_rating=float(avg) if avg is not None else None)
 
@@ -612,15 +685,113 @@ def origin_triage() -> list[TriageCandidate]:
             for c in origins.triage_candidates(db.load_all_products())]
 
 
+# ─── Origin submissions (the write path) ─────────────────────
+# An agent that has read a package label can submit what it saw. The
+# submission is a queue entry, not evidence: nothing it says reaches the
+# resolver or the planner until a reviewer approves it, at which point it
+# is COPIED into product_origin_evidence as source "agent-label". Over HTTP
+# the caller must hold a configured bearer token; over stdio the operator's
+# own process is trusted.
+
+@server.tool(title="Submit an origin reading", annotations=_SUBMIT)
+def submit_origin_evidence(product_id: int, claim_type: str,
+                           country: Annotated[str, Field(max_length=80)],
+                           verbatim: Annotated[str, Field(min_length=3, max_length=500)],
+                           confidence: str = "medium", importer_only: bool = False,
+                           note: Annotated[str, Field(max_length=1000)] = "",
+                           source_ref: Annotated[str, Field(max_length=300)] = "",
+                           ctx: Context = None) -> Submission:  # type: ignore[assignment]
+    """Submit a country-of-origin reading from a package label for review.
+    Call find_product first to get the `product_id`. Free — no LLM calls.
+
+    `verbatim` is the EXACT printed wording, character for character —
+    never a paraphrase, never a translation. A reviewer checks it against
+    the claim, so "Product of U.S.A." must not become "Made in USA".
+
+    `claim_type` says what the wording legally asserts:
+      product-of / grown-in / farmed-in / harvested-in / caught-in — a FULL
+        claim: all or virtually all (>=98%) of the content is from that
+        country. Fills ingredient_origin and manufactured_in.
+      made-in / prepared-in / packaged-in — a PROCESSING claim: the last
+        substantial transformation happened there; the ingredients may
+        well be imported. Fills manufactured_in only.
+    An "Imported by …" or "Distributed by …" address is NOT an origin: set
+    `importer_only=True` so it is recorded but never ranked as provenance.
+    `confidence`: high = the full declaration is legible; medium = partial
+    or cropped; low = inferred from a flag, address or fragment.
+
+    Submissions are PENDING and change nothing — not the product's origin,
+    not any plan — until a reviewer approves them with
+    review_origin_submission. Resubmitting the same reading returns the
+    existing entry (`duplicate=True`) rather than queueing it twice; if it
+    was rejected you get the rejection and its note. Validation failures
+    name the field and the allowed values; unknown country spellings come
+    back with suggestions."""
+    from . import ingest
+
+    label = _require_write(ctx)
+    _check_countries([country])
+    try:
+        return Submission(**ingest.submit_origin({
+            "product_id": product_id, "claim_type": claim_type, "country": country,
+            "verbatim": verbatim, "confidence": confidence,
+            "importer_only": importer_only, "note": note, "source_ref": source_ref,
+        }, submitted_by=label))
+    except ValueError as e:
+        raise ToolError(str(e)) from e
+
+
+@server.tool(title="List origin submissions", annotations=_READ)
+def list_origin_submissions(status: str | None = "pending",
+                            limit: Annotated[int, Field(ge=1, le=200)] = 50,
+                            offset: Annotated[int, Field(ge=0)] = 0) -> SubmissionPage:
+    """Page through the origin review queue, oldest first. `status` is
+    "pending" (default), "approved", "rejected" or null for every status.
+    `next_offset` is null on the last page. Free — no LLM calls."""
+    from . import ingest
+
+    try:
+        items, total = ingest.list_submissions(status, limit=limit, offset=offset)
+    except ValueError as e:
+        raise ToolError(str(e)) from e
+    end = offset + len(items)
+    return SubmissionPage(items=[Submission(**d) for d in items], total=total,
+                          next_offset=end if end < total else None)
+
+
+@server.tool(title="Review an origin submission", annotations=_REVIEW)
+def review_origin_submission(submission_id: int, decision: str,
+                             note: Annotated[str, Field(max_length=1000)] = "",
+                             ctx: Context = None) -> Submission:  # type: ignore[assignment]
+    """Approve or reject a pending submission. `decision` is "approve" or
+    "reject"; a rejection needs a `note` (>= 3 chars) saying why, so the
+    next reader can tell a blurry photo from a wrong claim. Approval copies
+    the reading into the evidence table as source "agent-label", refreshes
+    the product's resolved origin, and from then on plan tools honour it.
+    Review each one against get_product first: does the verbatim wording
+    support the claim type and the country? A submission can be reviewed
+    once; reviewing it again is an error naming its status."""
+    from . import ingest
+
+    label = _require_write(ctx)
+    try:
+        return Submission(**ingest.review_submission(
+            submission_id, decision, reviewed_by=label, note=note))
+    except ValueError as e:
+        raise ToolError(str(e)) from e
+
+
 # ─── Status ──────────────────────────────────────────────────
 
 @server.tool(title="Pipeline status", annotations=_READ)
-def pipeline_status() -> PipelineStatus:
+def pipeline_status(ctx: Context = None) -> PipelineStatus:  # type: ignore[assignment]
     """Active configuration: routing strategy, models, confidence
-    threshold, DB target. Free — no LLM calls."""
+    threshold, DB target, and whether this caller may submit origin
+    readings (`write_tools`). Free — no LLM calls."""
     from .config import redact_db_url, settings
 
     cfg = settings()
+    label, transport = _principal(ctx)
     return PipelineStatus(
         status="ok",
         routing_strategy=cfg.routing_strategy,
@@ -630,6 +801,9 @@ def pipeline_status() -> PipelineStatus:
         db=redact_db_url(cfg.db_url),
         anthropic_key_configured=bool(cfg.anthropic_api_key),
         demo_mode=cfg.demo_mode,
+        mcp_auth="required" if cfg.mcp_auth_tokens else "anonymous",
+        write_tools=("disabled" if transport == "http" and label == "anonymous"
+                     else "enabled"),
     )
 
 
@@ -639,16 +813,22 @@ def http_app():
     """Streamable HTTP ASGI app, mounted by api.py. Stateless + plain
     JSON responses: no session affinity or SSE needed behind nginx.
     DNS-rebinding protection is off because the app sits behind a
-    reverse proxy whose Host header is the public hostname."""
+    reverse proxy whose Host header is the public hostname.
+
+    Bearer auth is layered on by mcp_auth.install: with MCP_AUTH_TOKENS
+    set every request needs a token (401 otherwise); unset, the endpoint
+    is anonymous and the write tools refuse."""
     from mcp.server.transport_security import TransportSecuritySettings
 
-    return server.streamable_http_app(
+    from .mcp_auth import install
+
+    return install(server.streamable_http_app(
         streamable_http_path="/mcp",
         json_response=True,
         stateless_http=True,
         transport_security=TransportSecuritySettings(
             enable_dns_rebinding_protection=False),
-    )
+    ))
 
 
 def main() -> None:

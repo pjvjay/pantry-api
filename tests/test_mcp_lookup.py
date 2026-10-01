@@ -349,14 +349,17 @@ async def test_input_schemas_advertise_the_bounds(server):
 READ_TOOLS = {
     "list_recipes", "get_recipe", "list_products", "find_product", "get_product",
     "get_product_origins", "rank_products_by_origin", "origin_triage", "pipeline_status",
+    "list_origin_submissions",
 }
 PLAN_TOOLS = {"plan_recipe", "plan_from_text", "plan_week"}
+# Write tools add to a queue or copy into evidence; nothing is destroyed.
+WRITE_TOOLS = {"submit_origin_evidence", "review_origin_submission"}
 
 
 @pytest.mark.asyncio
 async def test_every_tool_is_annotated_and_titled(server):
     tools = {t.name: t for t in await server.list_tools()}
-    assert set(tools) == READ_TOOLS | PLAN_TOOLS
+    assert set(tools) == READ_TOOLS | PLAN_TOOLS | WRITE_TOOLS
     for name, t in tools.items():
         assert t.annotations is not None, name
         assert t.title, name
@@ -366,4 +369,10 @@ async def test_every_tool_is_annotated_and_titled(server):
     for name in PLAN_TOOLS:
         assert tools[name].annotations.read_only_hint is True, name
         assert tools[name].annotations.idempotent_hint is False, name
+    for name in WRITE_TOOLS:
+        assert tools[name].annotations.read_only_hint is False, name
+        assert tools[name].annotations.destructive_hint is False, name
+    # Resubmitting the same reading is deduped; a second review is an error.
+    assert tools["submit_origin_evidence"].annotations.idempotent_hint is True
+    assert tools["review_origin_submission"].annotations.idempotent_hint is False
     assert tools["plan_recipe"].title == "Plan a recipe"
