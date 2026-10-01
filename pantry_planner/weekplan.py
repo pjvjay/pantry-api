@@ -31,8 +31,12 @@ from .nlsearch.plan import GateCode, PlanAlert, PlanExecution, StepKind, StepRes
 from .nlsearch.planner import PlanAborted
 from .nlsearch.query_parser import ALLOWED_TAGS
 from .nlsearch.schemas import Constraints, IngredientSpec
-from .nlsearch.sql_builder import (build_options_sql, build_price_matrix_sql,
-                                   inline_for_display)
+from .nlsearch.sql_builder import (
+    PER_INGREDIENT_LIMIT,
+    build_options_sql,
+    build_price_matrix_sql,
+    inline_for_display,
+)
 from .nlsearch.units import tokens
 from .selector import call_selector
 
@@ -45,11 +49,12 @@ def _timed(session: Session, sql: str, params: dict) -> tuple[list, int]:
 
 def _batched_pools(session: Session, specs: list[IngredientSpec], c: Constraints,
                    lat: float, lon: float, max_km: float | None,
-                   execution: PlanExecution, step_id: str, label_prefix: str) -> dict[int, list]:
+                   execution: PlanExecution, step_id: str, label_prefix: str,
+                   limit: int = PER_INGREDIENT_LIMIT) -> dict[int, list]:
     from .nlsearch.planner import _row_to_product
 
     sql, params = build_options_sql(c, specs, relaxed=set(), lat=lat, lon=lon,
-                                    max_km=max_km)
+                                    max_km=max_km, per_ingredient_limit=limit)
     rows, ms = _timed(session, sql, params)
     pools: dict[int, list] = {}
     for row in rows:
@@ -66,8 +71,13 @@ def _batched_pools(session: Session, specs: list[IngredientSpec], c: Constraints
 _DETAIL_CAP = 12
 
 
+def _shown_names(emptied: dict) -> list[str]:
+    """The ingredients both the message and the details list name — one
+    sorted, capped list, so the two can never disagree."""
+    return sorted({n for n, _ in emptied.values()})[:_DETAIL_CAP]
+
+
 def _name_list(emptied: dict) -> str:
-    """Names in the abort message, capped to match the details list."""
     names = sorted({n for n, _ in emptied.values()})
     shown = ", ".join(names[:_DETAIL_CAP])
     more = len(names) - _DETAIL_CAP
@@ -130,8 +140,12 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
         raise PlanAborted(execution)
 
     with Session(db.engine()) as s:
+        # With an exclusion active the cheapest-8 shortlist is taken BEFORE the
+        # origin filter, so 8 excluded products hid a valid 9th. Retrieve wide,
+        # filter, then trim back to the usual size below.
+        limit = 10_000 if exclude_origin else PER_INGREDIENT_LIMIT
         pools = _batched_pools(s, specs, c, lat, lon, max_distance_km,
-                               execution, "w1_options", "library retrieval")
+                               execution, "w1_options", "library retrieval", limit=limit)
 
         # ── w2: head-noun fallback for strict-AND misses ──
         empty = [g for g in range(len(specs)) if not pools.get(g)]
@@ -146,7 +160,8 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
             if fb_specs:
                 fb_pools = _batched_pools(s, fb_specs, c, lat, lon,
                                           max_distance_km, execution,
-                                          "w2_fallback", "head-noun fallback")
+                                          "w2_fallback", "head-noun fallback",
+                                          limit=limit)
                 for i, g in enumerate(fb_map):
                     if fb_pools.get(i):
                         pools[g] = fb_pools[i]
@@ -174,7 +189,7 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
                 kept, dropped = origins_mod.filter_pool(
                     pool, exclude=exclude_origin, origins=origins_map)
                 dropped_ids.update(p.id for p, _c, _f in dropped)
-                pools[g] = kept
+                pools[g] = sorted(kept, key=_charged)[:PER_INGREDIENT_LIMIT]
                 if dropped and not kept:
                     origin_emptied[g] = (specs[g].name, dropped)
             if dropped_ids:
@@ -217,6 +232,7 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
             # library, say so and say what it cost — a generic "relax a
             # dietary filter" sends the user to the wrong knob.
             if origin_emptied:
+                by_name = {n: r for n, r in origin_emptied.values()}
                 execution.aborted = PlanAlert(
                     stage="origin_filter", code=GateCode.excluded_by_origin,
                     message=(f"Excluding {', '.join(exclude_origin or [])} "
@@ -226,13 +242,12 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
                              f"listed per ingredient."),
                     details=[{
                         "name": name,
-                        "reason": (f"all {len(removed)} candidate(s) are evidenced "
+                        "reason": (f"all {len(by_name[name])} candidate(s) are evidenced "
                                    f"as coming from an excluded country"),
                         "suggestions": [
                             f"{p.name} (${_charged(p):.2f}) — {country} via {field}"
-                            for p, country, field in removed[:5]],
-                    } for name, removed in
-                        {n: r for n, r in origin_emptied.values()}.items()][:_DETAIL_CAP])
+                            for p, country, field in by_name[name][:5]],
+                    } for name in _shown_names(origin_emptied)])
             else:
                 execution.aborted = PlanAlert(
                     stage="w2_fallback",

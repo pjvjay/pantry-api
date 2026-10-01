@@ -70,7 +70,9 @@ def _pools(recipe):
 
     cfg = settings()
     raw = flow._ingredient_pools(recipe, cfg.default_lat, cfg.default_lon)
-    return {recipe.ingredients[k].name: {p.id for p in v} for k, v in raw.items()}
+    # Direct candidates only: relaxed (head-noun) matches are alternatives the
+    # gate may offer, never candidates — see test_origin_round3.py.
+    return {recipe.ingredients[k].name: {p.id for p in v["direct"]} for k, v in raw.items()}
 
 
 # ─── The blocking defect: a line must come from ITS OWN candidates ────

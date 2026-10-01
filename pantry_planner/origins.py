@@ -109,19 +109,41 @@ _ALIASES: dict[str, set[str]] = {
     "cabo verde": {"cabo verde", "cape verde"},
     "eswatini": {"eswatini", "swaziland"},
     "timor-leste": {"timor-leste", "east timor"},
-    "north macedonia": {"north macedonia", "macedonia"},
+    # Not bare "macedonia": that is also a Greek region on Greek labels.
+    "north macedonia": {"north macedonia", "republic of north macedonia"},
     "vietnam": {"vietnam", "viet nam"},
     "russia": {"russia", "russian federation"},
     "united arab emirates": {"united arab emirates", "uae", "u.a.e"},
     "democratic republic of the congo": {"democratic republic of the congo",
                                          "dr congo", "drc", "congo-kinshasa"},
+    # The OTHER Congo. Bare "congo" is ambiguous and is neither's form.
+    "republic of the congo": {"republic of the congo", "congo-brazzaville",
+                              "congo brazzaville"},
+    # Endonyms and ISO-style forms people actually type
+    "germany": {"germany", "deutschland"}, "italy": {"italy", "italia"},
+    "spain": {"spain", "espana"}, "brazil": {"brazil", "brasil"},
+    "sweden": {"sweden", "sverige"}, "norway": {"norway", "norge"},
+    "finland": {"finland", "suomi"}, "poland": {"poland", "polska"},
+    "greece": {"greece", "hellas"}, "japan": {"japan", "nippon", "nihon"},
+    "austria": {"austria", "osterreich"},
+    "switzerland": {"switzerland", "schweiz", "suisse", "svizzera"},
+    "belgium": {"belgium", "belgie", "belgique"}, "denmark": {"denmark", "danmark"},
+    "hungary": {"hungary", "magyarorszag"}, "croatia": {"croatia", "hrvatska"},
+    "kyrgyzstan": {"kyrgyzstan", "kyrgyz republic"},
+    "ireland": {"ireland", "republic of ireland"},
+    "saint vincent and the grenadines": {"saint vincent and the grenadines",
+                                         "saint vincent"},
+    "macau": {"macau", "macao"},
     "bosnia and herzegovina": {"bosnia and herzegovina", "bosnia"},
     "slovakia": {"slovakia", "slovak republic"},
     "vatican city": {"vatican city", "holy see", "vatican"},
-    "taiwan": {"taiwan", "republic of china"},
+    # Not "republic of china": it fires inside "People's Republic of China",
+    # so excluding Taiwan removed every PRC-labelled product.
+    "taiwan": {"taiwan", "republic of china (taiwan)", "chinese taipei"},
     "china": {"china", "people's republic of china", "prc"},
     "iran": {"iran", "islamic republic of iran"},
-    "laos": {"laos", "lao"},
+    # Not bare "lao": it is a common label word ("Lao Gan Ma").
+    "laos": {"laos", "lao people's democratic republic", "lao pdr"},
     "syria": {"syria", "syrian arab republic"},
     "tanzania": {"tanzania", "united republic of tanzania"},
     "brunei": {"brunei", "brunei darussalam"},
@@ -133,6 +155,9 @@ _ALIASES: dict[str, set[str]] = {
 # regions. A shorter name matching INSIDE one of these is a false positive:
 # "Guinea" inside "Papua New Guinea", "Ireland" inside "Northern Ireland".
 _SUPERSETS = (
+    "people's republic of china", "republic of china",
+    "democratic republic of the congo", "republic of the congo",
+    "lao people's democratic republic", "north macedonia",
     "papua new guinea", "equatorial guinea", "guinea-bissau",
     "northern ireland", "south africa", "south korea", "north korea",
     "south sudan", "dominican republic", "trinidad and tobago",
@@ -154,7 +179,7 @@ KNOWN_COUNTRIES: frozenset[str] = frozenset({
     "bangladesh", "barbados", "belarus", "belgium", "belize", "benin", "bhutan", "bolivia",
     "bosnia and herzegovina", "botswana", "brazil", "brunei", "bulgaria", "burkina faso",
     "burundi", "cabo verde", "cape verde", "cambodia", "cameroon", "canada",
-    "central african republic", "chad", "chile", "china", "colombia", "comoros", "congo",
+    "central african republic", "chad", "chile", "china", "colombia", "comoros",
     "democratic republic of the congo", "costa rica", "cote d'ivoire", "ivory coast",
     "croatia", "cuba", "cyprus", "czechia", "czech republic", "denmark", "djibouti",
     "dominica", "dominican republic", "ecuador", "egypt", "el salvador", "equatorial guinea",
@@ -168,7 +193,7 @@ KNOWN_COUNTRIES: frozenset[str] = frozenset({
     "marshall islands", "mauritania", "mauritius", "mexico", "micronesia", "moldova", "monaco",
     "mongolia", "montenegro", "morocco", "mozambique", "myanmar", "burma", "namibia", "nauru",
     "nepal", "netherlands", "new zealand", "nicaragua", "niger", "nigeria", "north macedonia",
-    "macedonia", "norway", "oman", "pakistan", "palau", "palestine", "panama",
+    "norway", "oman", "pakistan", "palau", "palestine", "panama",
     "papua new guinea", "paraguay", "peru", "philippines", "poland", "portugal", "qatar",
     "romania", "russia", "rwanda", "saint kitts and nevis", "saint lucia",
     "saint vincent and the grenadines", "samoa", "san marino", "sao tome and principe",
@@ -180,6 +205,14 @@ KNOWN_COUNTRIES: frozenset[str] = frozenset({
     "united arab emirates", "united kingdom", "united states", "uruguay", "uzbekistan",
     "vanuatu", "vatican city", "venezuela", "vietnam", "yemen", "zambia", "zimbabwe",
     "hong kong", "puerto rico", "greenland", "faroe islands",
+    # territories that appear as origins on labels
+    "curacao", "bermuda", "guam", "macau", "aruba", "cayman islands",
+    "french polynesia", "new caledonia", "gibraltar", "jersey", "guernsey",
+    "isle of man", "us virgin islands", "british virgin islands", "sint maarten",
+    "saint martin", "reunion", "martinique", "guadeloupe", "mayotte",
+    "american samoa", "northern mariana islands", "cook islands", "niue",
+    "falkland islands", "montserrat", "anguilla", "turks and caicos islands",
+    "saint helena", "western sahara", "republic of the congo",
 })
 
 # surface form -> canonical country
@@ -200,7 +233,11 @@ def _normalize(text: str) -> str:
     t = unicodedata.normalize("NFKD", (text or "").lower())
     t = "".join(c for c in t if not unicodedata.combining(c))
     t = t.replace("\u2019", "'").replace("\u2018", "'").replace("`", "'")
+    t = t.replace("&", " and ")
+    t = re.sub(r"(?<![a-z])st\.?\s+", "saint ", t)        # St. Lucia -> saint lucia
     t = re.sub(r"\s+", " ", t.replace(".", "")).strip()
+    # ISO list forms: "Moldova, Republic of" -> "moldova"
+    t = re.sub(r",\s+[a-z' ]+ of$", "", t)
     # "The Netherlands", "the UK": the article is never part of the name.
     return re.sub(r"^the\s+", "", t)
 
@@ -220,8 +257,9 @@ _SUGGESTION_HINTS = {"america": "united states", "american": "united states",
 # Inputs that are ambiguous or not countries: name the real choices rather than
 # let difflib offer "Monaco" for Ontario.
 _AMBIGUOUS = {"korea": ["South Korea", "North Korea"],
-              "congo": ["Democratic Republic Of The Congo", "Congo"],
-              "ontario": ["Canada"], "quebec": ["Canada"],
+              "congo": ["Republic of the Congo", "Democratic Republic of the Congo"],
+              "macedonia": ["North Macedonia", "(or a Greek region — name the country)"],
+              "ontario": ["Canada"],
               "eu": ["(a bloc, not a country — name the member state)"],
               "europe": ["(a continent, not a country — name the country)"]}
 
@@ -247,6 +285,13 @@ def preference_rank(origin: ProductOrigin | None, preference: list[str]) -> int:
     return idx * 2 + (0 if claim in FULL_CLAIMS else 1)
 
 
+def _title(name: str) -> str:
+    """Title-case a country name without capitalising its small words."""
+    small = {"of", "the", "and"}
+    words = name.split()
+    return " ".join(w if (i and w in small) else w.capitalize() for i, w in enumerate(words))
+
+
 def validate_countries(names: list[str]) -> dict[str, list[str]]:
     """Map each UNRECOGNISED name to its closest known spellings.
 
@@ -260,14 +305,14 @@ def validate_countries(names: list[str]) -> dict[str, list[str]]:
     universe = sorted(KNOWN_COUNTRIES | set(_SURFACE_TO_CANON) | set(_SUGGESTION_HINTS))
     for raw in names or []:
         n = canonical_country(raw)
-        if not n or n in KNOWN_COUNTRIES or n in _SURFACE_TO_CANON:
-            continue
-        if n in _AMBIGUOUS:
+        if n in _AMBIGUOUS:            # before the known-name shortcut, or it is dead code
             unknown[raw] = _AMBIGUOUS[n]
+            continue
+        if not n or n in KNOWN_COUNTRIES or n in _SURFACE_TO_CANON:
             continue
         seen: list[str] = []
         for s in difflib.get_close_matches(n, universe, n=5, cutoff=0.6):
-            canon = _SUGGESTION_HINTS.get(s, _SURFACE_TO_CANON.get(s, s)).title()
+            canon = _title(_SUGGESTION_HINTS.get(s, _SURFACE_TO_CANON.get(s, s)))
             if canon not in seen:
                 seen.append(canon)
         unknown[raw] = seen[:3]
