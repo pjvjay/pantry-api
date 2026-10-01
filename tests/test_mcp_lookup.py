@@ -324,10 +324,10 @@ async def test_plan_from_text_accepts_exactly_8000_chars(server):
             os.environ["ANTHROPIC_API_KEY"] = saved_key
         config.settings.cache_clear()
     assert not res.is_error
-    plan = res.structured_content
-    assert {li["ingredient_name"] for li in plan["line_items"]} == {
+    summary = res.structured_content["summary"]
+    assert {ln["ingredient"] for ln in summary["lines"]} == {
         "penne", "garlic", "crushed tomatoes"}
-    assert plan["total_cost"] > 0
+    assert summary["total_cost"] > 0
 
 
 @pytest.mark.asyncio

@@ -28,7 +28,17 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 
-from .models import OriginRanking, ProductOrigin, Recipe, ShoppingPlan, WeekPlan
+from .models import (
+    OriginCoverage,
+    OriginRanking,
+    PlanLineItem,
+    Product,
+    ProductOrigin,
+    Recipe,
+    ShoppingPlan,
+    TripOption,
+    WeekPlan,
+)
 
 # Tool annotations are hints for the client, not security: a read tool
 # never writes, and nothing here reaches outside the seeded catalog, so
@@ -51,6 +61,8 @@ MAX_TEXT = 8000
 MAX_LIST = 50
 MAX_SEARCH = 200
 MAX_IDS = 200
+# Every value origins.resolve_origin can stamp on ProductOrigin.status.
+_ORIGIN_STATUSES = {"resolved", "conflicting", "unknown", "lookup_failed", "guess"}
 
 server = MCPServer(
     name="pantry-planner",
@@ -202,6 +214,109 @@ class SubmissionPage(BaseModel):
     next_offset: int | None
 
 
+class ProductPage(BaseModel):
+    items: list[ProductSummary]
+    total: int                  # matches before the page was cut
+    next_offset: int | None     # None on the last page
+
+
+class OriginPage(BaseModel):
+    items: list[ProductOrigin]
+    total: int                  # rows matching ids/search AND status
+    by_status: dict[str, int]   # over the ids/search set BEFORE the status filter
+    next_offset: int | None
+
+
+# ─── Token-lean plan results ──────────────────────────────────
+# A plan's full shape (ShoppingPlan / WeekPlan) carries the retrieval
+# trace, every trip option and the selector's reasoning per line: 3-19k
+# chars on the demo seed, almost all of it debugging context an agent
+# never reads. The summary keeps what a shopper acts on — the lines, the
+# price, the provenance verdict — and `full` is attached only on request.
+
+class LeanLine(BaseModel):
+    line_no: int
+    ingredient: str
+    product_id: int
+    product: str
+    brand: str
+    size: str
+    store: str
+    price: float
+    confidence: float
+    origin_country: str         # "" unless the line's origin resolved
+    origin_status: str          # the receipt status, or "none" when there is no receipt
+
+
+class Coverage(BaseModel):
+    spend_fraction: float       # the binding measure: what the money did
+    count_fraction: float
+    meets_floor: bool
+    lines_known: int
+    lines_total: int
+    lines_excluded_origin: int
+
+
+class Trip(BaseModel):
+    """The recommended point on the stops-vs-cost frontier."""
+    stores: list[str]
+    total_cost: float
+    savings_vs_one_stop: float
+
+
+class PlanSummary(BaseModel):
+    recipe_slug: str
+    recipe_name: str
+    total_cost: float
+    origin_status: str          # not_requested | verified | unverified
+    coverage: Coverage | None   # only when an origin question was asked
+    lines: list[LeanLine]
+    trip: Trip | None           # None when the planner produced no trip options
+    notes: list[str]            # interpretation, substitutions, coverage warnings
+    llm_cost_usd: float
+    latency_ms: int
+
+
+class PlanResult(BaseModel):
+    summary: PlanSummary
+    full: ShoppingPlan | None = None    # populated only with verbose=True
+
+
+class WeekDay(BaseModel):
+    recipe_slug: str
+    recipe_name: str
+    day_cost: float
+    lines: list[LeanLine]
+
+
+class WeekListItem(BaseModel):
+    product_id: int
+    product: str
+    store: str
+    price: float
+    used_by: list[str]          # recipe names sharing this product
+    origin_country: str
+    origin_status: str
+
+
+class WeekSummary(BaseModel):
+    days: list[WeekDay]
+    shopping_list: list[WeekListItem]   # merged; a shared product appears once
+    total_cost: float
+    standalone_cost: float
+    overlap_savings: float
+    budget: float | None
+    origin_status: str
+    coverage: Coverage | None
+    trip: Trip | None
+    notes: list[str]
+
+
+class WeekResult(BaseModel):
+    summary: WeekSummary
+    full: WeekPlan | None = None        # populated only with verbose=True
+
+
 def _check_countries(*lists) -> None:
     """Unknown country names are an error the agent must see, not a silent
     no-op filter that reports success. Suggests the closest spellings."""
@@ -299,6 +414,104 @@ def _planner_candidates(name: str, lat: float, lon: float) -> list:
         return [_row_to_product(r) for r in s.execute(text(sql), params).mappings()]
 
 
+def _page(total: int, offset: int, page_len: int) -> int | None:
+    """Offset of the next page, or None when this one was the last."""
+    end = offset + page_len
+    return end if end < total else None
+
+
+def _products_by_id(ids: set[int]) -> dict[int, Product]:
+    """Catalog rows for the products a plan chose (brand and pack size are
+    not carried on a plan line)."""
+    from . import db
+
+    if not ids:
+        return {}
+    return {p.id: p for p in db.load_all_products() if p.id in ids}
+
+
+def _lean_line(li: PlanLineItem, products: dict[int, Product]) -> LeanLine:
+    p = products.get(li.product_id)
+    o = li.origin
+    return LeanLine(
+        line_no=li.line_no, ingredient=li.ingredient_name,
+        product_id=li.product_id, product=li.product_name,
+        brand=p.brand if p else "", size=p.unit_size if p else "",
+        store=li.store_name, price=li.price, confidence=li.confidence,
+        origin_country=o.country if o else "",
+        origin_status=o.status if o else "none")
+
+
+def _coverage(c: OriginCoverage | None) -> Coverage | None:
+    if c is None:
+        return None
+    return Coverage(spend_fraction=c.spend_fraction, count_fraction=c.count_fraction,
+                    meets_floor=c.meets_floor, lines_known=c.lines_known,
+                    lines_total=c.lines_total,
+                    lines_excluded_origin=c.lines_excluded_origin)
+
+
+def _trip(options: list[TripOption]) -> Trip | None:
+    best = next((t for t in options if t.recommended), None)
+    if best is None:
+        return None
+    return Trip(stores=best.stores, total_cost=best.total_cost,
+                savings_vs_one_stop=best.savings_vs_one_stop)
+
+
+def _substitution_notes(lines: list[PlanLineItem], prefix: str = "") -> list[str]:
+    """One note per line the selector itself flagged as a substitution."""
+    return [f"{prefix}line {li.line_no} ({li.ingredient_name}): substitution — "
+            f"{li.product_name}"
+            for li in lines if "substitut" in li.reasoning.lower()]
+
+
+def _floor_note(c: OriginCoverage | None) -> list[str]:
+    if c is None or c.meets_floor:
+        return []
+    return [f"coverage below floor: origin known for {c.lines_known} of "
+            f"{c.lines_total} lines ({c.spend_fraction:.0%} of spend, floor "
+            f"{c.floor:.0%}); unknown is not foreign, but do not call this "
+            "basket clean"]
+
+
+def _summarize_plan(plan: ShoppingPlan) -> PlanSummary:
+    products = _products_by_id({li.product_id for li in plan.line_items})
+    notes = (list(plan.interpretation)
+             + _substitution_notes(plan.line_items)
+             + _floor_note(plan.origin_coverage))
+    return PlanSummary(
+        recipe_slug=plan.recipe_slug, recipe_name=plan.recipe_name,
+        total_cost=plan.total_cost, origin_status=plan.origin_status,
+        coverage=_coverage(plan.origin_coverage),
+        lines=[_lean_line(li, products) for li in plan.line_items],
+        trip=_trip(plan.trip_options), notes=notes,
+        llm_cost_usd=plan.total_llm_cost_usd, latency_ms=plan.total_latency_ms)
+
+
+def _summarize_week(plan: WeekPlan) -> WeekSummary:
+    products = _products_by_id({li.product_id for d in plan.days for li in d.line_items})
+    notes = list(plan.notes)
+    for d in plan.days:
+        notes += _substitution_notes(d.line_items, prefix=f"{d.recipe_name}: ")
+    notes += _floor_note(plan.origin_coverage)
+    return WeekSummary(
+        days=[WeekDay(recipe_slug=d.recipe_slug, recipe_name=d.recipe_name,
+                      day_cost=d.day_cost,
+                      lines=[_lean_line(li, products) for li in d.line_items])
+              for d in plan.days],
+        shopping_list=[
+            WeekListItem(product_id=w.product_id, product=w.product_name,
+                         store=w.store_name, price=w.price, used_by=w.used_by,
+                         origin_country=w.origin.country if w.origin else "",
+                         origin_status=w.origin.status if w.origin else "none")
+            for w in plan.shopping_list],
+        total_cost=plan.total_cost, standalone_cost=plan.standalone_cost,
+        overlap_savings=plan.overlap_savings, budget=plan.budget,
+        origin_status=plan.origin_status, coverage=_coverage(plan.origin_coverage),
+        trip=_trip(plan.trip_options), notes=notes)
+
+
 # ─── Catalog / recipe tools (free — DB reads only) ───────────
 
 @server.tool(title="List recipes", annotations=_READ)
@@ -343,21 +556,30 @@ def get_recipe(slug: str) -> Recipe:
 
 @server.tool(title="List products", annotations=_READ)
 def list_products(search: Annotated[str | None, Field(max_length=MAX_SEARCH)] = None,
-                  ) -> list[ProductSummary]:
-    """List the store catalog. Optional `search` filters by
-    case-insensitive substring over name, brand, category and
-    subcategory (recommended — the full catalog is long).
-    Free — no LLM calls."""
+                  category: Annotated[str | None, Field(max_length=MAX_SEARCH)] = None,
+                  limit: Annotated[int, Field(ge=1, le=200)] = 50,
+                  offset: Annotated[int, Field(ge=0)] = 0) -> ProductPage:
+    """Page through the store catalog, ordered by id. `search` is a
+    case-insensitive substring over name, brand, category and subcategory;
+    `category` is an exact (case-insensitive) category such as "pantry",
+    "dairy", "produce" or "meat". `total` counts every match and
+    `next_offset` is null on the last page. For an ingredient lookup the
+    way the planner sees it, prefer find_product. Free — no LLM calls."""
     from . import db
 
-    products = db.load_all_products()
+    products = sorted(db.load_all_products(), key=lambda p: p.id)
     if search:
         needle = search.lower()
         products = [
             p for p in products
             if needle in f"{p.name} {p.brand} {p.category} {p.subcategory}".lower()
         ]
-    return [_product_summary(p) for p in products]
+    if category:
+        wanted = category.strip().lower()
+        products = [p for p in products if (p.category or "").lower() == wanted]
+    page = products[offset:offset + limit]
+    return ProductPage(items=[_product_summary(p) for p in page], total=len(products),
+                       next_offset=_page(len(products), offset, len(page)))
 
 
 # ─── Product lookup (free — DB reads only) ───────────────────
@@ -495,7 +717,7 @@ def get_product(product_id: int, lat: float | None = None,
 def plan_recipe(slug: str,
                 exclude_origin: Annotated[list[str] | None, Field(max_length=MAX_LIST)] = None,
                 preference: Annotated[list[str] | None, Field(max_length=MAX_LIST)] = None,
-                ) -> ShoppingPlan:
+                verbose: bool = False) -> PlanResult:
     """Run the full shopping-plan pipeline for a seeded recipe: an LLM
     matches every ingredient to the best-value product, with a model
     router escalating hard cases. SLOW (10-60s) and costs real Claude
@@ -504,15 +726,19 @@ def plan_recipe(slug: str,
     `exclude_origin` drops candidates positively evidenced as coming from
     those countries (e.g. ["United States"]) before the model ever sees
     them — never candidates that merely lack evidence. `preference` is soft
-    guidance. The plan carries per-line provenance and `origin_coverage`:
-    read its `spend_fraction` and `meets_floor` before describing a basket
-    as clean, because unverified lines are not verified-clean lines."""
+    guidance. Read `summary.origin_status` and `summary.coverage`
+    (`spend_fraction`, `meets_floor`) before describing a basket as clean,
+    because unverified lines are not verified-clean lines; `summary.notes`
+    carries substitutions and the coverage warning. `summary` is the
+    token-lean result; `verbose=True` also attaches `full` (the complete
+    ShoppingPlan with per-line reasoning and every trip option)."""
     from . import flow
     from .nlsearch import PlanAborted
 
     _check_countries(exclude_origin, preference)
     try:
-        return flow.run(slug, exclude=exclude_origin, preference=preference)
+        plan = flow.run(slug, exclude=exclude_origin, preference=preference)
+        return PlanResult(summary=_summarize_plan(plan), full=plan if verbose else None)
     except ValueError as e:
         raise ToolError(f"{e}. Call list_recipes for valid slugs.") from e
     except PlanAborted as e:
@@ -524,19 +750,23 @@ def plan_from_text(recipe_text: Annotated[str, Field(max_length=MAX_TEXT)],
                    lat: float | None = None, lon: float | None = None,
                    exclude_origin: Annotated[list[str] | None, Field(max_length=MAX_LIST)] = None,
                    preference: Annotated[list[str] | None, Field(max_length=MAX_LIST)] = None,
-                   ) -> ShoppingPlan:
+                   verbose: bool = False) -> PlanResult:
     """Plan a shopping basket from PASTED RECIPE TEXT — include the full
     ingredient list (quantities optional) and any shopping notes
     (budget, dietary exclusions); lat/lon optionally set the shopping
     location. Parses the text, runs a staged SQL retrieval plan, then
-    the LLM selector. SLOW (10-60s) and costs real Claude API credits."""
+    the LLM selector. SLOW (10-60s) and costs real Claude API credits.
+    `summary.notes` starts with how the text was interpreted; `trip` is
+    the recommended store split. `verbose=True` attaches `full` with the
+    retrieval `plan_trace` and every trip option."""
     _check_countries(exclude_origin, preference)
     from . import flow
     from .nlsearch import PlanAborted, UnparseableRecipe
 
     try:
-        return flow.run_nl(recipe_text, lat=lat, lon=lon,
+        plan = flow.run_nl(recipe_text, lat=lat, lon=lon,
                            exclude=exclude_origin, preference=preference)
+        return PlanResult(summary=_summarize_plan(plan), full=plan if verbose else None)
     except UnparseableRecipe as e:
         raise ToolError(
             "Couldn't find an ingredient list in that text. Paste a recipe "
@@ -567,24 +797,27 @@ def plan_week(days: Annotated[int, Field(ge=1, le=14)] = 5,
               max_distance_km: float | None = None,
               exclude_origin: Annotated[list[str] | None, Field(max_length=MAX_LIST)] = None,
               preference: Annotated[list[str] | None, Field(max_length=MAX_LIST)] = None,
-              ) -> WeekPlan:
+              verbose: bool = False) -> WeekResult:
     """Plan `days` dinners from the recipe library under an optional
     budget, rewarding ingredient overlap (a shared product is bought
-    once). Returns per-day plans, the merged shopping list, overlap
-    savings, and store-split trip options. exclude_tags filters out
-    recipes containing those dietary tags (e.g. ["dairy", "gluten"]).
-    SLOW (runs the LLM selector per day) and costs real Claude API
-    credits — roughly one plan_recipe per day planned."""
+    once). `summary` has the per-day lines, the merged shopping list
+    (each product once, with `used_by`), overlap savings, the recommended
+    trip and notes (skipped recipes, substitutions, coverage warnings).
+    exclude_tags filters out recipes containing those dietary tags (e.g.
+    ["dairy", "gluten"]). `verbose=True` attaches `full` with the retrieval
+    trace and every trip option. SLOW (runs the LLM selector per day) and
+    costs real Claude API credits — roughly one plan_recipe per day."""
     _check_countries(exclude_origin, preference)
     from . import weekplan
     from .nlsearch import PlanAborted
 
     try:
-        return weekplan.plan_week(
+        plan = weekplan.plan_week(
             days=days, max_total_budget=max_total_budget,
             exclude_tags=exclude_tags or [], lat=lat, lon=lon,
             max_distance_km=max_distance_km,
             exclude_origin=exclude_origin, preference=preference)
+        return WeekResult(summary=_summarize_week(plan), full=plan if verbose else None)
     except PlanAborted as e:
         alert = e.execution.aborted
         raise ToolError(
@@ -601,20 +834,29 @@ def plan_week(days: Annotated[int, Field(ge=1, le=14)] = 5,
 @server.tool(title="Get product origins", annotations=_READ)
 def get_product_origins(product_ids: Annotated[list[int] | None, Field(max_length=MAX_IDS)] = None,
                         search: Annotated[str | None, Field(max_length=MAX_SEARCH)] = None,
-                        ) -> list[ProductOrigin]:
+                        status: str | None = None,
+                        limit: Annotated[int, Field(ge=1, le=200)] = 50,
+                        offset: Annotated[int, Field(ge=0)] = 0) -> OriginPage:
     """Resolved country-of-origin evidence per product - by ids, by a name
-    `search` filter, or the whole catalog. Free, no LLM calls.
+    `search` filter, or the whole catalog - one page at a time, ordered by
+    product id. Free, no LLM calls.
 
-    Read `status` before using `country`: only "resolved" carries usable
-    evidence. "unknown" means no source published an origin, "conflicting"
-    means sources disagreed and no winner was picked, "lookup_failed" means
-    a source did not answer, and "guess" is a name-based hint that must not
-    be treated as provenance. Coverage is thin and biased - most Canadian
-    products resolve to "unknown" - so absence is never evidence of foreign
-    origin."""
+    `by_status` counts EVERY product the ids/search selected, before the
+    `status` filter and before paging, so one call answers "62 products:
+    2 resolved, 60 unknown"; then `status="resolved"` pages through just
+    those. Read `status` before using `country`: only "resolved" carries
+    usable evidence. "unknown" means no source published an origin,
+    "conflicting" means sources disagreed and no winner was picked,
+    "lookup_failed" means a source did not answer, and "guess" is a
+    name-based hint that must not be treated as provenance. Coverage is
+    thin and biased - most Canadian products resolve to "unknown" - so
+    absence is never evidence of foreign origin."""
     from . import db, origins
 
-    products = db.load_all_products()
+    if status is not None and status not in _ORIGIN_STATUSES:
+        raise ToolError(f"Unknown origin status {status!r}. Allowed: "
+                        + ", ".join(sorted(_ORIGIN_STATUSES)) + ".")
+    products = sorted(db.load_all_products(), key=lambda p: p.id)
     if product_ids is not None:
         wanted = set(product_ids)
         products = [p for p in products if p.id in wanted]
@@ -627,8 +869,16 @@ def get_product_origins(product_ids: Annotated[list[int] | None, Field(max_lengt
         needle = search.lower()
         products = [p for p in products
                     if needle in f"{p.name} {p.brand} {p.category}".lower()]
-    resolved = origins.resolve_all([p.id for p in products])
-    return [resolved[p.id] for p in products if p.id in resolved]
+    resolved = origins.resolve_all([p.id for p in products]) if products else {}
+    rows = [resolved[p.id] for p in products if p.id in resolved]
+    by_status: dict[str, int] = {}
+    for o in rows:
+        by_status[o.status] = by_status.get(o.status, 0) + 1
+    if status is not None:
+        rows = [o for o in rows if o.status == status]
+    page = rows[offset:offset + limit]
+    return OriginPage(items=page, total=len(rows), by_status=by_status,
+                      next_offset=_page(len(rows), offset, len(page)))
 
 
 @server.tool(title="Rank products by origin", annotations=_READ)

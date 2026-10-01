@@ -101,14 +101,16 @@ async def test_get_recipe_unknown_slug_is_tool_error(server):
 @pytest.mark.asyncio
 async def test_list_products_search_filter(server):
     res = await server.call_tool("list_products", {"search": "cheese"})
-    products = res.structured_content["result"]
+    page = res.structured_content
+    products = page["items"]
     assert products
+    assert page["total"] == len(products) and page["next_offset"] is None
     assert all("cheese" in
                f"{p['name']} {p['category']} {p['subcategory']}".lower()
                for p in products)
 
     everything = await server.call_tool("list_products", {})
-    assert len(everything.structured_content["result"]) > len(products)
+    assert everything.structured_content["total"] > len(products)
 
 
 @pytest.mark.asyncio
@@ -168,7 +170,9 @@ def evidence():
 @pytest.mark.asyncio
 async def test_get_product_origins_reports_status(server, evidence):
     res = await server.call_tool("get_product_origins", {"search": "basmati"})
-    origins = res.structured_content["result"]
+    page = res.structured_content
+    origins = page["items"]
+    assert page["total"] == 1 and page["by_status"] == {"resolved": 1}
     assert len(origins) == 1
     assert origins[0]["status"] == "resolved"
     assert origins[0]["manufactured_in"] == "India"
