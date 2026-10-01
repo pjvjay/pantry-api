@@ -59,7 +59,13 @@ jobs:
     env:
       # Same suite, production's engine. Dialect differences that SQLite
       # forgives (IN (), stricter GROUP BY, type coercion) fail here.
-      DB_URL: postgresql+psycopg://pantry:pantry@127.0.0.1:5432/pantry
+      #
+      # The test modules read PANTRY_TEST_DB_URL — not DB_URL — because each
+      # module sets DB_URL itself. The first version of this job exported
+      # DB_URL only, so every module silently fell back to SQLite and the
+      # job proved nothing. Hence the self-check step below.
+      PANTRY_TEST_DB_URL: postgresql+psycopg://pantry:pantry@127.0.0.1:5432/pantry
+      PGPASSWORD: pantry
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -68,3 +74,12 @@ jobs:
           cache: pip
       - run: pip install -e ".[dev]"
       - run: pytest -q -p no:randomly
+      - name: Prove the suite actually ran against Postgres
+        # A hollow run leaves these tables absent or empty. Fail loudly
+        # rather than let a green check stand for a backend never touched.
+        run: |
+          n=$(psql -h 127.0.0.1 -U pantry -d pantry -tAc "select count(*) from products")
+          echo "products rows in Postgres after the suite: $n"
+          test "$n" -gt 0 || { echo "::error::suite did not touch Postgres"; exit 1; }
+          psql -h 127.0.0.1 -U pantry -d pantry -tAc \
+            "select to_regclass('product_origin_evidence') is not null" | grep -q t
