@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import contextlib
 import os
+from typing import Annotated
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from . import db, flow
@@ -55,6 +56,25 @@ app = FastAPI(
 )
 
 
+def _check_countries(*lists: list[str] | None) -> None:
+    """Reject unrecognised country names up front.
+
+    A filter that accepts "Amerca", excludes nothing and returns 200 has
+    reported success on a request it did not honour. For a boycott tool that
+    is the worst available outcome, so it is a 422 with the closest matches.
+    """
+    from .origins import validate_countries
+
+    names = [n for lst in lists for n in (lst or [])]
+    unknown = validate_countries(names)
+    if unknown:
+        raise HTTPException(status_code=422, detail={
+            "error": "unrecognised country name(s)",
+            "unknown": unknown,
+            "hint": "Use a country name or common alias, e.g. 'United States', 'USA', 'Canada'.",
+        })
+
+
 @app.get("/health")
 def health() -> dict:
     return {
@@ -65,6 +85,23 @@ def health() -> dict:
         "confidence_threshold": settings().confidence_threshold,
         "demo_mode": settings().demo_mode,
     }
+
+
+@app.get("/metrics")
+def metrics():
+    """Prometheus exposition. Free, no LLM calls, safe to scrape often.
+
+    /health says the process is up. This says whether it is doing its job:
+    LLM spend, plan outcomes by gate code, and origin coverage — which is
+    the series that matters most, because if coverage collapses the origin
+    filter silently stops protecting anyone."""
+    from fastapi.responses import Response
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+    from . import metrics as m
+
+    m.refresh_db_gauges()
+    return Response(generate_latest(m.REGISTRY), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/recipes", response_model=list[Recipe])
@@ -93,6 +130,10 @@ class NLPlanRequest(BaseModel):
     recipe_text: str = Field(max_length=8000)   # public endpoint: bound the paste
     lat: float | None = None
     lon: float | None = None
+    # Provenance: exclude removes candidates positively evidenced as coming
+    # from these countries; preference is soft guidance to the selector.
+    exclude_origin: list[str] = Field(default_factory=list, max_length=50)
+    preference: list[str] = Field(default_factory=list, max_length=50)
 
 
 @app.post("/plan/nl", response_model=ShoppingPlan)
@@ -101,11 +142,19 @@ def plan_nl(req: NLPlanRequest) -> ShoppingPlan:
     (existence → options → brand stats → lookups), route, select. Returns
     the plan + interpretation + the full per-step SQL trace. A gate abort
     returns 409 with the alert and the trace up to the failed step."""
+    from . import metrics as m
     from .nlsearch import PlanAborted, UnparseableRecipe
 
+    _check_countries(req.exclude_origin, req.preference)
     try:
-        return flow.run_nl(req.recipe_text, lat=req.lat, lon=req.lon)
+        plan = flow.run_nl(req.recipe_text, lat=req.lat, lon=req.lon,
+                           exclude=req.exclude_origin,
+                           preference=req.preference)
+        m.record_plan("nl", "ok")
+        m.record_coverage(plan.origin_coverage)
+        return plan
     except UnparseableRecipe:
+        m.record_plan("nl", "unparseable")
         raise HTTPException(status_code=422, detail=(
             "Couldn't find an ingredient list in that text. Paste a recipe "
             "with its ingredients (quantities optional), e.g.:\n"
@@ -113,6 +162,8 @@ def plan_nl(req: NLPlanRequest) -> ShoppingPlan:
             "- 400g spaghetti\n- 500g ground beef\n- 1 can crushed tomatoes\n"
             "Notes: under $30, no dairy"))
     except PlanAborted as e:
+        code = e.execution.aborted.code.value if e.execution.aborted else "unknown"
+        m.record_plan("nl", "gated", gate=code)
         raise HTTPException(status_code=409, detail=e.execution.model_dump(mode="json"))
 
 
@@ -127,6 +178,8 @@ class WeekPlanRequest(BaseModel):
     lat: float | None = None
     lon: float | None = None
     max_distance_km: float | None = None
+    exclude_origin: list[str] = Field(default_factory=list, max_length=50)
+    preference: list[str] = Field(default_factory=list, max_length=50)
 
 
 @app.post("/plan/week", response_model=WeekPlan)
@@ -137,22 +190,46 @@ def plan_week(req: WeekPlanRequest) -> WeekPlan:
     from . import weekplan
     from .nlsearch import PlanAborted
 
+    _check_countries(req.exclude_origin, req.preference)
     try:
         return weekplan.plan_week(
             days=req.days, max_total_budget=req.max_total_budget,
             exclude_tags=req.exclude_tags, lat=req.lat, lon=req.lon,
-            max_distance_km=req.max_distance_km)
+            max_distance_km=req.max_distance_km,
+            exclude_origin=req.exclude_origin, preference=req.preference)
     except PlanAborted as e:
         raise HTTPException(status_code=409, detail=e.execution.model_dump(mode="json"))
 
 
 @app.post("/plan/{slug}", response_model=ShoppingPlan)
-def plan_recipe(slug: str) -> ShoppingPlan:
-    """Run the pipeline for one recipe. Returns the shopping plan."""
+def plan_recipe(slug: str,
+                exclude_origin: Annotated[list[str] | None, Query()] = None,
+                preference: Annotated[list[str] | None, Query()] = None) -> ShoppingPlan:
+    """Run the pipeline for one recipe. Returns the shopping plan.
+
+    `exclude_origin` removes candidates positively evidenced as coming from
+    those countries — never candidates that merely lack evidence. The
+    returned plan carries per-line provenance and a spend-weighted coverage
+    figure saying how much of the basket was actually checked."""
+    from . import metrics as m
+    from .nlsearch import PlanAborted
+
+    _check_countries(exclude_origin, preference)
     try:
-        return flow.run(slug)
+        plan = flow.run(slug, exclude=exclude_origin, preference=preference)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        m.record_plan("recipe", "not_found")
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except PlanAborted as e:
+        # The origin gate is a 409 like every other gate — it was escaping
+        # this route as a 500 with no alert payload.
+        code = e.execution.aborted.code.value if e.execution.aborted else "unknown"
+        m.record_plan("recipe", "gated", gate=code)
+        raise HTTPException(status_code=409,
+                            detail=e.execution.model_dump(mode="json")) from e
+    m.record_plan("recipe", "ok")
+    m.record_coverage(plan.origin_coverage)
+    return plan
 
 
 # ─── Provenance ──────────────────────────────────────────────
@@ -196,6 +273,7 @@ def rank_by_origin(req: RankRequest) -> OriginRanking:
     """
     from . import origins
 
+    _check_countries(req.preference, req.exclude)
     products = db.load_all_products()
     if req.product_ids is not None:
         wanted = set(req.product_ids)

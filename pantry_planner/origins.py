@@ -35,7 +35,9 @@ import unicodedata
 
 from .models import (
     ExcludedProduct,
+    OriginCoverage,
     OriginRanking,
+    OriginReceipt,
     Product,
     ProductOrigin,
     RankedProduct,
@@ -95,6 +97,36 @@ _ALIASES: dict[str, set[str]] = {
     },
     "netherlands": {"netherlands", "holland", "dutch"},
     "south korea": {"south korea", "korea, south", "republic of korea"},
+    "north korea": {"north korea", "korea, north", "dprk",
+                    "democratic people's republic of korea"},
+    # Synonym pairs that were previously independent KNOWN_COUNTRIES entries:
+    # validation accepted either spelling, then country_matches compared the
+    # user's spelling literally against the evidence text and found nothing.
+    "czechia": {"czechia", "czech republic"},
+    "turkey": {"turkey", "turkiye"},
+    "myanmar": {"myanmar", "burma"},
+    "cote d'ivoire": {"cote d'ivoire", "ivory coast"},
+    "cabo verde": {"cabo verde", "cape verde"},
+    "eswatini": {"eswatini", "swaziland"},
+    "timor-leste": {"timor-leste", "east timor"},
+    "north macedonia": {"north macedonia", "macedonia"},
+    "vietnam": {"vietnam", "viet nam"},
+    "russia": {"russia", "russian federation"},
+    "united arab emirates": {"united arab emirates", "uae", "u.a.e"},
+    "democratic republic of the congo": {"democratic republic of the congo",
+                                         "dr congo", "drc", "congo-kinshasa"},
+    "bosnia and herzegovina": {"bosnia and herzegovina", "bosnia"},
+    "slovakia": {"slovakia", "slovak republic"},
+    "vatican city": {"vatican city", "holy see", "vatican"},
+    "taiwan": {"taiwan", "republic of china"},
+    "china": {"china", "people's republic of china", "prc"},
+    "iran": {"iran", "islamic republic of iran"},
+    "laos": {"laos", "lao"},
+    "syria": {"syria", "syrian arab republic"},
+    "tanzania": {"tanzania", "united republic of tanzania"},
+    "brunei": {"brunei", "brunei darussalam"},
+    "moldova": {"moldova", "republic of moldova"},
+    "palestine": {"palestine", "state of palestine", "palestinian territories"},
 }
 
 # Multi-word country names whose components are themselves countries or
@@ -110,6 +142,45 @@ _SUPERSETS = (
     "new mexico", "new york", "north carolina", "south carolina",
     "north dakota", "south dakota", "rhode island",
 )
+
+# Recognised country names. A filter that silently accepts "Amerca" and
+# excludes nothing has reported success on a request it did not honour —
+# the worst available outcome for a boycott tool. Data, not policy: this is
+# the UN member/observer list plus common short forms; aliases above fold
+# into it. Keep lowercase.
+KNOWN_COUNTRIES: frozenset[str] = frozenset({
+    "afghanistan", "albania", "algeria", "andorra", "angola", "antigua and barbuda",
+    "argentina", "armenia", "australia", "austria", "azerbaijan", "bahamas", "bahrain",
+    "bangladesh", "barbados", "belarus", "belgium", "belize", "benin", "bhutan", "bolivia",
+    "bosnia and herzegovina", "botswana", "brazil", "brunei", "bulgaria", "burkina faso",
+    "burundi", "cabo verde", "cape verde", "cambodia", "cameroon", "canada",
+    "central african republic", "chad", "chile", "china", "colombia", "comoros", "congo",
+    "democratic republic of the congo", "costa rica", "cote d'ivoire", "ivory coast",
+    "croatia", "cuba", "cyprus", "czechia", "czech republic", "denmark", "djibouti",
+    "dominica", "dominican republic", "ecuador", "egypt", "el salvador", "equatorial guinea",
+    "eritrea", "estonia", "eswatini", "swaziland", "ethiopia", "fiji", "finland", "france",
+    "gabon", "gambia", "georgia", "germany", "ghana", "greece", "grenada", "guatemala",
+    "guinea", "guinea-bissau", "guyana", "haiti", "honduras", "hungary", "iceland", "india",
+    "indonesia", "iran", "iraq", "ireland", "israel", "italy", "jamaica", "japan", "jordan",
+    "kazakhstan", "kenya", "kiribati", "north korea", "south korea", "kosovo", "kuwait",
+    "kyrgyzstan", "laos", "latvia", "lebanon", "lesotho", "liberia", "libya", "liechtenstein",
+    "lithuania", "luxembourg", "madagascar", "malawi", "malaysia", "maldives", "mali", "malta",
+    "marshall islands", "mauritania", "mauritius", "mexico", "micronesia", "moldova", "monaco",
+    "mongolia", "montenegro", "morocco", "mozambique", "myanmar", "burma", "namibia", "nauru",
+    "nepal", "netherlands", "new zealand", "nicaragua", "niger", "nigeria", "north macedonia",
+    "macedonia", "norway", "oman", "pakistan", "palau", "palestine", "panama",
+    "papua new guinea", "paraguay", "peru", "philippines", "poland", "portugal", "qatar",
+    "romania", "russia", "rwanda", "saint kitts and nevis", "saint lucia",
+    "saint vincent and the grenadines", "samoa", "san marino", "sao tome and principe",
+    "saudi arabia", "senegal", "serbia", "seychelles", "sierra leone", "singapore", "slovakia",
+    "slovenia", "solomon islands", "somalia", "south africa", "south sudan", "spain",
+    "sri lanka", "sudan", "suriname", "sweden", "switzerland", "syria", "taiwan", "tajikistan",
+    "tanzania", "thailand", "timor-leste", "east timor", "togo", "tonga", "trinidad and tobago",
+    "tunisia", "turkey", "turkiye", "turkmenistan", "tuvalu", "uganda", "ukraine",
+    "united arab emirates", "united kingdom", "united states", "uruguay", "uzbekistan",
+    "vanuatu", "vatican city", "venezuela", "vietnam", "yemen", "zambia", "zimbabwe",
+    "hong kong", "puerto rico", "greenland", "faroe islands",
+})
 
 # surface form -> canonical country
 _SURFACE_TO_CANON: dict[str, str] = {}
@@ -128,13 +199,79 @@ def _normalize(text: str) -> str:
     """
     t = unicodedata.normalize("NFKD", (text or "").lower())
     t = "".join(c for c in t if not unicodedata.combining(c))
-    return re.sub(r"\s+", " ", t.replace(".", "")).strip()
+    t = t.replace("\u2019", "'").replace("\u2018", "'").replace("`", "'")
+    t = re.sub(r"\s+", " ", t.replace(".", "")).strip()
+    # "The Netherlands", "the UK": the article is never part of the name.
+    return re.sub(r"^the\s+", "", t)
 
 
 def canonical_country(name: str) -> str:
     """Fold a surface form to a canonical country name, lowercased."""
     n = _normalize(name)
     return _SURFACE_TO_CANON.get(n, n)
+
+
+# Words people type that are not country names but obviously point at one.
+# Not aliases (they caused false matches: "South America"), only hints for
+# the did-you-mean list.
+_SUGGESTION_HINTS = {"america": "united states", "american": "united states",
+                     "britain": "united kingdom", "england": "united kingdom",
+                     "holland": "netherlands"}
+# Inputs that are ambiguous or not countries: name the real choices rather than
+# let difflib offer "Monaco" for Ontario.
+_AMBIGUOUS = {"korea": ["South Korea", "North Korea"],
+              "congo": ["Democratic Republic Of The Congo", "Congo"],
+              "ontario": ["Canada"], "quebec": ["Canada"],
+              "eu": ["(a bloc, not a country — name the member state)"],
+              "europe": ["(a continent, not a country — name the country)"]}
+
+
+def preference_rank(origin: ProductOrigin | None, preference: list[str]) -> int:
+    """Soft origin preference as a sort key: lower is more preferred.
+
+    Same scale as rank_products: a full origin claim on a preferred country
+    beats a processing claim on it; an unknown or non-preferred origin sits
+    at the end, tied with each other, so absence is neither punished nor
+    rewarded. Shared by the demo selector and the week planner so the two
+    deterministic paths agree.
+    """
+    worst = len(preference) * 2
+    if not preference or origin is None or origin.status != "resolved":
+        return worst
+    hit = _match_preference(origin, preference)
+    if hit is None:
+        return worst
+    idx, _country, field = hit
+    claim = (origin.manufactured_claim if field == "manufactured_in"
+             else origin.ingredient_claim) or origin.claim_type
+    return idx * 2 + (0 if claim in FULL_CLAIMS else 1)
+
+
+def validate_countries(names: list[str]) -> dict[str, list[str]]:
+    """Map each UNRECOGNISED name to its closest known spellings.
+
+    Empty dict means every name is understood. Callers turn a non-empty
+    result into a 422 / ToolError rather than running a filter that would
+    quietly match nothing.
+    """
+    import difflib
+
+    unknown: dict[str, list[str]] = {}
+    universe = sorted(KNOWN_COUNTRIES | set(_SURFACE_TO_CANON) | set(_SUGGESTION_HINTS))
+    for raw in names or []:
+        n = canonical_country(raw)
+        if not n or n in KNOWN_COUNTRIES or n in _SURFACE_TO_CANON:
+            continue
+        if n in _AMBIGUOUS:
+            unknown[raw] = _AMBIGUOUS[n]
+            continue
+        seen: list[str] = []
+        for s in difflib.get_close_matches(n, universe, n=5, cutoff=0.6):
+            canon = _SUGGESTION_HINTS.get(s, _SURFACE_TO_CANON.get(s, s)).title()
+            if canon not in seen:
+                seen.append(canon)
+        unknown[raw] = seen[:3]
+    return unknown
 
 
 def _forms_for(country: str) -> set[str]:
@@ -423,7 +560,13 @@ def rank_products(products: list[Product], *, preference: list[str] | None = Non
     unranked.sort(key=lambda u: (u.reason, u.product_name))
 
     total = len(products)
-    note = (f"{len(ranked)} of {total} products carry origin evidence. "
+    # Evidenced = ranked + excluded. An excluded product is the most
+    # thoroughly evidenced kind there is; counting only `ranked` reported
+    # "0 of 4 carry origin evidence" when all four did, and understated what
+    # is known precisely when the filter was working hardest.
+    evidenced = len(ranked) + len(excluded)
+    note = (f"{evidenced} of {total} products carry origin evidence "
+            f"({len(excluded)} excluded by your filter). "
             f"{len(unranked)} are unverified and are NOT ranked — no source "
             f"published an origin for them, which is not evidence that they "
             f"are foreign or domestic.")
@@ -478,3 +621,113 @@ def triage_candidates(products: list[Product],
                             "status": o.status if o else "unknown"})
                 break
     return out
+
+
+# ─── Planning-facing surface ─────────────────────────────────
+# Everything above answers "how do these products rank?". The planners ask a
+# different question — "may I put this in a basket?" — and until this module
+# answered it, origin evidence had no effect on any plan.
+
+def origin_receipt(origin: ProductOrigin | None) -> OriginReceipt | None:
+    """Compress a resolved origin into the receipt carried on a plan line."""
+    if origin is None:
+        return None
+    return OriginReceipt(
+        status=origin.status, country=origin.country,
+        claim_type=origin.claim_type,
+        ingredient_origin=origin.ingredient_origin,
+        manufactured_in=origin.manufactured_in,
+        source=origin.source, confidence=origin.confidence,
+        verbatim=origin.verbatim)
+
+
+def filter_pool(products: list[Product], *, exclude: list[str] | None = None,
+                origins: dict[int, ProductOrigin] | None = None
+                ) -> tuple[list[Product], list[tuple[Product, str, str]]]:
+    """Split a candidate pool into (kept, dropped) on origin evidence.
+
+    Only positive evidence drops a product. A product with no evidence is
+    KEPT — absence is not a verdict — which is why the caller must also
+    report coverage: silently keeping the unmeasured is how missing data
+    becomes a competitive advantage.
+
+    Dropped entries carry (product, excluded_country, matched_field) so the
+    caller can say what was removed and why.
+    """
+    exclude = [e for e in (exclude or []) if e.strip()]
+    if not exclude:
+        return list(products), []
+    if origins is None:
+        origins = resolve_all([p.id for p in products])
+
+    kept: list[Product] = []
+    dropped: list[tuple[Product, str, str]] = []
+    for p in products:
+        origin = origins.get(p.id)
+        hit = None
+        if origin and origin.status == "resolved":
+            hit = _match_exclusion(origin, exclude)
+        elif origin and origin.status == "conflicting":
+            # Sources disagree, but one of them positively names an excluded
+            # country. For a filter whose job is to keep that country out,
+            # "some evidence says USA" is a reason to drop, not a loophole:
+            # only a product with NO such evidence is kept on absence.
+            for c in exclude:
+                if any(country_matches(sc, c) for sc in origin.seen_countries):
+                    hit = (c, "conflicting_evidence")
+                    break
+        if hit:
+            dropped.append((p, hit[0], hit[1]))
+        else:
+            kept.append(p)
+    return kept, dropped
+
+
+def basket_coverage(lines: list[tuple[int, float]], *,
+                    origins: dict[int, ProductOrigin] | None = None,
+                    excluded_lines: int = 0,
+                    floor: float | None = None) -> OriginCoverage:
+    """Coverage for a chosen basket: (product_id, charged_price) per line.
+
+    Count- and spend-weighted are both reported because they diverge: the
+    one line somebody photographed is often the cheapest thing in the cart.
+    """
+    from .config import settings
+
+    if floor is None:
+        floor = settings().origin_min_coverage
+    if origins is None:
+        origins = resolve_all([pid for pid, _ in lines])
+
+    total = len(lines)
+    spend_total = sum(price for _, price in lines)
+    known = [(pid, price) for pid, price in lines
+             if (o := origins.get(pid)) is not None and o.status == "resolved"]
+    spend_known = sum(price for _, price in known)
+
+    count_fraction = (len(known) / total) if total else 0.0
+    spend_fraction = (spend_known / spend_total) if spend_total else 0.0
+    # Spend is the binding measure: it is what the money actually did.
+    meets = spend_fraction >= floor if total else True
+
+    if not total:
+        note = "Empty basket."
+    elif meets:
+        note = (f"Origin known for {len(known)} of {total} lines "
+                f"({spend_fraction:.0%} of spend).")
+    else:
+        note = (f"UNVERIFIED BASKET — origin known for only {len(known)} of "
+                f"{total} lines ({spend_fraction:.0%} of spend, floor "
+                f"{floor:.0%}). The unknown lines are not evidence of foreign "
+                f"origin, but this basket has not been checked well enough to "
+                f"call it clean.")
+    if excluded_lines:
+        note += f" {excluded_lines} candidate(s) were excluded by origin."
+
+    return OriginCoverage(
+        lines_total=total, lines_known=len(known),
+        lines_excluded_origin=excluded_lines,
+        count_fraction=round(count_fraction, 4),
+        spend_total=round(spend_total, 2), spend_known=round(spend_known, 2),
+        spend_fraction=round(spend_fraction, 4),
+        meets_floor=meets, floor=floor, note=note)

@@ -13,7 +13,7 @@ import pytest
 
 @pytest.fixture(scope="module", autouse=True)
 def demo_env(tmp_path_factory):
-    os.environ["DB_URL"] = f"sqlite:///{tmp_path_factory.mktemp('db') / 'demo.db'}"
+    os.environ["DB_URL"] = os.environ.get("PANTRY_TEST_DB_URL") or f"sqlite:///{tmp_path_factory.mktemp('db') / 'demo.db'}"
     os.environ["DEMO_MODE"] = "1"
     os.environ.pop("ANTHROPIC_API_KEY", None)
     from pantry_planner import config, db

@@ -80,6 +80,35 @@ class TriageCandidate(BaseModel):
     status: str
 
 
+def _check_countries(*lists) -> None:
+    """Unknown country names are an error the agent must see, not a silent
+    no-op filter that reports success. Suggests the closest spellings."""
+    from .origins import validate_countries
+
+    names = [n for lst in lists for n in (lst or [])]
+    unknown = validate_countries(names)
+    if unknown:
+        parts = [f"{k!r} (did you mean: {', '.join(v) or 'no close match'})"
+                 for k, v in unknown.items()]
+        raise ToolError("Unrecognised country name(s): " + "; ".join(parts)
+                        + ". Use a country name or common alias such as "
+                          "'United States', 'USA' or 'Canada'.")
+
+
+def _gate_message(e) -> str:
+    """One shape for every gate abort an agent can hit."""
+    alert = e.execution.aborted
+    steps = ", ".join(f"{s.step_id}:{s.outcome}" for s in e.execution.steps)
+    detail = ""
+    if alert and alert.details:
+        names = ", ".join(str(d.get("name", "?")) for d in alert.details)
+        detail = f" Affected: {names}."
+    code = alert.code.value if alert else "unknown"
+    msg = alert.message if alert else "plan aborted"
+    return (f"Plan aborted before product selection — {code}: {msg}{detail}"
+            + (f" Steps: {steps}." if steps else ""))
+
+
 def _product_summary(p) -> ProductSummary:
     return ProductSummary(
         id=p.id, name=p.name, brand=p.brand, category=p.category,
@@ -150,32 +179,48 @@ def list_products(search: str | None = None) -> list[ProductSummary]:
 # ─── Planning tools (SLOW — run the LLM pipeline) ────────────
 
 @server.tool()
-def plan_recipe(slug: str) -> ShoppingPlan:
+def plan_recipe(slug: str, exclude_origin: list[str] | None = None,
+                preference: list[str] | None = None) -> ShoppingPlan:
     """Run the full shopping-plan pipeline for a seeded recipe: an LLM
     matches every ingredient to the best-value product, with a model
     router escalating hard cases. SLOW (10-60s) and costs real Claude
-    API credits. Get slugs from list_recipes first."""
-    from . import flow
+    API credits. Get slugs from list_recipes first.
 
+    `exclude_origin` drops candidates positively evidenced as coming from
+    those countries (e.g. ["United States"]) before the model ever sees
+    them — never candidates that merely lack evidence. `preference` is soft
+    guidance. The plan carries per-line provenance and `origin_coverage`:
+    read its `spend_fraction` and `meets_floor` before describing a basket
+    as clean, because unverified lines are not verified-clean lines."""
+    from . import flow
+    from .nlsearch import PlanAborted
+
+    _check_countries(exclude_origin, preference)
     try:
-        return flow.run(slug)
+        return flow.run(slug, exclude=exclude_origin, preference=preference)
     except ValueError as e:
         raise ToolError(f"{e}. Call list_recipes for valid slugs.") from e
+    except PlanAborted as e:
+        raise ToolError(_gate_message(e)) from e
 
 
 @server.tool()
 def plan_from_text(recipe_text: str, lat: float | None = None,
-                   lon: float | None = None) -> ShoppingPlan:
+                   lon: float | None = None,
+                   exclude_origin: list[str] | None = None,
+                   preference: list[str] | None = None) -> ShoppingPlan:
     """Plan a shopping basket from PASTED RECIPE TEXT — include the full
     ingredient list (quantities optional) and any shopping notes
     (budget, dietary exclusions); lat/lon optionally set the shopping
     location. Parses the text, runs a staged SQL retrieval plan, then
     the LLM selector. SLOW (10-60s) and costs real Claude API credits."""
+    _check_countries(exclude_origin, preference)
     from . import flow
     from .nlsearch import PlanAborted, UnparseableRecipe
 
     try:
-        return flow.run_nl(recipe_text, lat=lat, lon=lon)
+        return flow.run_nl(recipe_text, lat=lat, lon=lon,
+                           exclude=exclude_origin, preference=preference)
     except UnparseableRecipe as e:
         raise ToolError(
             "Couldn't find an ingredient list in that text. Paste a recipe "
@@ -202,7 +247,9 @@ def plan_from_text(recipe_text: str, lat: float | None = None,
 def plan_week(days: int = 5, max_total_budget: float | None = None,
               exclude_tags: list[str] | None = None,
               lat: float | None = None, lon: float | None = None,
-              max_distance_km: float | None = None) -> WeekPlan:
+              max_distance_km: float | None = None,
+              exclude_origin: list[str] | None = None,
+              preference: list[str] | None = None) -> WeekPlan:
     """Plan `days` dinners from the recipe library under an optional
     budget, rewarding ingredient overlap (a shared product is bought
     once). Returns per-day plans, the merged shopping list, overlap
@@ -210,6 +257,7 @@ def plan_week(days: int = 5, max_total_budget: float | None = None,
     recipes containing those dietary tags (e.g. ["dairy", "gluten"]).
     SLOW (runs the LLM selector per day) and costs real Claude API
     credits — roughly one plan_recipe per day planned."""
+    _check_countries(exclude_origin, preference)
     from . import weekplan
     from .nlsearch import PlanAborted
 
@@ -217,7 +265,8 @@ def plan_week(days: int = 5, max_total_budget: float | None = None,
         return weekplan.plan_week(
             days=days, max_total_budget=max_total_budget,
             exclude_tags=exclude_tags or [], lat=lat, lon=lon,
-            max_distance_km=max_distance_km)
+            max_distance_km=max_distance_km,
+            exclude_origin=exclude_origin, preference=preference)
     except PlanAborted as e:
         alert = e.execution.aborted
         raise ToolError(
@@ -288,6 +337,7 @@ def rank_products_by_origin(preference: list[str] | None = None,
     the `unranked` count - those products have no published origin, and
     showing only the ranked list would imply a coverage this data does not
     have."""
+    _check_countries(preference, exclude)
     from . import db, origins
 
     products = db.load_all_products()

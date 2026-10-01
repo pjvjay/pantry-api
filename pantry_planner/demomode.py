@@ -80,13 +80,26 @@ def parse_recipe(text_input: str, *, model: str | None = None) -> ParsedInput:
                        constraints=cons, cost_usd=0.0, latency_ms=0)
 
 
+def _preference_rank(origin, preference: list[str]) -> int:
+    from .origins import preference_rank
+    return preference_rank(origin, preference)
+
+
 def select_products(ingredients: list[RecipeIngredient],
                     products: list[Product], *, model: str,
                     enable_thinking: bool = False,
-                    constraints: dict | None = None) -> SelectorResult:
-    """Token-overlap + offer-price ranking, direct matches before t4
-    substitutes. Confidence is fixed at 0.9 — above the cascade threshold,
-    so demo mode never triggers a (would-be) escalation call."""
+                    constraints: dict | None = None,
+                    origins_by_id: dict | None = None,
+                    preference: list[str] | None = None) -> SelectorResult:
+    """Token-overlap, then origin preference, then offer price; direct
+    matches before t4 substitutes. Confidence is fixed at 0.9 — above the
+    cascade threshold, so demo mode never triggers a (would-be) escalation.
+
+    Preference applies strictly AFTER semantic match (token overlap), the
+    same priority the live selector prompt gives it: it only breaks ties
+    between equally-good matches, never trades correctness for origin."""
+    origins_by_id = origins_by_id or {}
+    preference = [c for c in (preference or []) if c.strip()]
     selections: list[Selection] = []
     for ing in ingredients:
         toks = set(tokens(ing.name))
@@ -95,11 +108,16 @@ def select_products(ingredients: list[RecipeIngredient],
             continue
         pick = min(pool, key=lambda p: (
             -len(toks & set(tokens(f"{p.name} {p.description}"))),
+            _preference_rank(origins_by_id.get(p.id), preference),
             p.store_price if p.store_price is not None else p.price,
             p.id))
+        why = "demo mode: highest token overlap, then cheapest offer"
+        if preference:
+            why = ("demo mode: highest token overlap, then origin preference "
+                   f"({', '.join(preference)}), then cheapest offer")
         selections.append(Selection(
             line_no=ing.line_no, product_id=pick.id, confidence=0.9,
-            reasoning="demo mode: highest token overlap, then cheapest offer"))
+            reasoning=why))
     return SelectorResult(selections=selections, total_cost=0.0,
                           model_used="demo-deterministic",
                           input_tokens=0, output_tokens=0,

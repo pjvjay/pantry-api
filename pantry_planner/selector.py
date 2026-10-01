@@ -19,7 +19,8 @@ from .models import Product, Recipe, RecipeIngredient, Selection, SelectorResult
 from .prompts import SELECTOR_SYSTEM, SELECTOR_TOOL
 
 
-def _serialize_products(products: list[Product]) -> list[dict]:
+def _serialize_products(products: list[Product],
+                        origins_by_id: dict | None = None) -> list[dict]:
     out = []
     for p in products:
         d = {
@@ -45,6 +46,17 @@ def _serialize_products(products: list[Product]) -> list[dict]:
             d["distance_km"] = p.distance_km
         if p.substitute:
             d["substitute"] = True              # t4 alternative, not a direct match
+        # Provenance, when known. Products positively evidenced as coming
+        # from an excluded country are filtered out before they reach here;
+        # this is shown so the model can PREFER on origin and explain why,
+        # and so it never has to guess at a country it was not told.
+        origin = origins_by_id.get(p.id) if origins_by_id else None
+        if origin is not None and origin.status == "resolved":
+            d["origin"] = {
+                "country": origin.country,
+                "claim": origin.claim_type,
+                "ingredient_origin": origin.ingredient_origin or None,
+            }
         out.append(d)
     return out
 
@@ -63,6 +75,8 @@ def call_selector(
     model: str,
     enable_thinking: bool = False,
     constraints: dict | None = None,
+    origins_by_id: dict | None = None,
+    preference: list[str] | None = None,
 ) -> SelectorResult:
     """Make one main-selector call. Returns structured selections.
 
@@ -74,12 +88,14 @@ def call_selector(
         from . import demomode
         return demomode.select_products(ingredients, products, model=model,
                                         enable_thinking=enable_thinking,
-                                        constraints=constraints)
+                                        constraints=constraints,
+                                        origins_by_id=origins_by_id,
+                                        preference=preference)
     client = Anthropic(api_key=cfg.anthropic_api_key)
 
     payload: dict = {
         "recipe_ingredients": _serialize_ingredients(ingredients),
-        "available_products": _serialize_products(products),
+        "available_products": _serialize_products(products, origins_by_id),
         "objective": "cost",
     }
     if constraints:

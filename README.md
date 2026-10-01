@@ -79,6 +79,7 @@ Everything's env-var driven. Defaults in `pantry_planner/config.py`.
 | `DEMO_MODE`                  | `false`                          | Deterministic stand-ins replace both LLM calls (public demo: no key, no cost) |
 | `TRAVEL_COST_PER_KM`         | `0.50`                           | Split-trip optimizer: $ value of a km of driving |
 | `DEFAULT_LAT` / `DEFAULT_LON`| `49.28` / `-123.12`              | Shopping location when the request sends none |
+| `ORIGIN_MIN_COVERAGE`        | `0.6`                            | Spend-weighted origin coverage below which a basket is labelled UNVERIFIED |
 | `DB_HOST` (+ `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`) | *(unset)* | Composed into a Postgres URL when `DB_URL` is unset — the Kubernetes path, parts injected from the CNPG credential secret |
 
 ## Try both routers side-by-side
@@ -119,6 +120,7 @@ pantry-planner/
 │   ├── mcp_server.py      # MCP server: stdio script + HTTP app
 │   ├── origins.py         # provenance: evidence → resolve → rank
 │   ├── ingest.py          # loads claude-chrome-container output
+│   ├── metrics.py         # /metrics: LLM spend, gates, origin coverage
 │   ├── demo.py            # CLI entrypoint
 │   ├── nlsearch/          # constrained NL2SQL: parse → query plan → gates
 │   │   ├── plan.py        # QueryPlan/StepResult/PlanAlert formalism
@@ -327,12 +329,20 @@ Canadian goods (Open Food Facts began in France), so folding unverified items
 into the ranking would silently turn "nobody published this" into a finding.
 
 Sources, cheapest first: the DB cache, then evidence ingested from the
-[claude-chrome-container](https://github.com/pjvjay/pantry-platform) tooling.
-The old name/brand heuristics survive only as `origin_triage` — a work queue
-of what to photograph next, never as provenance. They were wrong often enough
-to matter: that tooling's reconciliation pass found Lindt Excellence 70% is
-made in **New Hampshire**, not the Switzerland or France a brand guess
-produces.
+companion `claude-chrome-container` tooling. The old name/brand heuristics
+survive only as `origin_triage` — a work queue of what to photograph next,
+never as provenance. They were wrong often enough to matter: that tooling's
+reconciliation pass found Lindt Excellence 70% is made in **New Hampshire**,
+not the Switzerland or France a brand guess produces.
+
+**Origin is a planning constraint, not just a view.** `POST /plan/{slug}`,
+`/plan/nl` and `/plan/week` all accept `exclude_origin` and `preference`;
+excluded candidates are removed before the selector ever sees them, every
+plan line carries a provenance receipt, and the plan reports
+`origin_coverage` — count- **and** spend-weighted. Read `spend_fraction`
+and `meets_floor` before calling a basket clean: below the floor
+(`ORIGIN_MIN_COVERAGE`, default 0.6) the basket is labelled UNVERIFIED,
+because unchecked lines are not verified-clean lines.
 
 ### Loading evidence
 

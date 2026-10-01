@@ -63,10 +63,36 @@ def _batched_pools(session: Session, specs: list[IngredientSpec], c: Constraints
     return pools
 
 
+_DETAIL_CAP = 12
+
+
+def _name_list(emptied: dict) -> str:
+    """Names in the abort message, capped to match the details list."""
+    names = sorted({n for n, _ in emptied.values()})
+    shown = ", ".join(names[:_DETAIL_CAP])
+    more = len(names) - _DETAIL_CAP
+    return f"{shown} and {more} more" if more > 0 else shown
+
+
+def _charged(p) -> float:
+    return p.store_price if p.store_price is not None else p.price
+
+
+def _week_coverage(shopping, origins_map, dropped):
+    """Spend-weighted origin coverage of the merged week basket."""
+    from . import origins as origins_mod
+
+    return origins_mod.basket_coverage(
+        [(w.product_id, w.price) for w in shopping],
+        origins=origins_map or None, excluded_lines=dropped)
+
+
 def plan_week(*, days: int = 5, max_total_budget: float | None = None,
               exclude_tags: list[str] | None = None,
               lat: float | None = None, lon: float | None = None,
-              max_distance_km: float | None = None) -> WeekPlan:
+              max_distance_km: float | None = None,
+              exclude_origin: list[str] | None = None,
+              preference: list[str] | None = None) -> WeekPlan:
     cfg = settings()
     lat = lat if lat is not None else cfg.default_lat
     lon = lon if lon is not None else cfg.default_lon
@@ -93,6 +119,16 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
             flat.append((ri, li))
             specs.append(IngredientSpec(name=ing.name))
 
+    # An empty library has a correct answer further down (the days == 0
+    # gate), but retrieval crashed before it could ever be reached. Check
+    # here so the clean 409 actually fires.
+    if not specs:
+        execution.aborted = PlanAlert(
+            stage="w1_options", code=GateCode.unavailable_within_constraints,
+            message="The recipe library is empty, so there is nothing to plan.",
+            details=[])
+        raise PlanAborted(execution)
+
     with Session(db.engine()) as s:
         pools = _batched_pools(s, specs, c, lat, lon, max_distance_km,
                                execution, "w1_options", "library retrieval")
@@ -115,35 +151,102 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
                     if fb_pools.get(i):
                         pools[g] = fb_pools[i]
 
+        # ── origin filter ──
+        # Applied AFTER w1 and the w2 fallback, because w2 repopulates empty
+        # pools: filtering before it let excluded products back in through
+        # the fallback. Products with no evidence are kept — absence is not a
+        # verdict — and origin_coverage below is what stops that leniency
+        # from reading as a clean basket.
+        from . import origins as origins_mod
+        all_ids = {p.id for pool in pools.values() for p in pool}
+        origins_map = origins_mod.resolve_all(list(all_ids))
+        origin_requested = bool(exclude_origin or preference)
+        dropped_ids: set[int] = set()
+        # global ingredient index -> (ingredient name, removed candidates).
+        # Tracked per ingredient so the gate can name what the exclusion
+        # emptied and list what was removed — not parse it back out of a
+        # note string, which produced wrong names and empty suggestions.
+        origin_emptied: dict[int, tuple[str, list]] = {}
+        if exclude_origin:
+            for g, pool in list(pools.items()):
+                if not pool:
+                    continue
+                kept, dropped = origins_mod.filter_pool(
+                    pool, exclude=exclude_origin, origins=origins_map)
+                dropped_ids.update(p.id for p, _c, _f in dropped)
+                pools[g] = kept
+                if dropped and not kept:
+                    origin_emptied[g] = (specs[g].name, dropped)
+            if dropped_ids:
+                notes.append(
+                    f"origin filter removed {len(dropped_ids)} candidate(s) "
+                    f"evidenced as from {', '.join(exclude_origin)}")
+        # NOTE: preference deliberately does NOT reorder pools. w3 reads
+        # pool[0] as the cheapest product to compute the budget floor, so a
+        # preferred-but-dearer product at the front inflated the floor and
+        # fired budget_infeasible on a feasible budget. A soft preference must
+        # never cost the user money; it is applied as a selector tie-break
+        # in the per-day mapping instead.
+        origin_dropped = len(dropped_ids)
+
         # regroup per recipe; drop recipes that still miss an ingredient
         by_recipe: dict[int, dict[int, list]] = {}
         for g, (ri, li) in enumerate(flat):
             by_recipe.setdefault(ri, {})[li] = pools.get(g, [])
         candidates: list[tuple[Recipe, dict[int, list]]] = []
+        g_of = {(ri, li): g for g, (ri, li) in enumerate(flat)}
         for ri, r in enumerate(recipes):
             missing = [r.ingredients[li].name
                        for li, pool in by_recipe[ri].items() if not pool]
             if missing:
-                notes.append(f"skipped {r.name}: no match for "
-                             f"{', '.join(missing)} under current constraints")
+                by_origin = [r.ingredients[li].name for li, pool in by_recipe[ri].items()
+                             if not pool and g_of[(ri, li)] in origin_emptied]
+                if by_origin:
+                    notes.append(f"skipped {r.name}: every candidate for "
+                                 f"{', '.join(by_origin)} is from an excluded origin")
+                else:
+                    notes.append(f"skipped {r.name}: no match for "
+                                 f"{', '.join(missing)} under current constraints")
             else:
                 candidates.append((r, by_recipe[ri]))
         if len(candidates) < days:
             days = len(candidates)
             notes.append(f"only {days} recipes remain feasible")
         if days == 0:
-            execution.aborted = PlanAlert(
-                stage="w2_fallback", code=GateCode.unavailable_within_constraints,
-                message="No library recipe is feasible under the current "
-                        "constraints. Relax a dietary filter or the distance.",
-                details=[])
+            # Attribute the cause. If the origin filter is what emptied the
+            # library, say so and say what it cost — a generic "relax a
+            # dietary filter" sends the user to the wrong knob.
+            if origin_emptied:
+                execution.aborted = PlanAlert(
+                    stage="origin_filter", code=GateCode.excluded_by_origin,
+                    message=(f"Excluding {', '.join(exclude_origin or [])} "
+                             f"left no candidate for {_name_list(origin_emptied)}"
+                             f", so no complete recipe remains. Relax the "
+                             f"exclusion, or accept one of the removed products "
+                             f"listed per ingredient."),
+                    details=[{
+                        "name": name,
+                        "reason": (f"all {len(removed)} candidate(s) are evidenced "
+                                   f"as coming from an excluded country"),
+                        "suggestions": [
+                            f"{p.name} (${_charged(p):.2f}) — {country} via {field}"
+                            for p, country, field in removed[:5]],
+                    } for name, removed in
+                        {n: r for n, r in origin_emptied.values()}.items()][:_DETAIL_CAP])
+            else:
+                execution.aborted = PlanAlert(
+                    stage="w2_fallback",
+                    code=GateCode.unavailable_within_constraints,
+                    message="No library recipe is feasible under the current "
+                            "constraints. Relax a dietary filter or the distance.",
+                    details=[])
             raise PlanAborted(execution)
 
         # ── w3: greedy menu pick by marginal basket cost ──
         t0 = time.perf_counter()
         cheapest: list[dict[int, tuple[int, float]]] = []  # per candidate: line -> (pid, price)
         for _r, rpools in candidates:
-            cheapest.append({li: (pool[0].id, pool[0].store_price or pool[0].price)
+            cheapest.append({li: (pool[0].id, _charged(pool[0]))
                              for li, pool in rpools.items()})
         picked: list[int] = []
         union: dict[int, float] = {}                       # product_id -> price
@@ -198,8 +301,12 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
             seen: set[int] = set()
             products = [p for pool in rpools.values() for p in pool
                         if p.id not in seen and not seen.add(p.id)]
-            result = call_selector(recipe.ingredients, products,
-                                   model=cfg.selector_model_default)
+            result = call_selector(
+                recipe.ingredients, products, model=cfg.selector_model_default,
+                constraints=({"origin_preference": list(preference)}
+                             if preference else None),
+                origins_by_id=origins_map,
+                preference=list(preference or []))
             llm_cost += result.cost_usd
             by_id = {p.id: p for p in products}
             by_line = {i.line_no: i for i in recipe.ingredients}
@@ -215,7 +322,8 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
                     product_description=prod.description, price=charged,
                     confidence=sel.confidence, reasoning=sel.reasoning,
                     model_used=result.model_used,
-                    store_name=prod.store_name, store_price=prod.store_price))
+                    store_name=prod.store_name, store_price=prod.store_price,
+                    origin=origins_mod.origin_receipt(origins_map.get(prod.id))))
                 day_cost += charged
             day_plans.append(DayPlan(recipe_slug=recipe.slug,
                                      recipe_name=recipe.name,
@@ -233,7 +341,8 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
                     merged[li.product_id] = WeekItem(
                         product_id=li.product_id, product_name=li.product_name,
                         store_name=li.store_name, price=li.price,
-                        used_by=[dp.recipe_name])
+                        used_by=[dp.recipe_name],
+                        origin=li.origin)
         shopping = sorted(merged.values(), key=lambda w: -len(w.used_by))
         total = round(sum(w.price for w in shopping), 2)
         standalone = round(sum(dp.day_cost for dp in day_plans), 2)
@@ -258,9 +367,15 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
                    f"{len(best.stores)} stop(s), ${best.total_cost:.2f} total")
                   if best else "no trip options"))
 
+    coverage = None
+    origin_status = "not_requested"
+    if origin_requested:
+        coverage = _week_coverage(shopping, origins_map, origin_dropped)
+        origin_status = "verified" if coverage.meets_floor else "unverified"
     return WeekPlan(days=day_plans, shopping_list=shopping, total_cost=total,
                     standalone_cost=standalone,
                     overlap_savings=round(standalone - total, 2),
                     budget=max_total_budget, notes=notes,
                     plan_trace=execution.steps, trip_options=trip_options,
+                    origin_coverage=coverage, origin_status=origin_status,
                     total_llm_cost_usd=round(llm_cost, 6))

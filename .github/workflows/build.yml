@@ -5,7 +5,7 @@
 #     → pytest
 #     → docker build (linux/amd64 + linux/arm64)
 #     → push ghcr.io/pjvjay/pantry-api:dev-<sha>
-#     → kustomize edit set image in pjvjay/pantry-gitops
+#     → bump_image_tag.py in pjvjay/pantry-gitops (no external binary)
 #     → ArgoCD rolls the API Deployment on AKS
 #
 # Auth:
@@ -91,11 +91,14 @@ jobs:
       - name: Bump image tag in pantry-gitops
         run: |
           git clone "https://x-access-token:${{ secrets.GITOPS_PAT }}@github.com/${GITOPS_REPO}.git" gitops
-          cd gitops/apps
-          curl -sLo /tmp/kustomize.tgz \
-            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz"
-          tar -xzf /tmp/kustomize.tgz -C /tmp
-          /tmp/kustomize edit set image "${IMAGE}=${IMAGE}:${{ steps.tag.outputs.tag }}"
+          cd gitops
+          # No downloaded binary: this rewrites one `newTag:` line, which
+          # needs no dependency. The previous step curl'd a kustomize tarball
+          # with no checksum, signature or digest and executed it in a job
+          # holding write access to the deploy repo. The script ships in the
+          # repo it edits and is unit-tested.
+          python3 scripts/bump_image_tag.py \
+            "${IMAGE}" "${{ steps.tag.outputs.tag }}"
           git config user.name  "pantry-ci"
           git config user.email "ci@users.noreply.github.com"
           git commit -am "bump pantry-api to ${{ steps.tag.outputs.tag }}"

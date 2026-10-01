@@ -13,7 +13,7 @@ import pytest
 
 @pytest.fixture(scope="module", autouse=True)
 def seeded_db(tmp_path_factory):
-    os.environ["DB_URL"] = f"sqlite:///{tmp_path_factory.mktemp('db') / 'test.db'}"
+    os.environ["DB_URL"] = os.environ.get("PANTRY_TEST_DB_URL") or f"sqlite:///{tmp_path_factory.mktemp('db') / 'test.db'}"
     from pantry_planner import config, db
     from pantry_planner.nlsearch import vocab
 
@@ -26,7 +26,7 @@ def seeded_db(tmp_path_factory):
 
 
 def _stub_selector(ingredients, products, *, model, enable_thinking=False,
-                   constraints=None):
+                   constraints=None, **_kw):
     from pantry_planner.models import Selection, SelectorResult
     from pantry_planner.nlsearch.units import tokens
 
