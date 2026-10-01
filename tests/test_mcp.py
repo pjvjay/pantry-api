@@ -16,6 +16,7 @@ _TMP_DB = None
 
 EXPECTED_TOOLS = {
     "list_recipes", "get_recipe", "list_products",
+    "find_product", "get_product",
     "plan_recipe", "plan_from_text", "plan_week",
     "get_product_origins", "rank_products_by_origin", "origin_triage",
     "pipeline_status",
