@@ -386,16 +386,36 @@ def _ingredient_pools(recipe, lat, lon):
     from .nlsearch.planner import _row_to_product
     from .nlsearch.schemas import Constraints, IngredientSpec
     from .nlsearch.sql_builder import build_options_sql
+    from .nlsearch.units import tokens
 
     specs = [IngredientSpec(name=i.name) for i in recipe.ingredients]
     if not specs:
         return {}
-    sql, params = build_options_sql(Constraints(), specs, relaxed=set(),
-                                    lat=lat, lon=lon)
-    pools: dict[int, list] = {}
-    with Session(db.engine()) as s:
-        for row in s.execute(text(sql), params).mappings():
-            pools.setdefault(row["ing_no"], []).append(_row_to_product(row))
+
+    def fetch(spec_list):
+        # Uncapped: the gate asks "is ANY candidate left?", so a cheapest-8
+        # shortlist is wrong — the 9th-cheapest non-excluded product is a
+        # perfectly good answer and must not trigger a 409.
+        sql, params = build_options_sql(Constraints(), spec_list, relaxed=set(),
+                                        lat=lat, lon=lon,
+                                        per_ingredient_limit=10_000)
+        out: dict[int, list] = {}
+        with Session(db.engine()) as s:
+            for row in s.execute(text(sql), params).mappings():
+                out.setdefault(row["ing_no"], []).append(_row_to_product(row))
+        return out
+
+    pools = fetch(specs)
+    # Head-noun fallback, the same relaxation the week planner's w2 applies:
+    # strict token-AND makes "Cheddar Cheese" miss "Cheddar Shredded 320g",
+    # which the selector would happily choose. The gate's idea of a candidate
+    # must be at least as broad as the selector's, or it aborts plans that
+    # were possible.
+    heads = [IngredientSpec(name=tokens(s.name)[-1]) if tokens(s.name) else s
+             for s in specs]
+    for g, pool in fetch(heads).items():
+        seen = {p.id for p in pools.get(g, [])}
+        pools.setdefault(g, []).extend(p for p in pool if p.id not in seen)
     return pools
 
 
@@ -434,14 +454,19 @@ def apply_origin_constraint(products, pools, names, *, exclude, preference):
 
     emptied: list[tuple[str, list]] = []
     for key, pool in pools.items():
-        if not pool:
+        direct = [p for p in pool if not p.substitute]
+        if not direct:
             continue                      # nothing to lose; not an origin casualty
         kept_pool, dropped_pool = origins_mod.filter_pool(
             pool, exclude=exclude, origins=origins)
         for p, c, f in dropped_pool:
             dropped_by_id.setdefault(p.id, (p, c, f))
-        if not kept_pool:
-            emptied.append((names.get(key, str(key)), dropped_pool))
+        # Substitutes are same-aisle padding (t4), not candidates for THIS
+        # ingredient. If every direct candidate is gone, the ingredient is
+        # emptied no matter how many onions remain in garlic's pool.
+        if not any(not p.substitute for p in kept_pool):
+            emptied.append((names.get(key, str(key)),
+                            [d for d in dropped_pool if not d[0].substitute]))
 
     if emptied:
         details = [{

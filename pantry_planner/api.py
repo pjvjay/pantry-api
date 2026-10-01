@@ -212,13 +212,21 @@ def plan_recipe(slug: str,
     returned plan carries per-line provenance and a spend-weighted coverage
     figure saying how much of the basket was actually checked."""
     from . import metrics as m
+    from .nlsearch import PlanAborted
 
     _check_countries(exclude_origin, preference)
     try:
         plan = flow.run(slug, exclude=exclude_origin, preference=preference)
     except ValueError as e:
         m.record_plan("recipe", "not_found")
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except PlanAborted as e:
+        # The origin gate is a 409 like every other gate — it was escaping
+        # this route as a 500 with no alert payload.
+        code = e.execution.aborted.code.value if e.execution.aborted else "unknown"
+        m.record_plan("recipe", "gated", gate=code)
+        raise HTTPException(status_code=409,
+                            detail=e.execution.model_dump(mode="json")) from e
     m.record_plan("recipe", "ok")
     m.record_coverage(plan.origin_coverage)
     return plan

@@ -95,6 +95,20 @@ def _check_countries(*lists) -> None:
                           "'United States', 'USA' or 'Canada'.")
 
 
+def _gate_message(e) -> str:
+    """One shape for every gate abort an agent can hit."""
+    alert = e.execution.aborted
+    steps = ", ".join(f"{s.step_id}:{s.outcome}" for s in e.execution.steps)
+    detail = ""
+    if alert and alert.details:
+        names = ", ".join(str(d.get("name", "?")) for d in alert.details)
+        detail = f" Affected: {names}."
+    code = alert.code.value if alert else "unknown"
+    msg = alert.message if alert else "plan aborted"
+    return (f"Plan aborted before product selection — {code}: {msg}{detail}"
+            + (f" Steps: {steps}." if steps else ""))
+
+
 def _product_summary(p) -> ProductSummary:
     return ProductSummary(
         id=p.id, name=p.name, brand=p.brand, category=p.category,
@@ -178,13 +192,16 @@ def plan_recipe(slug: str, exclude_origin: list[str] | None = None,
     guidance. The plan carries per-line provenance and `origin_coverage`:
     read its `spend_fraction` and `meets_floor` before describing a basket
     as clean, because unverified lines are not verified-clean lines."""
-    _check_countries(exclude_origin, preference)
     from . import flow
+    from .nlsearch import PlanAborted
 
+    _check_countries(exclude_origin, preference)
     try:
         return flow.run(slug, exclude=exclude_origin, preference=preference)
     except ValueError as e:
         raise ToolError(f"{e}. Call list_recipes for valid slugs.") from e
+    except PlanAborted as e:
+        raise ToolError(_gate_message(e)) from e
 
 
 @server.tool()

@@ -47,7 +47,7 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:15-alpine   # production's major; a parity gate must match it
         env:
           POSTGRES_USER: pantry
           POSTGRES_PASSWORD: pantry

@@ -63,6 +63,17 @@ def _batched_pools(session: Session, specs: list[IngredientSpec], c: Constraints
     return pools
 
 
+_DETAIL_CAP = 12
+
+
+def _name_list(emptied: dict) -> str:
+    """Names in the abort message, capped to match the details list."""
+    names = sorted({n for n, _ in emptied.values()})
+    shown = ", ".join(names[:_DETAIL_CAP])
+    more = len(names) - _DETAIL_CAP
+    return f"{shown} and {more} more" if more > 0 else shown
+
+
 def _charged(p) -> float:
     return p.store_price if p.store_price is not None else p.price
 
@@ -170,14 +181,12 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
                 notes.append(
                     f"origin filter removed {len(dropped_ids)} candidate(s) "
                     f"evidenced as from {', '.join(exclude_origin)}")
-        if preference:
-            # Soft: reorder within each pool so the deterministic greedy
-            # below sees preferred-origin candidates first at equal match.
-            for g, pool in pools.items():
-                pools[g] = sorted(pool, key=lambda p: (
-                    origins_mod.preference_rank(origins_map.get(p.id), preference),
-                    p.store_price if p.store_price is not None else p.price,
-                    p.id))
+        # NOTE: preference deliberately does NOT reorder pools. w3 reads
+        # pool[0] as the cheapest product to compute the budget floor, so a
+        # preferred-but-dearer product at the front inflated the floor and
+        # fired budget_infeasible on a feasible budget. A soft preference must
+        # never cost the user money; it is applied as a selector tie-break
+        # in the per-day mapping instead.
         origin_dropped = len(dropped_ids)
 
         # regroup per recipe; drop recipes that still miss an ingredient
@@ -211,8 +220,7 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
                 execution.aborted = PlanAlert(
                     stage="origin_filter", code=GateCode.excluded_by_origin,
                     message=(f"Excluding {', '.join(exclude_origin or [])} "
-                             f"left no candidate for "
-                             f"{', '.join(sorted({n for n, _ in origin_emptied.values()}))}"
+                             f"left no candidate for {_name_list(origin_emptied)}"
                              f", so no complete recipe remains. Relax the "
                              f"exclusion, or accept one of the removed products "
                              f"listed per ingredient."),
@@ -224,7 +232,7 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
                             f"{p.name} (${_charged(p):.2f}) — {country} via {field}"
                             for p, country, field in removed[:5]],
                     } for name, removed in
-                        {n: r for n, r in origin_emptied.values()}.items()][:8])
+                        {n: r for n, r in origin_emptied.values()}.items()][:_DETAIL_CAP])
             else:
                 execution.aborted = PlanAlert(
                     stage="w2_fallback",
@@ -238,7 +246,7 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
         t0 = time.perf_counter()
         cheapest: list[dict[int, tuple[int, float]]] = []  # per candidate: line -> (pid, price)
         for _r, rpools in candidates:
-            cheapest.append({li: (pool[0].id, pool[0].store_price or pool[0].price)
+            cheapest.append({li: (pool[0].id, _charged(pool[0]))
                              for li, pool in rpools.items()})
         picked: list[int] = []
         union: dict[int, float] = {}                       # product_id -> price
@@ -293,8 +301,12 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
             seen: set[int] = set()
             products = [p for pool in rpools.values() for p in pool
                         if p.id not in seen and not seen.add(p.id)]
-            result = call_selector(recipe.ingredients, products,
-                                   model=cfg.selector_model_default)
+            result = call_selector(
+                recipe.ingredients, products, model=cfg.selector_model_default,
+                constraints=({"origin_preference": list(preference)}
+                             if preference else None),
+                origins_by_id=origins_map,
+                preference=list(preference or []))
             llm_cost += result.cost_usd
             by_id = {p.id: p for p in products}
             by_line = {i.line_no: i for i in recipe.ingredients}

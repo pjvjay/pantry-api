@@ -97,6 +97,36 @@ _ALIASES: dict[str, set[str]] = {
     },
     "netherlands": {"netherlands", "holland", "dutch"},
     "south korea": {"south korea", "korea, south", "republic of korea"},
+    "north korea": {"north korea", "korea, north", "dprk",
+                    "democratic people's republic of korea"},
+    # Synonym pairs that were previously independent KNOWN_COUNTRIES entries:
+    # validation accepted either spelling, then country_matches compared the
+    # user's spelling literally against the evidence text and found nothing.
+    "czechia": {"czechia", "czech republic"},
+    "turkey": {"turkey", "turkiye"},
+    "myanmar": {"myanmar", "burma"},
+    "cote d'ivoire": {"cote d'ivoire", "ivory coast"},
+    "cabo verde": {"cabo verde", "cape verde"},
+    "eswatini": {"eswatini", "swaziland"},
+    "timor-leste": {"timor-leste", "east timor"},
+    "north macedonia": {"north macedonia", "macedonia"},
+    "vietnam": {"vietnam", "viet nam"},
+    "russia": {"russia", "russian federation"},
+    "united arab emirates": {"united arab emirates", "uae", "u.a.e"},
+    "democratic republic of the congo": {"democratic republic of the congo",
+                                         "dr congo", "drc", "congo-kinshasa"},
+    "bosnia and herzegovina": {"bosnia and herzegovina", "bosnia"},
+    "slovakia": {"slovakia", "slovak republic"},
+    "vatican city": {"vatican city", "holy see", "vatican"},
+    "taiwan": {"taiwan", "republic of china"},
+    "china": {"china", "people's republic of china", "prc"},
+    "iran": {"iran", "islamic republic of iran"},
+    "laos": {"laos", "lao"},
+    "syria": {"syria", "syrian arab republic"},
+    "tanzania": {"tanzania", "united republic of tanzania"},
+    "brunei": {"brunei", "brunei darussalam"},
+    "moldova": {"moldova", "republic of moldova"},
+    "palestine": {"palestine", "state of palestine", "palestinian territories"},
 }
 
 # Multi-word country names whose components are themselves countries or
@@ -169,7 +199,10 @@ def _normalize(text: str) -> str:
     """
     t = unicodedata.normalize("NFKD", (text or "").lower())
     t = "".join(c for c in t if not unicodedata.combining(c))
-    return re.sub(r"\s+", " ", t.replace(".", "")).strip()
+    t = t.replace("\u2019", "'").replace("\u2018", "'").replace("`", "'")
+    t = re.sub(r"\s+", " ", t.replace(".", "")).strip()
+    # "The Netherlands", "the UK": the article is never part of the name.
+    return re.sub(r"^the\s+", "", t)
 
 
 def canonical_country(name: str) -> str:
@@ -184,6 +217,13 @@ def canonical_country(name: str) -> str:
 _SUGGESTION_HINTS = {"america": "united states", "american": "united states",
                      "britain": "united kingdom", "england": "united kingdom",
                      "holland": "netherlands"}
+# Inputs that are ambiguous or not countries: name the real choices rather than
+# let difflib offer "Monaco" for Ontario.
+_AMBIGUOUS = {"korea": ["South Korea", "North Korea"],
+              "congo": ["Democratic Republic Of The Congo", "Congo"],
+              "ontario": ["Canada"], "quebec": ["Canada"],
+              "eu": ["(a bloc, not a country — name the member state)"],
+              "europe": ["(a continent, not a country — name the country)"]}
 
 
 def preference_rank(origin: ProductOrigin | None, preference: list[str]) -> int:
@@ -221,6 +261,9 @@ def validate_countries(names: list[str]) -> dict[str, list[str]]:
     for raw in names or []:
         n = canonical_country(raw)
         if not n or n in KNOWN_COUNTRIES or n in _SURFACE_TO_CANON:
+            continue
+        if n in _AMBIGUOUS:
+            unknown[raw] = _AMBIGUOUS[n]
             continue
         seen: list[str] = []
         for s in difflib.get_close_matches(n, universe, n=5, cutoff=0.6):
