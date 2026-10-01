@@ -236,26 +236,153 @@ for the Hugging Face Space image.
 
 The pipeline is also exposed over the [Model Context
 Protocol](https://modelcontextprotocol.io) so any MCP client — Claude
-Desktop, Claude Code, or another agent — can call it as tools. One
-server definition (`pantry_planner/mcp_server.py`), two transports:
+Desktop, Claude Code, or another agent — can use it. One server
+definition (`pantry_planner/mcp_server.py`), two transports (stdio and
+Streamable HTTP), three primitives: **tools** the agent calls,
+**resources** it reads once per session, **prompts** the operator
+hands it for multi-step protocols.
 
-| Tool | Cost | What it does |
+### Tools
+
+"Token" means a bearer token from `MCP_AUTH_TOKENS` (below). When no
+token is configured the endpoint is anonymous: every read and plan tool
+still works, and the two write tools refuse with a message naming
+`MCP_AUTH_TOKENS`. Over stdio the operator's own process is trusted and
+nothing needs a token.
+
+| Tool | Cost | Needs a token? | Returns |
+| --- | --- | --- | --- |
+| `list_recipes`, `get_recipe` | free | only when configured | the recipe library; one `Recipe` |
+| `list_products` | free | only when configured | `ProductPage {items, total, next_offset}` — `search` substring, exact `category`, `limit`/`offset` |
+| `find_product` | free | only when configured | `ProductSearch` — planner-parity retrieval: `match` is `direct`, `relaxed` (same-aisle alternatives the planner would only offer) or `none`; each hit priced at its cheapest in-range store |
+| `get_product` | free | only when configured | `ProductDetail` — every store offer, the resolved origin (`status` first), the evidence rows behind it, pending submissions, reviews |
+| `get_product_origins` | free | only when configured | `OriginPage {items, total, by_status, next_offset}` — `by_status` counts the whole selection before paging |
+| `rank_products_by_origin` | free | only when configured | `OriginRanking` — `ranked` / `excluded` / `unranked` kept separate |
+| `origin_triage` | free | only when configured | products worth reading a label for (hints, never origins) |
+| `plan_recipe` | 1–3 Claude calls | only when configured | `PlanResult {summary, full}` for a seeded slug |
+| `plan_from_text` | 2–4 Claude calls | only when configured | `PlanResult` for pasted recipe text (NL2SQL path) |
+| `plan_week` | ~1 selector call per day | only when configured | `WeekResult {summary, full}` |
+| `submit_origin_evidence` | free | **always over HTTP** | `Submission` — a PENDING label reading, deduplicated |
+| `list_origin_submissions` | free | only when configured | `SubmissionPage` — the review queue, oldest first |
+| `review_origin_submission` | free | **always over HTTP** | `Submission` — approved (now evidence) or rejected with a note |
+| `pipeline_status` | free | only when configured | strategy, models, DB, `mcp_auth` (`required`/`anonymous`), `write_tools` (`enabled`/`disabled` for this caller) |
+
+Every tool carries `ToolAnnotations`: reads are `read_only_hint=true`,
+plan tools additionally `idempotent_hint=false` (the selector may choose
+differently), the two write tools are `read_only_hint=false,
+destructive_hint=false` (nothing is ever deleted; `submit` is idempotent
+because the queue dedupes). `open_world_hint` is false everywhere —
+nothing reaches outside the seeded catalog.
+
+**Token-lean results.** Plan tools return a `summary` — the lines
+(ingredient → product, brand, size, store, price, origin), `total_cost`,
+`origin_status`, `coverage {spend_fraction, count_fraction, meets_floor,
+…}`, the recommended `trip` and `notes` (interpretation, substitutions,
+the coverage-floor warning). Pass `verbose=true` to also get `full`, the
+complete `ShoppingPlan` / `WeekPlan` with the retrieval trace, per-line
+reasoning and every trip option (3–19k chars on the demo seed; the
+summary is 1–5k). The REST API is unchanged and always returns the full
+shape.
+
+**Input bounds** mirror the REST API, so a public `/mcp` is capped the
+same way: `recipe_text` ≤ 8000 chars; `exclude_origin`, `preference`,
+`exclude`, `exclude_tags` ≤ 50 entries; `search` ≤ 200 chars;
+`product_ids` ≤ 200; `plan_week.days` 1–14; page `limit` 1–200. An
+over-long call fails validation before anything runs. Unknown country
+names are an error with did-you-mean suggestions, never a silent filter
+that matches nothing.
+
+### Resources
+
+| URI | Content |
+| --- | --- |
+| `pantry://recipes` | the recipe library (slug, name, servings, ingredient count) |
+| `pantry://recipes/{slug}` | one recipe with its ordered ingredients; an unknown slug is a not-found error naming `list_recipes` |
+| `pantry://catalog/categories` | `{category: {subcategory: product count}}` — the vocabulary `list_products(category=…)` accepts |
+| `pantry://countries` | `{canonical: [...], aliases: {canonical: [forms]}, ambiguous: {input: [guidance]}}` — every spelling the server accepts for `exclude_origin`, `preference` and `country`; "korea" and "congo" are listed as ambiguous with the real choices |
+| `pantry://origins/coverage` | `{products, by_status, evidence_rows, submissions: {pending, approved, rejected}, floor}` — how thin the provenance data is, and the coverage floor a basket must reach to be called verified |
+
+All resources are `application/json` and wrap the same code the tools
+use, so they cannot disagree with them.
+
+### Prompts
+
+| Prompt | Arguments | What it tells the agent |
 | --- | --- | --- |
-| `list_recipes`, `get_recipe` | free | browse the seeded recipe library |
-| `list_products` | free | catalog, with a `search` substring filter |
-| `pipeline_status` | free | active strategy/models/threshold/DB |
-| `get_product_origins` | ≤1 Haiku call, then cached | country of origin per product |
-| `search_products_by_origin` | free by default | filter catalog by origin country |
-| `plan_recipe` | 1–3 Claude calls | full pipeline for a seeded recipe |
-| `plan_from_text` | 2–4 Claude calls | NL2SQL pipeline on pasted recipe text |
-| `plan_week` | ~1 selector call per day | weekly menu optimizer |
+| `plan_dinner` | `recipe`, `exclude_origin?`, `budget?` | look up slugs/products first, call the plan tool once, report `origin_status` and `coverage.spend_fraction` verbatim, never call a basket clean below the floor, name every `notes` entry |
+| `read_label` | `product` | the vision protocol: `find_product` for the id; transcribe the declaration EXACTLY; classify the claim type from the wording; "Imported by / Distributed by" ⇒ `importer_only`; the high/medium/low confidence rubric; submit and say it is pending |
+| `review_submissions` | — | list pending, `get_product` each, check verbatim vs claim type vs country, approve/reject with a note a later reader can audit |
 
-**Country-of-origin resolution** (`origins.py`) is deliberately
-low-cost, three tiers, cheapest first: a DB cache (`product_origins`,
-migration 0004) → deterministic keyword/subcategory heuristics tuned to
-a Canadian store (free, covers ~70% of the catalog) → one batch Haiku
-call for the remainder, cached so each product pays for at most one
-call ever. `allow_llm=false` guarantees a zero-cost answer.
+### The write path: from a label photo to a plan
+
+```
+submit_origin_evidence ──► origin_submissions (status pending)
+                               │  nothing reads it: not the resolver, not a plan
+review_origin_submission ──► approve: COPIED into product_origin_evidence
+                               │       (source "agent-label"), evidence_id recorded
+                               │  reject: kept with the reviewer's note; the same
+                               │          wording resubmitted gets that verdict back
+origins.resolve_origin ──────► product's origin is "resolved" from the new row
+plan_recipe / plan_week ─────► exclude_origin now drops it; coverage counts it
+```
+
+A pending submission changes nothing. Approval copies rather than moves,
+so the audit trail (who submitted, who approved, when, why) survives;
+a transcribed label (`label-photo` or `agent-label`) outranks a
+crowd-sourced record at equal claim and confidence. The same path is
+available from the CLI: `python -m pantry_planner.ingest submissions
+[pending|approved|rejected]` and `python -m pantry_planner.ingest review
+<id> approve|reject [--note TEXT] [--by NAME]`.
+
+### Authentication
+
+`MCP_AUTH_TOKENS` is a comma-separated list of `label:secret` entries
+(an entry without a colon is labelled `token-<n>`; whitespace is
+stripped; empty entries are ignored). Each secret must be at least 16
+characters or the process refuses to start — a guessable token reads as
+protection and is worse than none. The label is what appears as
+`submitted_by` / `reviewed_by` on origin submissions, so name a person
+or a client, never the secret.
+
+* **Tokens configured** — every `/mcp` request must carry
+  `Authorization: Bearer <secret>`. A missing, wrong or malformed header
+  gets `401` with `WWW-Authenticate: Bearer realm="pantry-mcp",
+  error="invalid_token"` and a JSON body
+  `{"error": "invalid_token", "error_description": …}`. Secrets are
+  compared with `hmac.compare_digest`; they are never logged or returned.
+* **Anonymous mode** (`MCP_AUTH_TOKENS` unset) — every read and plan
+  tool works without a header; `submit_origin_evidence` and
+  `review_origin_submission` refuse with a message naming
+  `MCP_AUTH_TOKENS`, and `pipeline_status` reports `mcp_auth:
+  "anonymous"`, `write_tools: "disabled"`.
+* **stdio is trusted** — the server runs inside the operator's own
+  process, so the caller is `local` and the write tools work without a
+  token.
+
+The deployed instance reads the token list from the
+`pantry-mcp-credentials` secret (see pantry-gitops / pantry-infra).
+
+### Client configuration
+
+**Streamable HTTP (remote).** The FastAPI app mounts the same server at
+`/mcp` (public: `https://<host>/pantry/api/mcp`) — stateless, plain
+JSON responses, so it works unchanged behind nginx and the K8s ingress.
+With a bearer token:
+
+```bash
+claude mcp add --transport http pantry-remote https://<host>/pantry/api/mcp \
+  --header "Authorization: Bearer <secret>"
+```
+
+Locally, against `uvicorn pantry_planner.api:app`:
+
+```bash
+claude mcp add --transport http pantry-remote http://localhost:8000/mcp
+```
+
+Set `MCP_HTTP_ENABLED=false` to turn the mount off (stdio is
+unaffected). In `DEMO_MODE=1` the plan tools run keyless and
+deterministic, same as the REST endpoints.
 
 **stdio (local clients).** `pip install -e .` provides the
 `pantry-mcp` console script. Claude Desktop config (absolute paths —
@@ -283,20 +410,6 @@ claude mcp add pantry-planner --env ANTHROPIC_API_KEY=sk-ant-... --env DB_URL=sq
 
 Burr traces from stdio runs land in `~/.pantry-planner/burr`
 (override with `BURR_TRACKING_DIR`).
-
-**Streamable HTTP (remote).** The FastAPI app mounts the same server at
-`/mcp` (public: `https://<host>/pantry/api/mcp`) — stateless, plain
-JSON responses, so it works unchanged behind nginx and the K8s ingress.
-
-```bash
-claude mcp add --transport http pantry-remote http://localhost:8000/mcp
-```
-
-⚠️ The HTTP endpoint has **no auth** — same posture as the REST API —
-and the plan tools spend Anthropic credits per call. Don't expose it
-beyond the current demo footprint; set `MCP_HTTP_ENABLED=false` to
-turn the mount off (stdio is unaffected). In `DEMO_MODE=1` the plan
-tools run keyless and deterministic, same as the REST endpoints.
 
 ## Where things come from (provenance)
 

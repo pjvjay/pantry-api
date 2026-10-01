@@ -260,12 +260,15 @@ _SUGGESTION_HINTS = {"america": "united states", "american": "united states",
                      "holland": "netherlands"}
 # Inputs that are ambiguous or not countries: name the real choices rather than
 # let difflib offer "Monaco" for Ontario.
-_AMBIGUOUS = {"korea": ["South Korea", "North Korea"],
-              "congo": ["Republic of the Congo", "Democratic Republic of the Congo"],
-              "macedonia": ["North Macedonia", "(or a Greek region — name the country)"],
-              "ontario": ["Canada"],
-              "eu": ["(a bloc, not a country — name the member state)"],
-              "europe": ["(a continent, not a country — name the country)"]}
+AMBIGUOUS: dict[str, list[str]] = {
+    "korea": ["South Korea", "North Korea"],
+    "congo": ["Republic of the Congo", "Democratic Republic of the Congo"],
+    "macedonia": ["North Macedonia", "(or a Greek region — name the country)"],
+    "ontario": ["Canada"],
+    "eu": ["(a bloc, not a country — name the member state)"],
+    "europe": ["(a continent, not a country — name the country)"],
+}
+_AMBIGUOUS = AMBIGUOUS     # former private name, kept for out-of-tree importers
 
 
 def preference_rank(origin: ProductOrigin | None, preference: list[str]) -> int:
@@ -309,8 +312,8 @@ def validate_countries(names: list[str]) -> dict[str, list[str]]:
     universe = sorted(KNOWN_COUNTRIES | set(_SURFACE_TO_CANON) | set(_SUGGESTION_HINTS))
     for raw in names or []:
         n = canonical_country(raw)
-        if n in _AMBIGUOUS:            # before the known-name shortcut, or it is dead code
-            unknown[raw] = _AMBIGUOUS[n]
+        if n in AMBIGUOUS:             # before the known-name shortcut, or it is dead code
+            unknown[raw] = AMBIGUOUS[n]
             continue
         if not n or n in KNOWN_COUNTRIES or n in _SURFACE_TO_CANON:
             continue

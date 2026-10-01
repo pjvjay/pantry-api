@@ -1,6 +1,6 @@
 """
 MCP server — exposes the pantry pipeline to MCP clients (Claude
-Desktop, Claude Code, any agent) as tools.
+Desktop, Claude Code, any agent) as tools, resources and prompts.
 
 One server definition, two transports:
   stdio  — the `pantry-mcp` console script (see [project.scripts]);
@@ -24,7 +24,7 @@ from typing import Annotated
 
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.mcpserver import Context, MCPServer
-from mcp.server.mcpserver.exceptions import ToolError
+from mcp.server.mcpserver.exceptions import ResourceNotFoundError, ToolError
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 
@@ -74,7 +74,11 @@ server = MCPServer(
         "priced shopping plan. Provenance tools rank products by where "
         "they come from against a country preference you supply, using "
         "ingested evidence only - never a guess. Origin coverage is "
-        "partial, so always report how many products were unranked."
+        "partial, so always report how many products were unranked. "
+        "Resources: pantry://countries lists the country spellings the "
+        "server accepts, pantry://origins/coverage says how thin the "
+        "evidence is, pantry://recipes and pantry://catalog/categories "
+        "are the library and the aisle list."
     ),
 )
 
@@ -1054,6 +1058,220 @@ def pipeline_status(ctx: Context = None) -> PipelineStatus:  # type: ignore[assi
         mcp_auth="required" if cfg.mcp_auth_tokens else "anonymous",
         write_tools=("disabled" if transport == "http" and label == "anonymous"
                      else "enabled"),
+    )
+
+
+# ─── Resources (reference data an agent reads once per session) ──
+# Each resource is a thin wrapper over the same code the tools use, so it
+# can never disagree with them. A template function that cannot find its
+# instance raises ResourceNotFoundError: the SDK passes that message
+# through to the client, whereas any other exception is masked as
+# "Error creating resource from template <uri>" and the hint is lost.
+
+_JSON = "application/json"
+
+
+@server.resource("pantry://recipes", name="recipes", title="Recipe library",
+                 mime_type=_JSON)
+def recipes_resource() -> list[RecipeSummary]:
+    """Every seeded recipe: slug, name, servings, ingredient count. The
+    slug is what plan_recipe and pantry://recipes/{slug} take."""
+    return list_recipes()
+
+
+@server.resource("pantry://recipes/{slug}", name="recipe", title="One recipe",
+                 mime_type=_JSON)
+def recipe_resource(slug: str) -> Recipe:
+    """A seeded recipe with its ordered ingredient list."""
+    from . import db
+
+    try:
+        return db.load_recipe(slug)
+    except ValueError as e:
+        raise ResourceNotFoundError(
+            f"{e}. Read pantry://recipes or call list_recipes for valid slugs.") from e
+
+
+@server.resource("pantry://catalog/categories", name="catalog-categories",
+                 title="Catalog categories", mime_type=_JSON)
+def categories_resource() -> dict[str, dict[str, int]]:
+    """{category: {subcategory: product count}} over the whole catalog —
+    the vocabulary list_products(category=...) accepts, with the size of
+    each aisle, from one GROUP BY."""
+    from sqlalchemy import func
+    from sqlalchemy.orm import Session
+
+    from .db import ProductRow, engine
+
+    with Session(engine()) as s:
+        rows = (s.query(ProductRow.category, ProductRow.subcategory,
+                        func.count(ProductRow.id))
+                .group_by(ProductRow.category, ProductRow.subcategory)
+                .order_by(ProductRow.category, ProductRow.subcategory).all())
+    out: dict[str, dict[str, int]] = {}
+    for category, subcategory, n in rows:
+        out.setdefault(str(category or ""), {})[str(subcategory or "")] = int(n)
+    return out
+
+
+@server.resource("pantry://countries", name="countries", title="Country spellings",
+                 mime_type=_JSON)
+def countries_resource() -> dict[str, object]:
+    """How to spell a country this server accepts. `canonical` is the
+    sorted list of names every country folds to; `aliases` maps a canonical
+    name to the other forms that fold to it ("usa", "U.S.A", state names);
+    `ambiguous` lists inputs that are rejected with guidance ("korea" —
+    which one?). Any name in `canonical` or `aliases` passes the country
+    validation on exclude_origin / preference / submit_origin_evidence."""
+    from . import origins
+
+    canonical = sorted({origins._title(origins.canonical_country(n))
+                        for n in origins.KNOWN_COUNTRIES})
+    aliases = {origins._title(canon): sorted(forms)
+               for canon, forms in origins._ALIASES.items()}
+    return {"canonical": canonical, "aliases": aliases,
+            "ambiguous": dict(origins.AMBIGUOUS)}
+
+
+@server.resource("pantry://origins/coverage", name="origin-coverage",
+                 title="Origin coverage", mime_type=_JSON)
+def origin_coverage_resource() -> dict[str, object]:
+    """How much of the catalog has a provenance at all: product count,
+    resolved-origin counts by status, evidence rows, the review queue by
+    status, and the coverage floor a plan must reach before its basket
+    may be called verified. Read this before describing coverage."""
+    from sqlalchemy import func
+    from sqlalchemy.orm import Session
+
+    from . import db, origins
+    from .config import settings
+
+    with Session(db.engine()) as s:
+        products = int(s.query(func.count(db.ProductRow.id)).scalar() or 0)
+        evidence_rows = int(s.query(func.count(db.ProductOriginEvidenceRow.id)).scalar() or 0)
+        queue: dict[str, int] = {
+            str(status): int(n)
+            for status, n in s.query(db.OriginSubmissionRow.status,
+                                     func.count(db.OriginSubmissionRow.id))
+            .group_by(db.OriginSubmissionRow.status).all()}
+    by_status: dict[str, int] = {}
+    for o in origins.resolve_all().values():
+        by_status[o.status] = by_status.get(o.status, 0) + 1
+    return {
+        "products": products,
+        "by_status": by_status,
+        "evidence_rows": evidence_rows,
+        "submissions": {st: int(queue.get(st, 0))
+                        for st in ("pending", "approved", "rejected")},
+        "floor": settings().origin_min_coverage,
+    }
+
+
+# ─── Prompts (the protocols a client can hand its model) ─────
+# A prompt is the operator's wording for a multi-tool task, so the agent
+# follows the same discipline every time: look the id up first, report the
+# coverage numbers verbatim, transcribe a label rather than paraphrase it.
+
+@server.prompt(title="Plan a dinner",
+               description="Plan a priced basket for a recipe and report its "
+                           "provenance honestly.")
+def plan_dinner(recipe: str, exclude_origin: str = "", budget: str = "") -> str:
+    """Plan a priced shopping basket for `recipe` (a seeded slug or pasted
+    recipe text), optionally excluding origin countries and under a
+    budget."""
+    exclude = (f"Exclude products evidenced as coming from: {exclude_origin}. "
+               "Check each spelling against the pantry://countries resource "
+               "and pass them as the exclude_origin list. "
+               if exclude_origin.strip() else "")
+    budget_line = (f"The budget is {budget}: compare it with summary.total_cost "
+                   "and say plainly whether the basket is under it. "
+                   if budget.strip() else "")
+    return (
+        f"Plan dinner for: {recipe}.\n\n"
+        "Steps:\n"
+        "1. Call list_recipes. If the request names a seeded recipe, use its "
+        "slug with plan_recipe; otherwise pass the text to plan_from_text. "
+        "If an ingredient is in doubt, call find_product for it first and "
+        "read `match` — \"relaxed\" hits are alternatives the planner would "
+        "only offer, not candidates.\n"
+        f"2. {exclude}{budget_line}Call the plan tool once; it is slow and "
+        "costs credits.\n"
+        "3. Report summary.total_cost, every line (ingredient → product, store, "
+        "price) and the recommended trip.\n"
+        "4. Report summary.origin_status and summary.coverage.spend_fraction "
+        "VERBATIM as numbers, with coverage.lines_known of coverage.lines_total. "
+        "Never describe the basket as clean, verified or free of a country "
+        "unless origin_status is \"verified\" and coverage.meets_floor is true: "
+        "a line with no evidence is unknown, not foreign and not domestic.\n"
+        "5. Name every entry in summary.notes (interpretation, substitutions, "
+        "the coverage-floor warning) rather than summarising them away.\n"
+        "If the tool returns an error about an origin gate, report the gate's "
+        "message and the affected ingredients; do not retry with the exclusion "
+        "silently dropped."
+    )
+
+
+@server.prompt(title="Read a package label",
+               description="Transcribe a country-of-origin declaration from a "
+                           "package and submit it for review.")
+def read_label(product: str) -> str:
+    """The vision protocol for turning a label photo into a pending origin
+    submission for `product`."""
+    return (
+        f"You are reading the package label of: {product}.\n\n"
+        "1. Call find_product with the product name to get its `id`; if "
+        "`match` is not \"direct\", ask which hit is the one in the photo "
+        "before continuing.\n"
+        "2. Find the country-of-origin declaration on the label and "
+        "transcribe it EXACTLY as printed into `verbatim`: same words, same "
+        "punctuation, same capitalisation, no translation, no paraphrase. "
+        "\"Product of U.S.A.\" must not become \"Made in USA\".\n"
+        "3. Classify `claim_type` from the wording alone: product-of / "
+        "grown-in / farmed-in / harvested-in / caught-in are FULL claims (all "
+        "or virtually all content from that country); made-in / prepared-in / "
+        "packaged-in are PROCESSING claims (processed there, ingredients may be "
+        "imported). Set `country` to the country the wording names, spelled as "
+        "in the pantry://countries resource.\n"
+        "4. An \"Imported by\", \"Distributed by\" or \"Packed for\" address is "
+        "NOT an origin. Record it with importer_only=true so a reviewer sees "
+        "it, and never present it as the product's origin.\n"
+        "5. Set `confidence`: high = the full declaration is legible in the "
+        "photo; medium = partial, cropped or a fragment; low = inferred from a "
+        "flag, an address or a maple leaf rather than read.\n"
+        "6. Call submit_origin_evidence with product_id, claim_type, country, "
+        "verbatim, confidence, importer_only and a `note` on what you could "
+        "and could not see. If it returns duplicate=true or status "
+        "\"rejected\", report that instead of resubmitting.\n"
+        "7. Tell the user the submission is PENDING: it changes nothing — not "
+        "the product's origin, not any plan — until a reviewer approves it."
+    )
+
+
+@server.prompt(title="Review origin submissions",
+               description="Work the pending origin-submission queue with "
+                           "auditable decisions.")
+def review_submissions() -> str:
+    """The reviewer protocol: check each pending submission against the
+    product and approve or reject it with a note a later reader can audit."""
+    return (
+        "Review the pending origin submissions.\n\n"
+        "1. Call list_origin_submissions (status \"pending\"); page with "
+        "next_offset until it is null.\n"
+        "2. For each submission call get_product with its product_id and "
+        "compare: does the product match what the verbatim wording describes? "
+        "Does the wording support the claim_type (\"Product of\" is a full "
+        "claim; \"Made in\" is processing-only)? Does it name the stated "
+        "country? Is an \"Imported by\" address marked importer_only? Does "
+        "existing evidence on the product contradict it?\n"
+        "3. Call review_origin_submission with decision \"approve\" when the "
+        "verbatim wording supports the claim type and the country, or "
+        "\"reject\" otherwise. Always give a `note` that a later reader can "
+        "audit without the photo: quote the wording and say what it does or "
+        "does not establish (\"blurry\" and \"wrong claim type\" are "
+        "different rejections).\n"
+        "4. Approval copies the reading into evidence as source \"agent-label\" "
+        "and the product's origin resolves from it immediately; report which "
+        "products changed status, and leave anything you cannot verify pending."
     )
 
 
