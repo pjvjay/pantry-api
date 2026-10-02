@@ -182,7 +182,9 @@ class ProductDetail(BaseModel):
     offers: list[Offer]                 # every store, cheapest first
     origin: ProductOrigin               # read `status` before `country`
     evidence: list[EvidenceSummary]     # every row, including ones the resolver ignored
-    pending_submissions: int            # origin readings awaiting review
+    # Origin readings awaiting review; null when the review-queue table is not
+    # deployed yet (the API can roll before pantry-db's 0006 migration).
+    pending_submissions: int | None
     review_count: int
     avg_rating: float | None
 
@@ -261,14 +263,33 @@ class Coverage(BaseModel):
     lines_excluded_origin: int
 
 
+class TripLine(BaseModel):
+    """One basket line at the store the trip buys it from; the product's
+    name is on the matching `lines` / `shopping_list` entry."""
+    product_id: int
+    store: str
+    price: float
+
+
 class Trip(BaseModel):
-    """The recommended point on the stops-vs-cost frontier."""
+    """The recommended point on the stops-vs-cost frontier, priced as ITS
+    OWN basket: `items` are the per-line prices at the stores the trip
+    visits, `basket_cost` their sum, `total_cost` basket plus travel. The
+    summary's `lines` and `total_cost` price every line at its cheapest
+    in-range store regardless of how many stops that implies — a different
+    basket, so the two totals legitimately differ. Report the one you mean."""
     stores: list[str]
+    basket_cost: float
+    travel_cost: float
     total_cost: float
     savings_vs_one_stop: float
+    items: list[TripLine]
 
 
 class PlanSummary(BaseModel):
+    """`total_cost` is the sum of `lines`, each at its cheapest in-range
+    store; `trip` is one realistic shopping trip priced at its own stores
+    (see Trip). They answer different questions and need not agree."""
     recipe_slug: str
     recipe_name: str
     total_cost: float
@@ -459,8 +480,11 @@ def _trip(options: list[TripOption]) -> Trip | None:
     best = next((t for t in options if t.recommended), None)
     if best is None:
         return None
-    return Trip(stores=best.stores, total_cost=best.total_cost,
-                savings_vs_one_stop=best.savings_vs_one_stop)
+    return Trip(stores=best.stores, basket_cost=best.basket_cost,
+                travel_cost=best.travel_cost, total_cost=best.total_cost,
+                savings_vs_one_stop=best.savings_vs_one_stop,
+                items=[TripLine(product_id=i.product_id, store=i.store_name, price=i.price)
+                       for i in best.items])
 
 
 def _substitution_notes(lines: list[PlanLineItem], prefix: str = "") -> list[str]:
@@ -565,13 +589,16 @@ def list_products(search: Annotated[str | None, Field(max_length=MAX_SEARCH)] = 
                   offset: Annotated[int, Field(ge=0)] = 0) -> ProductPage:
     """Page through the store catalog, ordered by id. `search` is a
     case-insensitive substring over name, brand, category and subcategory;
-    `category` is an exact (case-insensitive) category such as "pantry",
-    "dairy", "produce" or "meat". `total` counts every match and
+    `category` is an exact (case-insensitive) category OR subcategory such
+    as "pantry", "dairy" or "pasta" — a value that is neither is an error
+    naming the vocabulary (pantry://catalog/categories has the full tree),
+    never a silent empty page. `total` counts every match and
     `next_offset` is null on the last page. For an ingredient lookup the
     way the planner sees it, prefer find_product. Free — no LLM calls."""
     from . import db
 
-    products = sorted(db.load_all_products(), key=lambda p: p.id)
+    catalog = sorted(db.load_all_products(), key=lambda p: p.id)
+    products = catalog
     if search:
         needle = search.lower()
         products = [
@@ -580,7 +607,16 @@ def list_products(search: Annotated[str | None, Field(max_length=MAX_SEARCH)] = 
         ]
     if category:
         wanted = category.strip().lower()
-        products = [p for p in products if (p.category or "").lower() == wanted]
+        categories = sorted({(p.category or "").lower() for p in catalog} - {""})
+        subcategories = sorted({(p.subcategory or "").lower() for p in catalog} - {""})
+        if wanted not in categories and wanted not in subcategories:
+            raise ToolError(
+                f"Unknown category {category!r}. Categories: {', '.join(categories)}. "
+                f"Subcategories: {', '.join(subcategories)}. "
+                "Read pantry://catalog/categories for the tree with counts.")
+        products = [p for p in products
+                    if (p.category or "").lower() == wanted
+                    or (p.subcategory or "").lower() == wanted]
     page = products[offset:offset + limit]
     return ProductPage(items=[_product_summary(p) for p in page], total=len(products),
                        next_offset=_page(len(products), offset, len(page)))
@@ -1138,31 +1174,30 @@ def countries_resource() -> dict[str, object]:
 def origin_coverage_resource() -> dict[str, object]:
     """How much of the catalog has a provenance at all: product count,
     resolved-origin counts by status, evidence rows, the review queue by
-    status, and the coverage floor a plan must reach before its basket
-    may be called verified. Read this before describing coverage."""
+    status (null, with a note, when the review-queue table is not deployed
+    yet), and the coverage floor a plan must reach before its basket may be
+    called verified. Read this before describing coverage."""
     from sqlalchemy import func
     from sqlalchemy.orm import Session
 
-    from . import db, origins
+    from . import db, ingest, origins
     from .config import settings
 
     with Session(db.engine()) as s:
         products = int(s.query(func.count(db.ProductRow.id)).scalar() or 0)
         evidence_rows = int(s.query(func.count(db.ProductOriginEvidenceRow.id)).scalar() or 0)
-        queue: dict[str, int] = {
-            str(status): int(n)
-            for status, n in s.query(db.OriginSubmissionRow.status,
-                                     func.count(db.OriginSubmissionRow.id))
-            .group_by(db.OriginSubmissionRow.status).all()}
     by_status: dict[str, int] = {}
     for o in origins.resolve_all().values():
         by_status[o.status] = by_status.get(o.status, 0) + 1
+    # None (not zeros) when the review-queue table is not deployed yet: the
+    # resource must still answer the coverage question it exists for.
+    queue = ingest.submission_counts_by_status()
     return {
         "products": products,
         "by_status": by_status,
         "evidence_rows": evidence_rows,
-        "submissions": {st: int(queue.get(st, 0))
-                        for st in ("pending", "approved", "rejected")},
+        "submissions": queue,
+        "submissions_note": "" if queue is not None else ingest.QUEUE_MISSING,
         "floor": settings().origin_min_coverage,
     }
 
@@ -1310,7 +1345,10 @@ def main() -> None:
         "BURR_TRACKING_DIR", str(Path.home() / ".pantry-planner" / "burr"))
     from dotenv import load_dotenv
 
+    from .config import validate_startup
+
     load_dotenv()
+    validate_startup()
     server.run("stdio")
 
 

@@ -364,6 +364,41 @@ def _bounded(record: dict, field: str, limit: int) -> str:
     return value
 
 
+def _queue_guard(fn):
+    """Turn a missing review-queue table into a ValueError the tools already
+    map to a clear ToolError, instead of a raw driver error."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        from sqlalchemy.exc import OperationalError, ProgrammingError
+
+        try:
+            return fn(*args, **kwargs)
+        except (OperationalError, ProgrammingError) as e:
+            if queue_table_missing(e):
+                raise ValueError(QUEUE_MISSING) from e
+            raise
+    return wrapper
+
+
+QUEUE_MISSING = ("the origin_submissions table is not deployed: apply pantry-db "
+                 "migration 0006 before using the review queue")
+
+
+def queue_table_missing(exc: BaseException) -> bool:
+    """True when a DB error means `origin_submissions` does not exist.
+
+    SQLite says "no such table", Postgres raises UndefinedTable ("relation
+    ... does not exist"). The API and pantry-db ship through separate CI
+    bumps, so an API that knows about the review queue can run against a
+    database that does not have it yet.
+    """
+    text = str(exc).lower()
+    return "origin_submissions" in text and (
+        "no such table" in text or "does not exist" in text or "undefinedtable" in text)
+
+@_queue_guard
 def submit_origin(record: dict, *, submitted_by: str) -> dict:
     """Queue a label reading for review. Returns the row plus `duplicate`.
 
@@ -434,6 +469,7 @@ def submit_origin(record: dict, *, submitted_by: str) -> dict:
         return _submission_dict(row, product_name)
 
 
+@_queue_guard
 def review_submission(submission_id: int, decision: str, *, reviewed_by: str,
                       note: str = "") -> dict:
     """Approve or reject a pending submission.
@@ -504,6 +540,7 @@ def review_submission(submission_id: int, decision: str, *, reviewed_by: str,
         return _submission_dict(row, product_name)
 
 
+@_queue_guard
 def list_submissions(status: str | None = "pending", limit: int = 50,
                      offset: int = 0) -> tuple[list[dict], int]:
     """A page of submissions (oldest first — it is a queue) and the total
@@ -529,16 +566,49 @@ def list_submissions(status: str | None = "pending", limit: int = 50,
         return [_submission_dict(r, names.get(int(r.product_id), "")) for r in rows], total
 
 
-def pending_submission_count(product_id: int) -> int:
+def pending_submission_count(product_id: int) -> int | None:
+    """Pending review-queue rows for a product, or None when the queue table
+    is not deployed yet.
+
+    A product lookup must never fail because the review queue is missing,
+    and a missing table must not read as 0 — 0 would claim there is nothing
+    to review. None is the honest answer: unknown.
+    """
     from sqlalchemy import func
+    from sqlalchemy.exc import OperationalError, ProgrammingError
     from sqlalchemy.orm import Session
 
     from . import db
 
-    with Session(db.engine()) as s:
-        return int(s.query(func.count(db.OriginSubmissionRow.id))
-                   .filter(db.OriginSubmissionRow.product_id == product_id,
-                           db.OriginSubmissionRow.status == "pending").scalar() or 0)
+    try:
+        with Session(db.engine()) as s:
+            return int(s.query(func.count(db.OriginSubmissionRow.id))
+                       .filter(db.OriginSubmissionRow.product_id == product_id,
+                               db.OriginSubmissionRow.status == "pending").scalar() or 0)
+    except (OperationalError, ProgrammingError) as e:
+        if queue_table_missing(e):
+            return None
+        raise
+
+
+def submission_counts_by_status() -> dict[str, int] | None:
+    """Review-queue size by status, or None when the table is not deployed."""
+    from sqlalchemy import func
+    from sqlalchemy.exc import OperationalError, ProgrammingError
+    from sqlalchemy.orm import Session
+
+    from . import db
+
+    try:
+        with Session(db.engine()) as s:
+            rows = (s.query(db.OriginSubmissionRow.status, func.count(db.OriginSubmissionRow.id))
+                    .group_by(db.OriginSubmissionRow.status).all())
+    except (OperationalError, ProgrammingError) as e:
+        if queue_table_missing(e):
+            return None
+        raise
+    counts = {str(status): int(n) for status, n in rows}
+    return {st: counts.get(st, 0) for st in ("pending", "approved", "rejected")}
 
 
 # ─── CLI ─────────────────────────────────────────────────────

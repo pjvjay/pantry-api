@@ -183,6 +183,7 @@ async def test_origin_coverage_reflects_evidence_and_the_review_queue(
     assert data == {
         "products": 62, "by_status": {"unknown": 62}, "evidence_rows": 0,
         "submissions": {"pending": 0, "approved": 0, "rejected": 0},
+        "submissions_note": "",
         "floor": config.settings().origin_min_coverage,
     }
     assert 0 < data["floor"] <= 1

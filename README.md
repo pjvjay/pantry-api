@@ -278,11 +278,16 @@ nothing reaches outside the seeded catalog.
 (ingredient → product, brand, size, store, price, origin), `total_cost`,
 `origin_status`, `coverage {spend_fraction, count_fraction, meets_floor,
 …}`, the recommended `trip` and `notes` (interpretation, substitutions,
-the coverage-floor warning). Pass `verbose=true` to also get `full`, the
-complete `ShoppingPlan` / `WeekPlan` with the retrieval trace, per-line
-reasoning and every trip option (3–19k chars on the demo seed; the
-summary is 1–5k). The REST API is unchanged and always returns the full
-shape.
+the coverage-floor warning). `total_cost` prices every line at its
+cheapest in-range store; `trip` is one realistic shopping trip priced at
+the stores it visits, with its own per-item prices in `trip.items` and
+its own `basket_cost` / `travel_cost` / `total_cost` — two different
+baskets, so report the one you mean. Pass `verbose=true` to also get
+`full`, the complete `ShoppingPlan` / `WeekPlan` with the retrieval
+trace, per-line reasoning and every trip option. On the demo seed the
+summary is 1–7k chars of compact JSON and `full` 4–25k; the text copy of
+the result that a model reads is about 1.5× those figures. The REST API
+is unchanged and always returns the full shape.
 
 **Input bounds** mirror the REST API, so a public `/mcp` is capped the
 same way: `recipe_text` ≤ 8000 chars; `exclude_origin`, `preference`,

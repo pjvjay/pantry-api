@@ -227,7 +227,9 @@ async def test_plan_week_summary_merges_the_list_once(server):
     assert vout.summary.trip is not None and vout.summary.trip.stores == recommended.stores
 
     # Measured 6178 lean / 24878 verbose on the demo seed (compact JSON).
-    assert _chars(lean) <= 6500, _chars(lean)
+    # 6178 chars on the demo seed before the recommended trip carried its own
+    # per-item prices (review round 4), 6907 after; the ceiling leaves ~8%.
+    assert _chars(lean) <= 7500, _chars(lean)
     assert _chars(full) >= 3 * _chars(lean), (_chars(full), _chars(lean))
 
 

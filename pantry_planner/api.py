@@ -41,6 +41,11 @@ async def _lifespan(app: FastAPI):
     # session manager on the server, so a later call elsewhere (a test
     # inspecting routes) would otherwise leave the mounted app's own
     # manager never started and every /mcp request a 500.
+    # Fail at startup, not on the first request: a weak or malformed
+    # MCP_AUTH_TOKENS must stop the process here, before readiness passes.
+    from .config import validate_startup
+
+    validate_startup()
     if MCP_HTTP_ENABLED:
         async with _MCP_SESSION_MANAGER.run():
             yield
