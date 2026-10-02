@@ -52,6 +52,10 @@ from .models import (
 #                        may be imported and must be qualified as such
 FULL_CLAIMS = {"product-of", "grown-in", "farmed-in", "harvested-in", "caught-in"}
 PROCESSING_CLAIMS = {"made-in", "prepared-in", "packaged-in"}
+# Sources that are a transcription of the printed package: the container's
+# label-photo reads and reviewer-approved agent submissions (ingest.
+# review_submission). Both outrank a crowd-sourced record at equal claim.
+LABEL_SOURCES = frozenset({"label-photo", "agent-label"})
 NON_CLAIMS = {"unknown", "conflicting", "none", "imported"}
 
 CONF_ORDER = {"high": 3, "medium": 2, "low": 1}
@@ -256,12 +260,15 @@ _SUGGESTION_HINTS = {"america": "united states", "american": "united states",
                      "holland": "netherlands"}
 # Inputs that are ambiguous or not countries: name the real choices rather than
 # let difflib offer "Monaco" for Ontario.
-_AMBIGUOUS = {"korea": ["South Korea", "North Korea"],
-              "congo": ["Republic of the Congo", "Democratic Republic of the Congo"],
-              "macedonia": ["North Macedonia", "(or a Greek region — name the country)"],
-              "ontario": ["Canada"],
-              "eu": ["(a bloc, not a country — name the member state)"],
-              "europe": ["(a continent, not a country — name the country)"]}
+AMBIGUOUS: dict[str, list[str]] = {
+    "korea": ["South Korea", "North Korea"],
+    "congo": ["Republic of the Congo", "Democratic Republic of the Congo"],
+    "macedonia": ["North Macedonia", "(or a Greek region — name the country)"],
+    "ontario": ["Canada"],
+    "eu": ["(a bloc, not a country — name the member state)"],
+    "europe": ["(a continent, not a country — name the country)"],
+}
+_AMBIGUOUS = AMBIGUOUS     # former private name, kept for out-of-tree importers
 
 
 def preference_rank(origin: ProductOrigin | None, preference: list[str]) -> int:
@@ -305,8 +312,8 @@ def validate_countries(names: list[str]) -> dict[str, list[str]]:
     universe = sorted(KNOWN_COUNTRIES | set(_SURFACE_TO_CANON) | set(_SUGGESTION_HINTS))
     for raw in names or []:
         n = canonical_country(raw)
-        if n in _AMBIGUOUS:            # before the known-name shortcut, or it is dead code
-            unknown[raw] = _AMBIGUOUS[n]
+        if n in AMBIGUOUS:             # before the known-name shortcut, or it is dead code
+            unknown[raw] = AMBIGUOUS[n]
             continue
         if not n or n in KNOWN_COUNTRIES or n in _SURFACE_TO_CANON:
             continue
@@ -441,7 +448,7 @@ def resolve_origin(product_id: int, product_name: str, evidence: list
         return (
             1 if (e.claim_type or "") in FULL_CLAIMS else 0,
             CONF_ORDER.get(e.confidence or "low", 1),
-            1 if e.source == "label-photo" else 0,
+            1 if e.source in LABEL_SOURCES else 0,
         )
 
     # Fields are merged across rows, not read off the strongest one: one

@@ -118,6 +118,38 @@ class ProductOriginEvidenceRow(Base):
     observed_at = Column(String, nullable=False, default="")
 
 
+class OriginSubmissionRow(Base):
+    """0006_origin_submissions — a reviewed queue for agent-submitted claims.
+
+    A pending claim is never evidence: the resolver reads only
+    product_origin_evidence, so nothing here changes a plan until a reviewer
+    approves. Approval COPIES the claim into evidence (source "agent-label")
+    and records the new row's id in `evidence_id`; the submission stays, with
+    who reviewed it, when and why. Rejections are kept so the same wording
+    resubmitted returns the earlier verdict instead of re-entering the queue.
+    Columns mirror the migration exactly (names, nullability, defaults).
+    """
+    __tablename__ = "origin_submissions"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_id = Column(Integer, nullable=False, index=True)
+    claim_type = Column(String, nullable=False)
+    country = Column(String, nullable=False)
+    ingredient_origin = Column(String, nullable=False, default="")
+    manufactured_in = Column(String, nullable=False, default="")
+    verbatim = Column(String, nullable=False)
+    confidence = Column(String, nullable=False, default="low")
+    importer_only = Column(Boolean, nullable=False, default=False)
+    note = Column(String, nullable=False, default="")
+    source_ref = Column(String, nullable=False, default="")
+    submitted_by = Column(String, nullable=False, default="")
+    submitted_at = Column(String, nullable=False, default="")
+    status = Column(String, nullable=False, default="pending", index=True)
+    reviewed_by = Column(String, nullable=False, default="")
+    reviewed_at = Column(String, nullable=False, default="")
+    review_note = Column(String, nullable=False, default="")
+    evidence_id = Column(Integer, nullable=True)
+
+
 class PriceObservationRow(Base):
     """0005_origin_evidence — timestamped readings scraped from store pages.
 
@@ -350,6 +382,7 @@ def seed_from_json() -> None:
         # Clear existing
         s.query(RecipeIngredientRow).delete()
         s.query(RecipeRow).delete()
+        s.query(OriginSubmissionRow).delete()
         s.query(ProductOriginEvidenceRow).delete()
         s.query(PriceObservationRow).delete()
         s.query(ProductOriginRow).delete()

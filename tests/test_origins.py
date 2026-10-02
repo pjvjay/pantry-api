@@ -156,6 +156,25 @@ def test_full_claim_outranks_processing_claim_as_representative():
     assert resolve_all([1])[1].claim_type == "product-of"
 
 
+def test_approved_agent_label_outranks_open_food_facts_as_representative():
+    """An approved submission is a transcribed label: at equal claim and
+    confidence it beats the crowd-sourced record. Open Food Facts is
+    inserted FIRST so a stable sort without the bonus would pick it."""
+    from pantry_planner import db
+    from pantry_planner.origins import resolve_all
+
+    db.save_origin_evidence([
+        _ev(source="open-food-facts", manufactured_in="Canada", claim_type="made-in",
+            confidence="medium", verbatim="made in canada (off)"),
+        _ev(source="agent-label", manufactured_in="Canada", claim_type="made-in",
+            confidence="medium", verbatim="Made in Canada"),
+    ])
+    o = resolve_all([1])[1]
+    assert o.status == "resolved"
+    assert o.source == "agent-label"
+    assert o.verbatim == "Made in Canada"
+
+
 # ─── Ranking ─────────────────────────────────────────────────
 
 def test_product_of_outranks_made_in_for_same_country():
