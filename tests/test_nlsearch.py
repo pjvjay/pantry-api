@@ -253,6 +253,68 @@ def test_value_disagreement_stat():
     assert 0.0 <= r.stats.value_disagreement <= 1.0
 
 
+# ─── size cap: the smallest pack on offer stays admissible ────
+
+def test_regression_condiment_quantities_do_not_abort_t2():
+    """Live 2026-10-02 (pantry-api#21): "1 tbsp soy sauce" and "1/3 cup
+    canola oil" aborted t2 with unavailable_within_constraints although the
+    text named no distance, price or diet. No default distance is applied
+    (t2 carries no max_km) and both products are stocked at every store: the
+    SIZE_RANGE cap dropped every pack over 6x the need (500 ml for 15 ml,
+    1 L for 83 ml), and the attribution probe kept the cap, so the alert
+    blamed the dietary filter. The smallest pack on offer is now always
+    admissible."""
+    from sqlalchemy import text
+    from sqlalchemy.orm import Session
+
+    from pantry_planner import db
+    from pantry_planner.nlsearch.planner import build_plan
+    from pantry_planner.nlsearch.schemas import IngredientSpec
+
+    soy, canola, thighs = 59, 17, 46               # seeds/products.json
+    ings = [IngredientSpec(name="boneless skinless chicken thigh", quantity=1, unit="lb"),
+            IngredientSpec(name="soy sauce", quantity=1, unit="tbsp"),
+            IngredientSpec(name="canola oil", quantity=1 / 3, unit="cup"),
+            IngredientSpec(name="garlic", quantity=5, unit="cloves"),
+            IngredientSpec(name="ginger", quantity=1, unit="thumb")]
+    with Session(db.engine()) as s:
+        sizes = dict(s.execute(text(
+            "SELECT id, unit_qty FROM products WHERE id IN (:a, :b)"),
+            {"a": soy, "b": canola}).all())
+        n_stores = s.execute(text("SELECT COUNT(*) FROM stores")).scalar_one()
+        offers = dict(s.execute(text(
+            "SELECT product_id, COUNT(*) FROM store_products "
+            "WHERE product_id IN (:a, :b) GROUP BY product_id"),
+            {"a": soy, "b": canola}).all())
+        cheapest_soy = s.execute(text(
+            "SELECT MIN(price) FROM store_products WHERE product_id = :a"),
+            {"a": soy}).scalar_one()
+    assert sizes[soy] > 15 * 6 and sizes[canola] > 250 / 3 * 6   # every pack over the cap
+    assert offers == {soy: n_stores, canola: n_stores}            # stocked everywhere
+    p = _parsed(ingredients=ings)
+    assert "max_km" not in build_plan(p, max_km=None).steps[1].params_summary
+
+    r = _run(p)                                    # must not raise PlanAborted
+    assert r.execution.aborted is None
+    direct = {n: [x.id for x in pool if not x.substitute] for n, pool in r.pools.items()}
+    assert direct[1] == [soy] and direct[2] == [canola]
+    assert direct[0][0] == thighs                  # Chicken Thighs Boneless 450g
+    assert r.pools[1][0].store_price == pytest.approx(float(cheapest_soy))
+
+
+def test_size_cap_still_drops_catering_packs_when_a_fitting_pack_exists():
+    """50 g ground beef: the 300 g pack is within 6x, so 450 g and 900 g stay
+    out. 50 ml olive oil: 500 ml is the smallest bottle (exempt), the 1 L
+    one is still a catering pack."""
+    from pantry_planner.nlsearch.schemas import IngredientSpec
+
+    r = _run(_parsed(ingredients=[
+        IngredientSpec(name="ground beef", quantity=50, unit="g"),
+        IngredientSpec(name="olive oil", quantity=50, unit="ml")]))
+    assert [p.name for p in r.pools[0] if not p.substitute] == ["Ground Beef Extra Lean 300g"]
+    assert [p.name for p in r.pools[1] if not p.substitute] == ["Extra Virgin Olive Oil 500ml"]
+
+
 # ─── gate: missing_ingredients ───────────────────────────────
 
 def test_missing_ingredient_aborts_with_suggestions():
@@ -415,7 +477,11 @@ def test_single_pass_matches_naive_reference():
 
     ings = [IngredientSpec(name="rice"),
             IngredientSpec(name="ground beef", quantity=225, unit="g"),
-            IngredientSpec(name="cheddar")]
+            IngredientSpec(name="cheddar"),
+            # every pack > 6x the need: the smallest one stays admissible
+            IngredientSpec(name="soy sauce", quantity=1, unit="tbsp"),
+            # the 500 ml bottle is the smallest; the 1 L one is still capped
+            IngredientSpec(name="olive oil", quantity=50, unit="ml")]
     r = _run(_parsed(ingredients=ings))
 
     with Session(db.engine()) as s:
@@ -429,14 +495,17 @@ def test_single_pass_matches_naive_reference():
     for n, ing in enumerate(ings):
         toks = set(tokens(ing.name))
         need = normalize_quantity(ing.quantity, ing.unit)
+        matched = [pid for pid, tset in terms.items() if toks <= tset]
+        same_uom = [products[pid].unit_qty for pid in matched
+                    if need and products[pid].unit_qty is not None
+                    and products[pid].unit_uom == need[1]]
+        smallest = min(same_uom) if same_uom else None
         offers = []
-        for pid, tset in terms.items():
-            if not toks <= tset:
-                continue
+        for pid in matched:
             p = products[pid]
             if (need and p.unit_qty is not None and p.unit_uom == need[1]
-                    and p.unit_qty > need[0] * 6):
-                continue                               # size cap
+                    and p.unit_qty > need[0] * 6 and p.unit_qty > smallest):
+                continue                               # size cap, smallest exempt
             price = best_price[pid]
             if need is None or p.unit_qty is None or p.unit_uom != need[1]:
                 key = (1, 0, 0.0, price, pid)
@@ -447,6 +516,9 @@ def test_single_pass_matches_naive_reference():
         expected = [pid for _, pid in sorted(offers)][:8]
         got = [p.id for p in r.pools[n] if not p.substitute]
         assert got == expected, ing.name
+    # the two size-cap cases, stated outright (seeds/products.json ids)
+    assert [p.id for p in r.pools[3] if not p.substitute] == [59]   # Soy Sauce 500ml
+    assert [p.id for p in r.pools[4] if not p.substitute] == [16]   # EVOO 500ml, not 1 L
 
 
 def test_twenty_ingredients_one_round_trip():

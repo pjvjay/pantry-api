@@ -149,12 +149,28 @@ def build_options_sql(c: Constraints, ingredients: list[IngredientSpec],
         where.append(f"{DIST_EXPR} <= :maxdist2")
 
     sized = bool(need_rows)
-    need_cte = f",\n ing_need(ing_no, need, uom) AS (VALUES {', '.join(need_rows)})" if sized else ""
-    need_join = "\n   LEFT JOIN ing_need nn ON nn.ing_no = m.ing_no" if sized else ""
+    need_cte = (f",\n ing_need(ing_no, need, uom) AS (VALUES {', '.join(need_rows)})"
+                if sized else "")
+    # SIZE_RANGE cap: a pack more than SIZE_CAP_FACTOR x the need is a
+    # catering box — unless it is the SMALLEST pack on offer. A tablespoon
+    # of soy sauce (15 ml) is bought as a 500 ml bottle; without that
+    # exemption the cap emptied the pool and t2 aborted with
+    # unavailable_within_constraints on a recipe that named no constraint.
+    # The smallest pack is taken over offers that pass every other filter,
+    # so the exemption cannot reach past a price, diet or distance limit.
+    smallest_cte = (
+        ",\n smallest AS (\n"
+        "   SELECT o.ing_no, MIN(o.unit_qty) AS min_qty\n"
+        "   FROM offers o JOIN ing_need n ON n.ing_no = o.ing_no\n"
+        "   WHERE o.rn_store = 1 AND o.unit_qty IS NOT NULL AND o.unit_uom = n.uom\n"
+        "   GROUP BY o.ing_no)") if sized else ""
+    size_cap = (
+        "\n    AND (nd.need IS NULL OR b.unit_qty IS NULL OR b.unit_uom <> nd.uom "
+        f"OR b.unit_qty <= nd.need * {SIZE_CAP_FACTOR} OR b.unit_qty <= sm.min_qty)"
+    ) if sized else ""
     if sized:
-        where.append("(nn.need IS NULL OR p.unit_qty IS NULL OR p.unit_uom <> nn.uom "
-                     f"OR p.unit_qty <= nn.need * {SIZE_CAP_FACTOR})")
-        rank_join = " LEFT JOIN ing_need nd ON nd.ing_no = b.ing_no"
+        rank_join = (" LEFT JOIN ing_need nd ON nd.ing_no = b.ing_no"
+                     " LEFT JOIN smallest sm ON sm.ing_no = b.ing_no")
         rank_order = (
             "CASE WHEN nd.need IS NULL OR b.unit_qty IS NULL OR b.unit_uom <> nd.uom "
             "THEN 1 ELSE 0 END ASC,\n"
@@ -197,14 +213,14 @@ def build_options_sql(c: Constraints, ingredients: list[IngredientSpec],
         "   FROM matches m\n"
         "   JOIN products p ON p.id = m.product_id\n"
         "   JOIN store_products sp ON sp.product_id = p.id\n"
-        "   JOIN stores s ON s.id = sp.store_id"
-        f"{need_join}\n"
-        f"   WHERE {' AND '.join(where)})\n"
+        "   JOIN stores s ON s.id = sp.store_id\n"
+        f"   WHERE {' AND '.join(where)})"
+        f"{smallest_cte}\n"
         "SELECT * FROM (\n"
         "  SELECT b.*, ROW_NUMBER() OVER (PARTITION BY b.ing_no ORDER BY\n"
         f"      {rank_order}) AS rn\n"
         f"  FROM offers b{rank_join}\n"
-        "  WHERE b.rn_store = 1) ranked\n"
+        f"  WHERE b.rn_store = 1{size_cap}) ranked\n"
         "WHERE rn <= :lim\n"
         "ORDER BY ing_no, rn"
     )
