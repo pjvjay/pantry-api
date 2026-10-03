@@ -8,7 +8,7 @@ answer from somewhere other than the code under test — seeds/products.json
 ids, a direct SQL read, or the store coordinates — so it fails when the
 planner is wrong, not merely when it changes.
 
-No LLM: the planner tests inject the parse; the REST tests run in
+No LLM: the planner tests inject the parse; the MCP/REST tests run in
 DEMO_MODE with no ANTHROPIC_API_KEY.
 """
 from __future__ import annotations
@@ -17,6 +17,7 @@ import math
 import os
 
 import pytest
+from mcp.server.mcpserver.exceptions import ToolError
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -308,7 +309,7 @@ def test_selector_hints_omit_dropped_ingredients():
     assert "preps" not in out
 
 
-# ─── REST /plan/nl shares the path ───────────────────────────
+# ─── MCP: plan_from_text ─────────────────────────────────────
 
 MALA = ("Mala Chicken (serves 4)\n"
         "- 450g boneless skinless chicken thigh\n"
@@ -317,6 +318,164 @@ MALA = ("Mala Chicken (serves 4)\n"
         "- 10g sichuan peppercorns\n"
         "- 5g cornstarch\n")
 
+
+@pytest.fixture()
+def server():
+    from pantry_planner.mcp_server import server
+
+    return server
+
+
+@pytest.mark.asyncio
+async def test_plan_from_text_partial_summary(server):
+    from pantry_planner import demomode
+    from pantry_planner.mcp_server import PlanResult
+
+    parsed = [i.name for i in demomode.parse_recipe(MALA).recipe.ingredients]
+    assert parsed == ["boneless skinless chicken thigh", "light soy sauce", "canola oil",
+                      "sichuan peppercorns", "cornstarch"]
+
+    res = await server.call_tool("plan_from_text", {"recipe_text": MALA, "allow_partial": True})
+    s = PlanResult.model_validate(res.structured_content).summary
+    by = {ln.ingredient: ln for ln in s.lines}
+    assert list(by) == parsed[:3]
+    assert [ln.line_no for ln in s.lines] == [1, 2, 3]
+    assert (by["light soy sauce"].product_id, by["light soy sauce"].match) == (SOY_SAUCE, "generic")
+    assert (by["canola oil"].product_id, by["canola oil"].match) == (CANOLA, "exact")
+    assert by["boneless skinless chicken thigh"].match == "exact"
+    for ln in s.lines:                               # each at its cheapest store
+        (low,), = _sql("SELECT MIN(price) FROM store_products WHERE product_id = :p",
+                       p=ln.product_id)
+        assert ln.price == pytest.approx(float(low))
+    assert s.total_cost == round(sum(ln.price for ln in s.lines), 2)
+    assert [d.ingredient for d in s.not_stocked] == ["sichuan peppercorns", "cornstarch"]
+    assert s.out_of_range == []
+    assert ("planned 3 of 5 ingredients: 2 not stocked, 0 out of range (see not_stocked / "
+            "out_of_range); total_cost covers the planned lines only") in s.notes
+    assert "light soy sauce matched generically: Soy Sauce 500ml" in s.notes
+    # the empty lists are on the wire, not merely defaulted by the model
+    assert res.structured_content["summary"]["out_of_range"] == []
+
+
+@pytest.mark.asyncio
+async def test_plan_from_text_without_partial_errors_and_says_how_to_retry(server):
+    with pytest.raises(ToolError, match=r"(?s)missing_ingredients.*sichuan peppercorns, "
+                                        r"cornstarch.*allow_partial=true"):
+        await server.call_tool("plan_from_text", {"recipe_text": MALA})
+
+
+@pytest.mark.asyncio
+async def test_plan_from_text_nothing_stocked_errors_even_with_partial(server):
+    text_ = "Nothing (serves 1)\n- 10g sichuan peppercorns\n- 5g cornstarch\n"
+    with pytest.raises(ToolError, match="missing_ingredients") as exc:
+        await server.call_tool("plan_from_text", {"recipe_text": text_, "allow_partial": True})
+    assert "allow_partial=true" not in str(exc.value)    # retrying would not help
+
+
+@pytest.mark.asyncio
+async def test_plan_from_text_lean_summary_has_empty_drop_lists_by_default(server):
+    from pantry_planner.mcp_server import PlanResult
+
+    text_ = "Pasta (serves 2)\n- 500g penne\n- 2 cloves garlic\n"
+    res = await server.call_tool("plan_from_text", {"recipe_text": text_})
+    raw = res.structured_content["summary"]
+    assert raw["not_stocked"] == [] and raw["out_of_range"] == []
+    s = PlanResult.model_validate(res.structured_content).summary
+    assert not any(n.startswith("planned ") for n in s.notes)
+    assert all(ln.match == "exact" for ln in s.lines)
+
+
+@pytest.mark.asyncio
+async def test_plan_from_text_max_km_moves_every_line_to_the_stores_in_range(server):
+    from pantry_planner.mcp_server import PlanResult
+
+    text_ = "Garlic Pasta (serves 2)\n- 500g penne\n- 2 cloves garlic\n- 1 can crushed tomatoes\n"
+    wide = PlanResult.model_validate((await server.call_tool(
+        "plan_from_text", {"recipe_text": text_})).structured_content).summary
+    near = PlanResult.model_validate((await server.call_tool(
+        "plan_from_text", {"recipe_text": text_, "max_km": 1})).structured_content).summary
+
+    def cheapest(pid, store_ids):
+        keys = ",".join(str(i) for i in store_ids)
+        (name, price), = _sql(
+            "SELECT s.name, sp.price FROM store_products sp JOIN stores s ON s.id = sp.store_id "
+            f"WHERE sp.product_id = :p AND s.id IN ({keys}) ORDER BY sp.price, s.id LIMIT 1",
+            p=pid)
+        return str(name), float(price)
+
+    every = (1, 2, 3, 4)
+    for ln in wide.lines:
+        assert (ln.store, ln.price) == cheapest(ln.product_id, every), ln
+    # precondition for a meaningful test: unconstrained, some line is
+    # bought somewhere other than the one store within 1 km
+    assert {ln.store for ln in wide.lines} != {_store_name(DOWNTOWN)}
+    for ln in near.lines:
+        assert (ln.store, ln.price) == cheapest(ln.product_id, (DOWNTOWN,)), ln
+    assert "stores ≤ 1 km" in near.notes
+    assert near.trip is not None and near.trip.stores == [_store_name(DOWNTOWN)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad,detail", [(0.4, "greater than or equal to 0.5"),
+                                        (100.5, "less than or equal to 100")])
+async def test_plan_from_text_max_km_bounds(server, bad, detail):
+    with pytest.raises(ToolError, match=rf"(?s)validation error.*max_km.*{detail}"):
+        await server.call_tool("plan_from_text",
+                               {"recipe_text": "X\n- 500g penne\n", "max_km": bad})
+
+
+# ─── MCP: find_product's generic tier ────────────────────────
+
+@pytest.mark.asyncio
+async def test_find_product_generic_tier_matches_the_planner(server):
+    from pantry_planner.mcp_server import ProductSearch
+
+    light = ProductSearch.model_validate((await server.call_tool(
+        "find_product", {"query": "light soy sauce"})).structured_content)
+    assert light.match == "generic"
+    assert [i.id for i in light.items] == [SOY_SAUCE] and light.total == 1
+    assert "'soy sauce'" in light.note
+
+    dark = ProductSearch.model_validate((await server.call_tool(
+        "find_product", {"query": "dark chocolate"})).structured_content)
+    assert dark.match == "direct" and [i.id for i in dark.items] == [DARK_CHOC]
+
+    # no generic hit either: the head-noun alternatives as before
+    sun = ProductSearch.model_validate((await server.call_tool(
+        "find_product", {"query": "dried sun tomato"})).structured_content)
+    assert sun.match == "relaxed"
+
+
+# ─── plan_week: lines the head-noun fallback rescued ─────────
+
+@pytest.mark.asyncio
+async def test_plan_week_marks_fallback_lines_generic(server, reseed):
+    from pantry_planner.mcp_server import WeekResult
+
+    _sql("DELETE FROM recipe_ingredients")
+    _sql("DELETE FROM recipes")
+    _sql("INSERT INTO recipes (slug, name, servings) VALUES ('choc_toast', 'Choc Toast', 1)")
+    _sql("INSERT INTO recipe_ingredients (recipe_slug, line_no, name) VALUES "
+         "('choc_toast', 1, 'Wheat Bread'), ('choc_toast', 2, 'White Chocolate')")
+    # precondition: nothing is "white chocolate", so only w2 can answer it
+    (n,), = _sql("SELECT COUNT(*) FROM product_terms a JOIN product_terms b "
+                 "ON a.product_id = b.product_id WHERE a.term = 'white' AND b.term = 'chocolate'")
+    assert n == 0
+
+    out = WeekResult.model_validate(
+        (await server.call_tool("plan_week", {"days": 1})).structured_content)
+    (day,) = out.summary.days
+    by = {ln.ingredient: ln for ln in day.lines}
+    assert by["Wheat Bread"].match == "exact"
+    white = by["White Chocolate"]
+    assert white.match == "generic"
+    (sub,), = _sql("SELECT subcategory FROM products WHERE id = :p", p=white.product_id)
+    assert sub == "chocolate"
+    assert f"Choc Toast: White Chocolate matched generically: {white.product}" \
+        in out.summary.notes
+
+
+# ─── REST /plan/nl shares the path ───────────────────────────
 
 def test_rest_plan_nl_partial_and_max_km():
     from fastapi.testclient import TestClient
@@ -339,3 +498,12 @@ def test_rest_plan_nl_partial_and_max_km():
     assert gated.status_code == 409
     assert gated.json()["detail"]["aborted"]["code"] == "missing_ingredients"
     assert client.post("/plan/nl", json={"recipe_text": MALA, "max_km": 0}).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_plan_dinner_prompt_reports_what_a_partial_plan_left_out(server):
+    res = await server.get_prompt("plan_dinner", {"recipe": "https://example.com/mala"})
+    body = " ".join(m.content.text for m in res.messages)
+    for must in ("allow_partial=true", "summary.not_stocked", "summary.out_of_range",
+                 "\"generic\""):
+        assert must in body, must

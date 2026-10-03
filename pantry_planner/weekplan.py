@@ -149,6 +149,7 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
 
         # ── w2: head-noun fallback for strict-AND misses ──
         empty = [g for g in range(len(specs)) if not pools.get(g)]
+        rescued: set[int] = set()       # global ing_no answered by the fallback
         if empty:
             fb_specs = []
             fb_map = []
@@ -165,6 +166,7 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
                 for i, g in enumerate(fb_map):
                     if fb_pools.get(i):
                         pools[g] = fb_pools[i]
+                        rescued.add(g)
 
         # ── origin filter ──
         # Applied AFTER w1 and the w2 fallback, because w2 repopulates empty
@@ -325,6 +327,11 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
             llm_cost += result.cost_usd
             by_id = {p.id: p for p in products}
             by_line = {i.line_no: i for i in recipe.ingredients}
+            # A line the head-noun fallback rescued ("White Chocolate" ->
+            # chocolate products) matched only after dropping words: generic.
+            ri = next(i for i, r in enumerate(recipes) if r is recipe)
+            generic_lines = {ing.line_no for li, ing in enumerate(recipe.ingredients)
+                             if g_of[(ri, li)] in rescued}
             items, day_cost = [], 0.0
             for sel in result.selections:
                 prod, ing = by_id.get(sel.product_id), by_line.get(sel.line_no)
@@ -338,7 +345,8 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
                     confidence=sel.confidence, reasoning=sel.reasoning,
                     model_used=result.model_used,
                     store_name=prod.store_name, store_price=prod.store_price,
-                    origin=origins_mod.origin_receipt(origins_map.get(prod.id))))
+                    origin=origins_mod.origin_receipt(origins_map.get(prod.id)),
+                    match="generic" if sel.line_no in generic_lines else "exact"))
                 day_cost += charged
             day_plans.append(DayPlan(recipe_slug=recipe.slug,
                                      recipe_name=recipe.name,

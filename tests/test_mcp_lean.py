@@ -188,7 +188,9 @@ async def test_plan_from_text_summary_then_verbose_trace(server):
         recommended.stores, recommended.total_cost)
     assert vout.summary.total_cost == vout.full.total_cost
 
-    # size last: the flag has to be real in both directions
+    # size last: the flag has to be real in both directions. Measured 1363
+    # lean / 12079 verbose on the demo seed with `match` per line and the
+    # empty not_stocked / out_of_range lists (1280 / 11418 before them).
     assert _chars(lean) <= 2000, _chars(lean)
     assert _chars(full) >= 8000, _chars(full)
 
@@ -228,8 +230,9 @@ async def test_plan_week_summary_merges_the_list_once(server):
 
     # Measured 6178 lean / 24878 verbose on the demo seed (compact JSON).
     # 6178 chars on the demo seed before the recommended trip carried its own
-    # per-item prices (review round 4), 6907 after; the ceiling leaves ~8%.
-    assert _chars(lean) <= 7500, _chars(lean)
+    # per-item prices (review round 4), 6907 after; 7147 once every line
+    # carried its `match` level (pantry-api#21). The ceiling leaves ~8%.
+    assert _chars(lean) <= 7700, _chars(lean)
     assert _chars(full) >= 3 * _chars(lean), (_chars(full), _chars(lean))
 
 

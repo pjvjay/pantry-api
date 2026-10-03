@@ -168,8 +168,8 @@ model never writes SQL and never composes the plan. Structured per the
 
 | Stage | Template | What it does | Abort gate |
 |---|---|---|---|
-| t1 | `existence_probe` | One batched probe: is every ingredient stocked at all? (strict tokens, then form-relaxed) | `missing_ingredients` → 409 listing what's missing + same-category suggestions |
-| t2 | `options_single_pass` | All ingredients resolved in ONE query: per-product cheapest in-range store offer, ranked per ingredient by size-fit then price, under budget/distance constraints | `unavailable_within_constraints` (attribution re-probe names the out-of-range offer); `budget_infeasible` (cheapest-basket floor vs budget) |
+| t1 | `existence_probe` | One batched probe: is every ingredient stocked at all? Three match levels, each tried only when the one before finds nothing: exact (every token, purchase form included), form (form dropped), generic (descriptor words such as light/dark/toasted/ground dropped too — "light soy sauce" → Soy Sauce) | `missing_ingredients` → 409 listing what's missing + same-category suggestions |
+| t2 | `options_single_pass` | All ingredients resolved in ONE query: per-product cheapest in-range store offer, ranked per ingredient by size-fit then price, under budget/distance constraints. Packs over 6× the need are dropped as catering packs unless no smaller pack is on offer (a tablespoon of soy sauce is bought as a 500 ml bottle) | `unavailable_within_constraints` (attribution re-probe names the nearest out-of-range offer); `budget_infeasible` (cheapest-basket floor vs budget) |
 | t3 | `brand_stats` | Per-brand price/rating/review aggregates over the retrieved pools — context the selector uses to break ties | — |
 | t4 | `substitute_lookup` | Data-driven: same-subcategory alternatives for thin pools, labeled `substitute`, never silently swapped in | — |
 | t5 | `store_price_matrix` | **Split-trip optimizer** (zero LLM): full store×product matrix for the chosen basket → exhaustive store-subset enumeration with exact home→stores→home loops → stops-vs-cost frontier (`trip_options`, best flagged recommended) | — |
@@ -177,6 +177,19 @@ model never writes SQL and never composes the plan. Structured per the
 Every step's SQL, row count, timing, and outcome are returned as `plan_trace`
 (the UI renders it as an expandable timeline); a gate abort returns **409**
 with the alert + the trace up to the failed step.
+
+**Partial plans.** A recipe from the wild names far more than any one
+catalog stocks. With `"allow_partial": true` the two per-ingredient gates
+drop instead of abort: t1 misses go to `not_stocked`, t2 misses (stocked,
+but no offer within the distance/price/diet constraints) to `out_of_range`,
+each as `{ingredient, reason, suggestions}`, and the plan prices what
+remains. `total_cost`, `origin_coverage` and `trip_options` then cover the
+planned lines only; `ingredient_count` is what the recipe asked for. If
+nothing remains the gate aborts as before; `budget_infeasible` is a
+basket-level verdict and always aborts. `"max_km"` (0.5–100) sets the
+distance limit and overrides any distance written in the text. Each line
+carries `match`: `exact`, `form` or `generic`. Both fields default to the
+original behaviour.
 
 ### Retrieval efficiency
 
@@ -254,13 +267,13 @@ nothing needs a token.
 | --- | --- | --- | --- |
 | `list_recipes`, `get_recipe` | free | only when configured | the recipe library; one `Recipe` |
 | `list_products` | free | only when configured | `ProductPage {items, total, next_offset}` — `search` substring, exact `category`, `limit`/`offset` |
-| `find_product` | free | only when configured | `ProductSearch` — planner-parity retrieval: `match` is `direct`, `relaxed` (same-aisle alternatives the planner would only offer) or `none`; each hit priced at its cheapest in-range store |
+| `find_product` | free | only when configured | `ProductSearch` — planner-parity retrieval: `match` is `direct`, `generic` (matched once descriptor words such as "light" were dropped — the planner selects these too), `relaxed` (same-aisle alternatives the planner would only offer) or `none`; each hit priced at its cheapest in-range store |
 | `get_product` | free | only when configured | `ProductDetail` — every store offer, the resolved origin (`status` first), the evidence rows behind it, pending submissions, reviews |
 | `get_product_origins` | free | only when configured | `OriginPage {items, total, by_status, next_offset}` — `by_status` counts the whole selection before paging |
 | `rank_products_by_origin` | free | only when configured | `OriginRanking` — `ranked` / `excluded` / `unranked` kept separate |
 | `origin_triage` | free | only when configured | products worth reading a label for (hints, never origins) |
 | `plan_recipe` | 1–3 Claude calls | only when configured | `PlanResult {summary, full}` for a seeded slug |
-| `plan_from_text` | 2–4 Claude calls | only when configured | `PlanResult` for pasted recipe text (NL2SQL path) |
+| `plan_from_text` | 2–4 Claude calls | only when configured | `PlanResult` for pasted recipe text (NL2SQL path). `lat`/`lon`/`max_km` define "nearby"; `allow_partial=true` plans what is stocked and in range and lists the rest in `summary.not_stocked` / `summary.out_of_range` |
 | `plan_week` | ~1 selector call per day | only when configured | `WeekResult {summary, full}` |
 | `submit_origin_evidence` | free | **always over HTTP** | `Submission` — a PENDING label reading, deduplicated |
 | `list_origin_submissions` | free | only when configured | `SubmissionPage` — the review queue, oldest first |
@@ -275,11 +288,15 @@ because the queue dedupes). `open_world_hint` is false everywhere —
 nothing reaches outside the seeded catalog.
 
 **Token-lean results.** Plan tools return a `summary` — the lines
-(ingredient → product, brand, size, store, price, origin), `total_cost`,
-`origin_status`, `coverage {spend_fraction, count_fraction, meets_floor,
-…}`, the recommended `trip` and `notes` (interpretation, substitutions,
-the coverage-floor warning). `total_cost` prices every line at its
-cheapest in-range store; `trip` is one realistic shopping trip priced at
+(ingredient → product, brand, size, store, price, origin, and `match`:
+`exact`, `form` or `generic`), `total_cost`, `origin_status`, `coverage
+{spend_fraction, count_fraction, meets_floor, …}`, the recommended
+`trip`, `not_stocked` / `out_of_range` (what a partial plan left out —
+always present, empty unless `allow_partial` dropped something) and
+`notes` (interpretation, "planned K of N ingredients" when anything was
+dropped, every generic match by name, substitutions, the coverage-floor
+warning). `total_cost` and `coverage` cover the planned lines only.
+`total_cost` prices every line at its cheapest in-range store; `trip` is one realistic shopping trip priced at
 the stores it visits, with its own per-item prices in `trip.items` and
 its own `basket_cost` / `travel_cost` / `total_cost` — two different
 baskets, so report the one you mean. Pass `verbose=true` to also get

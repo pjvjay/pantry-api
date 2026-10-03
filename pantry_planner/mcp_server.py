@@ -29,6 +29,8 @@ from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 
 from .models import (
+    DroppedIngredient,
+    MatchLevel,
     OriginCoverage,
     OriginRanking,
     PlanLineItem,
@@ -149,7 +151,7 @@ class ProductMatch(BaseModel):
 class ProductSearch(BaseModel):
     query: str
     tokens: list[str]
-    match: str                  # "direct" | "relaxed" | "none"
+    match: str                  # "direct" | "generic" | "relaxed" | "none"
     total: int                  # hits before `limit` trimmed the list
     items: list[ProductMatch]
     note: str
@@ -241,6 +243,15 @@ class OriginPage(BaseModel):
 # price, the provenance verdict — and `full` is attached only on request.
 
 class LeanLine(BaseModel):
+    """One planned line. `match` says how the ingredient met the catalog:
+    "exact" — every word as written; "form" — only once the purchase form
+    was dropped ("powdered tomato" -> tomato products); "generic" — only
+    once descriptor words were dropped too ("light soy sauce" -> Soy Sauce
+    500ml; the vocabulary is fixed: light, dark, toasted, roasted, ground,
+    whole, dried, fresh, frozen, boneless, skinless, large, small, medium,
+    extra, chopped, sliced, minced, diced, raw, organic, low/reduced
+    sodium). Every generic line is also named in the summary's notes.
+    `line_no` is the ingredient's position in the recipe as written."""
     line_no: int
     ingredient: str
     product_id: int
@@ -252,6 +263,7 @@ class LeanLine(BaseModel):
     confidence: float
     origin_country: str         # "" unless the line's origin resolved
     origin_status: str          # the receipt status, or "none" when there is no receipt
+    match: MatchLevel
 
 
 class Coverage(BaseModel):
@@ -289,15 +301,27 @@ class Trip(BaseModel):
 class PlanSummary(BaseModel):
     """`total_cost` is the sum of `lines`, each at its cheapest in-range
     store; `trip` is one realistic shopping trip priced at its own stores
-    (see Trip). They answer different questions and need not agree."""
+    (see Trip). They answer different questions and need not agree.
+
+    Both describe the PLANNED lines only, and so does `coverage`. A partial
+    plan (plan_from_text with allow_partial=true) lists what it left out:
+    `not_stocked` — the catalog has nothing matching the ingredient at all;
+    `out_of_range` — it is stocked, but no offer passes the distance
+    (lat/lon/max_km), price or diet constraints, and `reason` names the
+    nearest offer outside them. Each entry is {ingredient, reason,
+    suggestions}. Both lists are always present and empty when nothing was
+    dropped; when something was, `notes` says "planned K of N ingredients"."""
     recipe_slug: str
     recipe_name: str
-    total_cost: float
+    total_cost: float           # planned lines only
     origin_status: str          # not_requested | verified | unverified
-    coverage: Coverage | None   # only when an origin question was asked
+    coverage: Coverage | None   # only when an origin question was asked; planned lines only
     lines: list[LeanLine]
     trip: Trip | None           # None when the planner produced no trip options
-    notes: list[str]            # interpretation, substitutions, coverage warnings
+    notes: list[str]            # interpretation, planned K of N, generic matches,
+                                # substitutions, coverage warnings
+    not_stocked: list[DroppedIngredient]
+    out_of_range: list[DroppedIngredient]
     llm_cost_usd: float
     latency_ms: int
 
@@ -419,11 +443,13 @@ def _location(lat: float | None, lon: float | None) -> tuple[float, float]:
             cfg.default_lon if lon is None else lon)
 
 
-def _planner_candidates(name: str, lat: float, lon: float) -> list:
+def _planner_candidates(name: str, lat: float, lon: float, *,
+                        generic: bool = False) -> list:
     """Exactly how the planner finds candidates for one ingredient
     (flow._ingredient_pools): token-AND over the product_terms index, each
     product pinned to its cheapest in-range store, cheapest first, uncapped.
-    A hit here is a candidate there; a miss here is a miss there."""
+    A hit here is a candidate there; a miss here is a miss there.
+    `generic` matches at the planner's generic level (descriptors dropped)."""
     from sqlalchemy import text
     from sqlalchemy.orm import Session
 
@@ -434,7 +460,8 @@ def _planner_candidates(name: str, lat: float, lon: float) -> list:
 
     sql, params = build_options_sql(
         Constraints(), [IngredientSpec(name=name)], relaxed=set(),
-        lat=lat, lon=lon, per_ingredient_limit=10_000)
+        lat=lat, lon=lon, per_ingredient_limit=10_000,
+        generic={0} if generic else None)
     with Session(db.engine()) as s:
         return [_row_to_product(r) for r in s.execute(text(sql), params).mappings()]
 
@@ -464,7 +491,7 @@ def _lean_line(li: PlanLineItem, products: dict[int, Product]) -> LeanLine:
         brand=p.brand if p else "", size=p.unit_size if p else "",
         store=li.store_name, price=li.price, confidence=li.confidence,
         origin_country=o.country if o else "",
-        origin_status=o.status if o else "none")
+        origin_status=o.status if o else "none", match=li.match)
 
 
 def _coverage(c: OriginCoverage | None) -> Coverage | None:
@@ -494,6 +521,23 @@ def _substitution_notes(lines: list[PlanLineItem], prefix: str = "") -> list[str
             for li in lines if "substitut" in li.reasoning.lower()]
 
 
+def _generic_notes(lines: list[PlanLineItem], prefix: str = "") -> list[str]:
+    """Name every line that matched only after dropping descriptor words, so
+    a generic match is never reported as if it were the ingredient asked."""
+    return [f"{prefix}{li.ingredient_name} matched generically: {li.product_name}"
+            for li in lines if li.match == "generic"]
+
+
+def _partial_note(plan: ShoppingPlan) -> list[str]:
+    dropped = len(plan.not_stocked) + len(plan.out_of_range)
+    if not dropped:
+        return []
+    return [f"planned {len(plan.line_items)} of {plan.ingredient_count} ingredients: "
+            f"{len(plan.not_stocked)} not stocked, {len(plan.out_of_range)} out of "
+            "range (see not_stocked / out_of_range); total_cost covers the planned "
+            "lines only"]
+
+
 def _floor_note(c: OriginCoverage | None) -> list[str]:
     if c is None or c.meets_floor:
         return []
@@ -506,6 +550,8 @@ def _floor_note(c: OriginCoverage | None) -> list[str]:
 def _summarize_plan(plan: ShoppingPlan) -> PlanSummary:
     products = _products_by_id({li.product_id for li in plan.line_items})
     notes = (list(plan.interpretation)
+             + _partial_note(plan)
+             + _generic_notes(plan.line_items)
              + _substitution_notes(plan.line_items)
              + _floor_note(plan.origin_coverage))
     return PlanSummary(
@@ -514,6 +560,7 @@ def _summarize_plan(plan: ShoppingPlan) -> PlanSummary:
         coverage=_coverage(plan.origin_coverage),
         lines=[_lean_line(li, products) for li in plan.line_items],
         trip=_trip(plan.trip_options), notes=notes,
+        not_stocked=list(plan.not_stocked), out_of_range=list(plan.out_of_range),
         llm_cost_usd=plan.total_llm_cost_usd, latency_ms=plan.total_latency_ms)
 
 
@@ -521,6 +568,7 @@ def _summarize_week(plan: WeekPlan) -> WeekSummary:
     products = _products_by_id({li.product_id for d in plan.days for li in d.line_items})
     notes = list(plan.notes)
     for d in plan.days:
+        notes += _generic_notes(d.line_items, prefix=f"{d.recipe_name}: ")
         notes += _substitution_notes(d.line_items, prefix=f"{d.recipe_name}: ")
     notes += _floor_note(plan.origin_coverage)
     return WeekSummary(
@@ -637,22 +685,32 @@ def find_product(query: Annotated[str, Field(min_length=1, max_length=MAX_SEARCH
     before `limit` trims. Free — no LLM calls.
 
     Read `match` before `items`: "direct" — every token matched;
-    "relaxed" — nothing matched all tokens, so these are same-aisle
-    alternatives on the last word only, which the planner would OFFER as
-    substitutes but never select; "none" — nothing at all (try
-    list_products(search=...) for substring matching). An empty result is
-    an answer, not an error. `origin_status`/`origin_country` come from
-    ingested evidence; "unknown" is the common case."""
+    "generic" — nothing matched every token, but dropping descriptor words
+    (light, dark, toasted, ground, whole, dried, ...) did: "light soy sauce"
+    finds Soy Sauce 500ml. These ARE planning candidates — the planner
+    selects them and labels the line match="generic"; "relaxed" — not
+    even that, so these are same-aisle alternatives on the last word only,
+    which the planner would OFFER as substitutes but never select; "none" —
+    nothing at all (try list_products(search=...) for substring matching).
+    An empty result is an answer, not an error. `origin_status`/
+    `origin_country` come from ingested evidence; "unknown" is the common
+    case."""
     from . import origins
-    from .nlsearch.units import tokens
+    from .nlsearch.units import generic_tokens, tokens
 
     lat, lon = _location(lat, lon)
     toks = tokens(query)
     hits = _planner_candidates(query, lat, lon) if toks else []
+    generic = generic_tokens(query)
     if hits:
         match = "direct"
         note = (f"{len(hits)} product(s) match every token in {query!r}; "
                 "each is priced at its cheapest store in range.")
+    elif generic and (hits := _planner_candidates(query, lat, lon, generic=True)):
+        match = "generic"
+        note = (f"No product matches every token in {query!r}; these match "
+                f"{' '.join(generic)!r} once descriptor words are dropped. The "
+                "planner selects them as a generic match and says so in its notes.")
     else:
         if len(toks) > 1:
             hits = _planner_candidates(toks[-1], lat, lon)
@@ -790,22 +848,46 @@ def plan_from_text(recipe_text: Annotated[str, Field(max_length=MAX_TEXT)],
                    lat: float | None = None, lon: float | None = None,
                    exclude_origin: Annotated[list[str] | None, Field(max_length=MAX_LIST)] = None,
                    preference: Annotated[list[str] | None, Field(max_length=MAX_LIST)] = None,
-                   verbose: bool = False) -> PlanResult:
+                   verbose: bool = False,
+                   max_km: Annotated[float | None, Field(ge=0.5, le=100)] = None,
+                   allow_partial: bool = False) -> PlanResult:
     """Plan a shopping basket from PASTED RECIPE TEXT — include the full
     ingredient list (quantities optional) and any shopping notes
-    (budget, dietary exclusions); lat/lon optionally set the shopping
-    location. Parses the text, runs a staged SQL retrieval plan, then
-    the LLM selector. SLOW (10-60s) and costs real Claude API credits.
-    `summary.notes` starts with how the text was interpreted; `trip` is
-    the recommended store split. `verbose=True` attaches `full` with the
-    retrieval `plan_trace` and every trip option."""
+    (budget, dietary exclusions). Parses the text, runs a staged SQL
+    retrieval plan, then the LLM selector. SLOW (10-60s) and costs real
+    Claude API credits.
+
+    "Nearby" is lat/lon plus max_km: lat/lon set the shopping location
+    (the server's default point when omitted) and max_km (0.5-100) is how
+    far a store may be. max_km overrides any distance written in the text;
+    with neither, every store counts, however far.
+
+    allow_partial=true plans what the catalog can supply instead of
+    failing on the first gap — use it for a real recipe (e.g. one fetched
+    from a link): ingredients the catalog does not stock go to
+    `summary.not_stocked`, ingredients stocked but with no offer within
+    the distance/price/diet constraints go to `summary.out_of_range` (the
+    reason names the nearest offer outside them), and the rest is priced.
+    `total_cost`, `coverage` and `trip` then cover the planned lines only
+    and `notes` says "planned K of N ingredients" — report the dropped
+    ingredients too, never only the priced basket. With allow_partial
+    false (the default) any such gap is an error naming the ingredients;
+    when nothing at all can be planned it is an error either way.
+
+    Each line's `match` is "exact", "form" (purchase form dropped) or
+    "generic" (descriptor words such as light/dark/toasted dropped:
+    "light soy sauce" -> Soy Sauce 500ml); generic lines are named in
+    `notes`. `summary.notes` starts with how the text was interpreted;
+    `trip` is the recommended store split. `verbose=True` attaches `full`
+    with the retrieval `plan_trace` and every trip option."""
     _check_countries(exclude_origin, preference)
     from . import flow
     from .nlsearch import PlanAborted, UnparseableRecipe
 
     try:
         plan = flow.run_nl(recipe_text, lat=lat, lon=lon,
-                           exclude=exclude_origin, preference=preference)
+                           exclude=exclude_origin, preference=preference,
+                           max_km=max_km, allow_partial=allow_partial)
         return PlanResult(summary=_summarize_plan(plan), full=plan if verbose else None)
     except UnparseableRecipe as e:
         raise ToolError(
@@ -822,11 +904,15 @@ def plan_from_text(recipe_text: Annotated[str, Field(max_length=MAX_TEXT)],
         if alert and alert.details:
             names = ", ".join(str(d.get("name", "?")) for d in alert.details)
             detail = f" Affected: {names}."
+        hint = ""
+        if (not allow_partial and alert is not None and alert.code.value in
+                ("missing_ingredients", "unavailable_within_constraints")):
+            hint = " Retry with allow_partial=true to plan the rest."
         raise ToolError(
             f"Plan aborted before product selection — "
             f"{alert.code.value if alert else 'gate'}: "
             f"{alert.message if alert else 'constraint infeasible'}."
-            f"{detail} (steps: {steps})") from e
+            f"{detail}{hint} (steps: {steps})") from e
 
 
 @server.tool(title="Plan a week of dinners", annotations=_PLAN)
@@ -1225,14 +1311,18 @@ def plan_dinner(recipe: str, exclude_origin: str = "", budget: str = "") -> str:
         f"Plan dinner for: {recipe}.\n\n"
         "Steps:\n"
         "1. Call list_recipes. If the request names a seeded recipe, use its "
-        "slug with plan_recipe; otherwise pass the text to plan_from_text. "
+        "slug with plan_recipe; otherwise pass the text to plan_from_text "
+        "(for a full recipe from elsewhere, with allow_partial=true). "
         "If an ingredient is in doubt, call find_product for it first and "
         "read `match` — \"relaxed\" hits are alternatives the planner would "
         "only offer, not candidates.\n"
         f"2. {exclude}{budget_line}Call the plan tool once; it is slow and "
         "costs credits.\n"
         "3. Report summary.total_cost, every line (ingredient → product, store, "
-        "price) and the recommended trip.\n"
+        "price; say so when its `match` is \"generic\") and the recommended "
+        "trip. Then name every entry in summary.not_stocked and "
+        "summary.out_of_range with its reason: when either is non-empty the "
+        "priced basket is not the whole recipe.\n"
         "4. Report summary.origin_status and summary.coverage.spend_fraction "
         "VERBATIM as numbers, with coverage.lines_known of coverage.lines_total. "
         "Never describe the basket as clean, verified or free of a country "
