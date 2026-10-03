@@ -16,14 +16,17 @@ from mcp.server.mcpserver.exceptions import ToolError
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from tests.seed_catalog import ids_mentioning
+
 _TMP_DB = None
 
 # Seed facts the assertions name (seeds/products.json).
-BASMATI, LONG_GRAIN = 8, 9
+BASMATI, LONG_GRAIN, JASMINE = 8, 9, 84
 GF_PENNE, PENNE_RIGATE = 49, 51
-# Gluten-Free Penne 340g is rice-flour pasta, so its description carries
-# the term "rice": the head-noun pool for "rice" is three products, not two.
-RICE_POOL = {BASMATI, LONG_GRAIN, GF_PENNE}
+# The head-noun pool for "rice" is every product whose name or description
+# says "rice" — not only the rice bags: Gluten-Free Penne is rice-flour
+# pasta, and Shaoxing wine, rice vinegar and rice noodles say "rice" too.
+RICE_POOL = ids_mentioning("rice")
 
 RECIPE = ("Garlic Pasta (serves 2)\n- 500g penne\n- 2 cloves garlic\n"
           "- 1 can crushed tomatoes\nNotes: ")
@@ -133,6 +136,7 @@ async def test_relaxed_match_offers_head_noun_alternatives(server):
     out = await _find(server, query="coconut rice")
     assert out["tokens"] == ["coconut", "rice"]
     assert out["match"] == "relaxed"
+    assert {BASMATI, LONG_GRAIN, JASMINE, GF_PENNE} <= RICE_POOL
     assert {i["id"] for i in out["items"]} == RICE_POOL
     assert out["total"] == len(RICE_POOL)
     assert "alternatives" in out["note"]

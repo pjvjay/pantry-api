@@ -142,6 +142,12 @@ class NLPlanRequest(BaseModel):
     # from these countries; preference is soft guidance to the selector.
     exclude_origin: list[str] = Field(default_factory=list, max_length=50)
     preference: list[str] = Field(default_factory=list, max_length=50)
+    # Same knobs as the MCP plan_from_text tool: max_km overrides any
+    # distance stated in the text; allow_partial plans what is stocked and
+    # in range and lists the rest (not_stocked / out_of_range) instead of a
+    # 409. Defaults keep the original behaviour.
+    max_km: float | None = Field(default=None, ge=0.5, le=100)
+    allow_partial: bool = False
 
 
 @app.post("/plan/nl", response_model=ShoppingPlan)
@@ -157,7 +163,8 @@ def plan_nl(req: NLPlanRequest) -> ShoppingPlan:
     try:
         plan = flow.run_nl(req.recipe_text, lat=req.lat, lon=req.lon,
                            exclude=req.exclude_origin,
-                           preference=req.preference)
+                           preference=req.preference,
+                           max_km=req.max_km, allow_partial=req.allow_partial)
         m.record_plan("nl", "ok")
         m.record_coverage(plan.origin_coverage)
         return plan

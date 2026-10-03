@@ -62,6 +62,10 @@ class PlanAlert(BaseModel):
     code: GateCode
     message: str
     details: list[dict] = Field(default_factory=list)   # per-ingredient: name, reason, suggestions[]
+    # How many ingredients a partial plan (allow_partial=true) would still
+    # price past THIS gate; None where the gate has no per-ingredient answer
+    # (budget, origin). 0 means retrying with allow_partial cannot help.
+    partial_would_plan: int | None = None
 
 
 class PlanExecution(BaseModel):

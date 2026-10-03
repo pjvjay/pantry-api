@@ -102,6 +102,13 @@ def match_product(name: str, products: list[Product]) -> Product | None:
         products ("Ground Beef Lean" vs "Ground Beef Medium 900g") mean
         the name does not identify one product, and guessing is worse
         than declining.
+
+    One tie is not ambiguous: when exactly one of the tied products adds
+    nothing to the query but size tokens, it is the plain product the name
+    asks for, and the others are variants the name did not ask for. "Soy
+    Sauce 500ml" is Soy Sauce 500ml, not Light or Dark Soy Sauce 500ml;
+    "Firm Tofu 454g" is not Extra Firm Tofu. "Ground Beef" still declines:
+    every candidate adds a descriptive word (lean, medium, extra lean).
     """
     scored: list[tuple[float, int, Product]] = []
     for p in products:
@@ -122,8 +129,18 @@ def match_product(name: str, products: list[Product]) -> Product | None:
     if len(scored) > 1:
         (s0, n0, _), (s1, n1, _) = scored[0], scored[1]
         if abs(s0 - s1) < 1e-9 and n0 == n1:
-            return None          # ambiguous — decline rather than guess
+            tied = [p for s_, n_, p in scored if abs(s_ - s0) < 1e-9 and n_ == n0]
+            plain = [p for p in tied if _adds_only_size(name, p)]
+            return plain[0] if len(plain) == 1 else None   # else ambiguous — decline
     return scored[0][2]
+
+
+def _adds_only_size(query: str, product: Product) -> bool:
+    """Every token the product's name has beyond the query is a size token
+    ("500ml", "454g"), so the name asks for exactly this product."""
+    q = _tokens(query)
+    extra = _tokens(product.name) - q
+    return not any(not re.search(r"\d", t) for t in extra)
 
 
 def _now() -> str:

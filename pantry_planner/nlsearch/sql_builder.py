@@ -21,7 +21,7 @@ from __future__ import annotations
 import math
 
 from .schemas import Constraints, IngredientSpec
-from .units import normalize_quantity, tokens
+from .units import equivalent_tokens, generic_tokens, normalize_quantity, tokens
 
 PRODUCT_COLS = ("p.id AS id, p.name AS name, p.description AS description, "
                 "p.price AS price, p.category AS category, "
@@ -67,12 +67,28 @@ def _constraint_where(c: Constraints, params: dict) -> list[str]:
     return where
 
 
-def _ingredient_terms(ing: IngredientSpec, *, relaxed: bool) -> list[str]:
-    """TOKEN_AND_MATCH terms. The purchase form is a required token unless
-    this ingredient is on the form-relaxed path (t1 said strict = 0)."""
+def _ingredient_terms(ing: IngredientSpec, *, relaxed: bool,
+                      generic: bool = False, equivalent: bool = False) -> list[str]:
+    """TOKEN_AND_MATCH terms, by match level (distinct, in order):
+      exact      — every name token, plus the purchase form as a required token
+      equivalent — the exact terms with powder/ground swapped
+                   (units.FORM_EQUIVALENTS): "cumin powder" -> cumin, ground.
+                   Reported as match="form"
+      form       — the form dropped (t1 said strict = 0)
+      generic    — the form AND descriptor words dropped (t1 said strict =
+                   relaxed = 0, generic > 0); see units.DESCRIPTORS
+
+    Distinct because token-AND compares COUNT(DISTINCT term) with the term
+    count: "ground Sichuan peppercorn" parsed with form "ground" would
+    otherwise need "ground" twice and match nothing."""
+    if generic:
+        return generic_tokens(ing.name)
     toks = tokens(ing.name)
     if ing.form and not relaxed:
         toks = [ing.form, *toks]
+    toks = list(dict.fromkeys(toks))
+    if equivalent:
+        return equivalent_tokens(toks)
     return toks
 
 
@@ -80,37 +96,57 @@ def _ingredient_terms(ing: IngredientSpec, *, relaxed: bool) -> list[str]:
 
 def build_existence_sql(ingredients: list[IngredientSpec]) -> tuple[str, dict]:
     """One batched probe: per ingredient, how many products match ALL its
-    tokens (strict = incl. purchase form) and ALL its base tokens (form
-    relaxed). Catalog-level on purpose — constraints don't apply here, so
-    'not stocked at all' stays distinct from 'not within constraints'."""
+    terms at each level (see _ingredient_terms): strict (purchase form
+    included), relaxed (form dropped), generic (descriptors dropped; 0 when
+    the name has none to drop) and equivalent (powder/ground swapped; 0 when
+    no term has an equivalent). Each distinct term is one VALUES row flagged
+    with the levels it belongs to. Catalog-level on purpose — constraints
+    don't apply here, so 'not stocked at all' stays distinct from 'not
+    within constraints'."""
     params: dict = {}
     term_rows: list[str] = []
     count_rows: list[str] = []
     for n, ing in enumerate(ingredients):
-        base = tokens(ing.name)
-        all_toks = ([ing.form, *base] if ing.form else base)
-        for j, t in enumerate(all_toks):
+        strict = _ingredient_terms(ing, relaxed=False)
+        base = _ingredient_terms(ing, relaxed=True)
+        gen = _ingredient_terms(ing, relaxed=True, generic=True)
+        eqv = _ingredient_terms(ing, relaxed=False, equivalent=True)
+        for j, t in enumerate(dict.fromkeys([*strict, *base, *gen, *eqv])):
             params[f"i{n}t{j}"] = t
-            is_base = 0 if (ing.form and j == 0) else 1
-            term_rows.append(f"({n}, :i{n}t{j}, {is_base})")
-        count_rows.append(f"({n}, {len(base)}, {len(all_toks)})")
+            flags = ", ".join("1" if t in level else "0"
+                              for level in (strict, base, gen, eqv))
+            term_rows.append(f"({n}, :i{n}t{j}, {flags})")
+        count_rows.append(f"({n}, {len(strict)}, {len(base)}, {len(gen)}, {len(eqv)})")
     if not term_rows:                        # fully tokenless recipe: no matches
         params["noterm"] = ""
-        term_rows = ["(-1, :noterm, 1)"]
+        term_rows = ["(-1, :noterm, 1, 1, 0, 0)"]
     if not count_rows:                       # sibling of the guard above —
-        count_rows = ["(-1, 0, 0)"]          # an empty VALUES () is a syntax error
+        count_rows = ["(-1, 0, 0, 0, 0)"]    # an empty VALUES () is a syntax error
+
+    def hits(flag: str) -> str:
+        return f"COUNT(DISTINCT CASE WHEN it.{flag} = 1 THEN it.term END)"
+
+    def level(hit: str, n: str) -> str:
+        return (f"COALESCE(SUM(CASE WHEN c.{n} > 0 AND m.{hit} = c.{n}"
+                " THEN 1 ELSE 0 END), 0)")
     sql = (
-        f"WITH ing_terms(ing_no, term, base) AS (VALUES {', '.join(term_rows)}),\n"
-        f" ing_counts(ing_no, n_base, n_all) AS (VALUES {', '.join(count_rows)}),\n"
+        "WITH ing_terms(ing_no, term, strict, base, gen, eqv) AS "
+        f"(VALUES {', '.join(term_rows)}),\n"
+        " ing_counts(ing_no, n_all, n_base, n_gen, n_eqv) AS "
+        f"(VALUES {', '.join(count_rows)}),\n"
         " m AS (\n"
         "   SELECT it.ing_no, pt.product_id,\n"
-        "          COUNT(DISTINCT CASE WHEN it.base = 1 THEN it.term END) AS base_hits,\n"
-        "          COUNT(DISTINCT it.term) AS all_hits\n"
+        f"          {hits('strict')} AS all_hits,\n"
+        f"          {hits('base')} AS base_hits,\n"
+        f"          {hits('gen')} AS gen_hits,\n"
+        f"          {hits('eqv')} AS eqv_hits\n"
         "   FROM ing_terms it JOIN product_terms pt ON pt.term = it.term\n"
         "   GROUP BY it.ing_no, pt.product_id)\n"
         "SELECT c.ing_no,\n"
-        "       COALESCE(SUM(CASE WHEN m.all_hits = c.n_all THEN 1 ELSE 0 END), 0) AS strict_matches,\n"
-        "       COALESCE(SUM(CASE WHEN m.base_hits = c.n_base THEN 1 ELSE 0 END), 0) AS relaxed_matches\n"
+        f"       {level('all_hits', 'n_all')} AS strict_matches,\n"
+        f"       {level('base_hits', 'n_base')} AS relaxed_matches,\n"
+        f"       {level('gen_hits', 'n_gen')} AS generic_matches,\n"
+        f"       {level('eqv_hits', 'n_eqv')} AS equivalent_matches\n"
         "FROM ing_counts c LEFT JOIN m ON m.ing_no = c.ing_no\n"
         "GROUP BY c.ing_no ORDER BY c.ing_no"
     )
@@ -122,18 +158,30 @@ def build_existence_sql(ingredients: list[IngredientSpec]) -> tuple[str, dict]:
 def build_options_sql(c: Constraints, ingredients: list[IngredientSpec],
                       relaxed: set[int], lat: float, lon: float,
                       max_km: float | None = None,
-                      per_ingredient_limit: int = PER_INGREDIENT_LIMIT) -> tuple[str, dict]:
+                      per_ingredient_limit: int = PER_INGREDIENT_LIMIT, *,
+                      generic: set[int] | None = None,
+                      equivalent: set[int] | None = None,
+                      nearest_store: bool = False) -> tuple[str, dict]:
     """All ingredients resolved in one pass: token VALUES -> product_terms
     join -> token-AND -> per-product cheapest in-range store (rn_store) ->
-    per-ingredient size-fit/price ranking (rn) capped at :lim."""
+    per-ingredient size-fit/price ranking (rn) capped at :lim.
+
+    `relaxed` / `generic` / `equivalent` are the ingredient indexes t1
+    resolved at the form, generic or equivalent-form level (see
+    _ingredient_terms). `nearest_store` pins each product to its NEAREST
+    store instead of its cheapest — the attribution probe uses it to name
+    the closest offer outside a distance limit."""
     params: dict = {"lim": per_ingredient_limit}
     _location_params(params, lat, lon)
+    generic = generic or set()
+    equivalent = equivalent or set()
 
     term_rows: list[str] = []
     count_rows: list[str] = []
     need_rows: list[str] = []
     for n, ing in enumerate(ingredients):
-        toks = _ingredient_terms(ing, relaxed=(n in relaxed))
+        toks = _ingredient_terms(ing, relaxed=(n in relaxed), generic=(n in generic),
+                                 equivalent=(n in equivalent))
         for j, t in enumerate(toks):
             params[f"i{n}t{j}"] = t
             term_rows.append(f"({n}, :i{n}t{j})")
@@ -149,19 +197,42 @@ def build_options_sql(c: Constraints, ingredients: list[IngredientSpec],
         where.append(f"{DIST_EXPR} <= :maxdist2")
 
     sized = bool(need_rows)
-    need_cte = f",\n ing_need(ing_no, need, uom) AS (VALUES {', '.join(need_rows)})" if sized else ""
-    need_join = "\n   LEFT JOIN ing_need nn ON nn.ing_no = m.ing_no" if sized else ""
+    need_cte = (f",\n ing_need(ing_no, need, uom) AS (VALUES {', '.join(need_rows)})"
+                if sized else "")
+    # SIZE_RANGE cap: a pack more than SIZE_CAP_FACTOR x the need is a
+    # catering box, and is dropped while a pack within the cap exists. When
+    # NO pack is within it — a tablespoon of oil (15 ml) against 250 ml-1.4 L
+    # bottles, 5 g of salt against 750 g-1.4 kg boxes — every pack is "too
+    # big" and the cook buys a normal one: the cap then scales to the
+    # SMALLEST pack on offer (packs up to SIZE_CAP_FACTOR x it stay), and
+    # the size-fit key below stops ranking them, so price decides. Keeping
+    # only the smallest pack priced 5 g of salt at a $3.22 sea salt over a
+    # $1.46 table salt, and planned "2 tbsp oil" as a 250 ml sesame oil.
+    # The smallest pack is taken over offers that pass every other filter,
+    # so the cap cannot reach past a price, diet or distance limit.
+    smallest_cte = (
+        ",\n smallest AS (\n"
+        "   SELECT o.ing_no, MIN(o.unit_qty) AS min_qty\n"
+        "   FROM offers o JOIN ing_need n ON n.ing_no = o.ing_no\n"
+        "   WHERE o.rn_store = 1 AND o.unit_qty IS NOT NULL AND o.unit_uom = n.uom\n"
+        "   GROUP BY o.ing_no)") if sized else ""
+    fits = f"b.unit_qty <= nd.need * {SIZE_CAP_FACTOR}"
+    size_cap = (
+        "\n    AND (nd.need IS NULL OR b.unit_qty IS NULL OR b.unit_uom <> nd.uom "
+        f"OR {fits} OR (sm.min_qty > nd.need * {SIZE_CAP_FACTOR} "
+        f"AND b.unit_qty <= sm.min_qty * {SIZE_CAP_FACTOR}))"
+    ) if sized else ""
     if sized:
-        where.append("(nn.need IS NULL OR p.unit_qty IS NULL OR p.unit_uom <> nn.uom "
-                     f"OR p.unit_qty <= nn.need * {SIZE_CAP_FACTOR})")
-        rank_join = " LEFT JOIN ing_need nd ON nd.ing_no = b.ing_no"
+        rank_join = (" LEFT JOIN ing_need nd ON nd.ing_no = b.ing_no"
+                     " LEFT JOIN smallest sm ON sm.ing_no = b.ing_no")
         rank_order = (
             "CASE WHEN nd.need IS NULL OR b.unit_qty IS NULL OR b.unit_uom <> nd.uom "
             "THEN 1 ELSE 0 END ASC,\n"
             "      CASE WHEN nd.need IS NOT NULL AND b.unit_qty IS NOT NULL "
             "AND b.unit_uom = nd.uom AND b.unit_qty < nd.need THEN 1 ELSE 0 END ASC,\n"
             "      CASE WHEN nd.need IS NOT NULL AND b.unit_qty IS NOT NULL "
-            "AND b.unit_uom = nd.uom THEN ABS(b.unit_qty - nd.need) ELSE 0 END ASC,\n"
+            f"AND b.unit_uom = nd.uom AND {fits} "
+            "THEN ABS(b.unit_qty - nd.need) ELSE 0 END ASC,\n"
             "      b.store_price ASC, b.id ASC")
     else:
         rank_join = ""
@@ -177,6 +248,8 @@ def build_options_sql(c: Constraints, ingredients: list[IngredientSpec],
     if not count_rows:
         count_rows = ["(-1, 0)"]
 
+    store_order = (f"{DIST_EXPR} ASC, sp.price ASC, s.id ASC" if nearest_store
+                   else "sp.price ASC, s.id ASC")
     sql = (
         f"WITH ing_terms(ing_no, term) AS (VALUES {', '.join(term_rows)}),\n"
         f" ing_counts(ing_no, ntok) AS (VALUES {', '.join(count_rows)})"
@@ -193,18 +266,18 @@ def build_options_sql(c: Constraints, ingredients: list[IngredientSpec],
         "          sp.price AS store_price, s.name AS store_name,\n"
         f"          {DIST_EXPR} AS dist_km2,\n"
         "          ROW_NUMBER() OVER (PARTITION BY m.ing_no, p.id "
-        "ORDER BY sp.price ASC, s.id ASC) AS rn_store\n"
+        f"ORDER BY {store_order}) AS rn_store\n"
         "   FROM matches m\n"
         "   JOIN products p ON p.id = m.product_id\n"
         "   JOIN store_products sp ON sp.product_id = p.id\n"
-        "   JOIN stores s ON s.id = sp.store_id"
-        f"{need_join}\n"
-        f"   WHERE {' AND '.join(where)})\n"
+        "   JOIN stores s ON s.id = sp.store_id\n"
+        f"   WHERE {' AND '.join(where)})"
+        f"{smallest_cte}\n"
         "SELECT * FROM (\n"
         "  SELECT b.*, ROW_NUMBER() OVER (PARTITION BY b.ing_no ORDER BY\n"
         f"      {rank_order}) AS rn\n"
         f"  FROM offers b{rank_join}\n"
-        "  WHERE b.rn_store = 1) ranked\n"
+        f"  WHERE b.rn_store = 1{size_cap}) ranked\n"
         "WHERE rn <= :lim\n"
         "ORDER BY ing_no, rn"
     )
@@ -304,6 +377,26 @@ def build_suggestions_sql(category_hint: str, limit: int = 3) -> tuple[str, dict
     return sql, params
 
 
+def build_token_suggestions_sql(toks: list[str]) -> tuple[str, dict]:
+    """Every product sharing at least one of a missing ingredient's tokens,
+    one row per shared token, with that token's document frequency (how
+    many products carry it). The planner scores the rows in Python — a
+    rarer shared word weighs more — so a not_stocked ingredient is offered
+    related products ("Kashmiri red chili powder" -> Chili Powder 100g)
+    before the cheapest of its category."""
+    params = {f"st{i}": t for i, t in enumerate(toks)}
+    # IN (NULL) matches nothing on both engines; IN () is a Postgres error
+    in_list = ", ".join(f":st{i}" for i in range(len(toks))) or "NULL"
+    sql = ("SELECT pt.term AS term, p.id AS id, p.name AS name, p.price AS price,\n"
+           "       d.df AS df\n"
+           "FROM product_terms pt JOIN products p ON p.id = pt.product_id\n"
+           "JOIN (SELECT term, COUNT(*) AS df FROM product_terms\n"
+           f"      WHERE term IN ({in_list}) GROUP BY term) d ON d.term = pt.term\n"
+           f"WHERE pt.term IN ({in_list})\n"
+           "ORDER BY p.id, pt.term")
+    return sql, params
+
+
 # The plan's template registry: QueryStep.template -> builder.
 TEMPLATES = {
     "existence_probe": build_existence_sql,
@@ -311,6 +404,7 @@ TEMPLATES = {
     "brand_stats": build_stats_sql,
     "substitute_lookup": build_substitute_sql,
     "missing_suggestions": build_suggestions_sql,
+    "token_suggestions": build_token_suggestions_sql,
     "store_price_matrix": build_price_matrix_sql,
 }
 
