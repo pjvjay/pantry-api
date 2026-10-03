@@ -169,8 +169,8 @@ model never writes SQL and never composes the plan. Structured per the
 
 | Stage | Template | What it does | Abort gate |
 |---|---|---|---|
-| t1 | `existence_probe` | One batched probe: is every ingredient stocked at all? Three match levels, each tried only when the one before finds nothing: exact (every token, purchase form included), form (form dropped), generic (descriptor words such as light/dark/toasted/ground dropped too — "light brown sugar" → Brown Sugar) | `missing_ingredients` → 409 listing what's missing + same-category suggestions |
-| t2 | `options_single_pass` | All ingredients resolved in ONE query: per-product cheapest in-range store offer, ranked per ingredient by size-fit then price, under budget/distance constraints. Packs over 6× the need are dropped as catering packs unless no smaller pack is on offer (a tablespoon of soy sauce is bought as a 500 ml bottle) | `unavailable_within_constraints` (attribution re-probe names the nearest out-of-range offer); `budget_infeasible` (cheapest-basket floor vs budget) |
+| t1 | `existence_probe` | One batched probe: is every ingredient stocked at all? Four match levels, each tried only when the one before finds nothing: exact (every token, purchase form included), equivalent form (powder/ground swapped — "cumin powder" → Cumin Ground; reported as `form`), form (form dropped), generic (descriptor words such as light/dark/toasted/ground/boneless dropped too — "light brown sugar" → Brown Sugar). Water and ice never reach it: they are skipped, never priced | `missing_ingredients` → 409 listing what's missing + related products (shared words first, then the category hint's cheapest) |
+| t2 | `options_single_pass` | All ingredients resolved in ONE query: per-product cheapest in-range store offer, ranked per ingredient by size-fit then price, under budget/distance constraints. Packs over 6× the need are dropped as catering packs while a pack within 6× exists; when none does (a tablespoon of oil against 250 ml-1.4 L bottles), packs within 6× the smallest stay and price decides | `unavailable_within_constraints` (attribution re-probe names the nearest out-of-range offer and the limit it breaks); `budget_infeasible` (cheapest-basket floor vs budget) |
 | t3 | `brand_stats` | Per-brand price/rating/review aggregates over the retrieved pools — context the selector uses to break ties | — |
 | t4 | `substitute_lookup` | Data-driven: same-subcategory alternatives for thin pools, labeled `substitute`, never silently swapped in | — |
 | t5 | `store_price_matrix` | **Split-trip optimizer** (zero LLM): full store×product matrix for the chosen basket → exhaustive store-subset enumeration with exact home→stores→home loops → stops-vs-cost frontier (`trip_options`, best flagged recommended) | — |
@@ -190,12 +190,20 @@ nothing remains the gate aborts as before; `budget_infeasible` is a
 basket-level verdict and always aborts. `"max_km"` (0.5–100) sets the
 distance limit and overrides any distance written in the text. Each line
 carries `match`: `exact`, `form` or `generic`. Both fields default to the
-original behaviour.
+original behaviour. With or without `allow_partial`, `skipped` lists what
+was never planned: water and ice (never bought), ingredients past the
+40-ingredient cap, and lines the selector returned no product for. Every
+ingredient is in exactly one place: a line, `not_stocked`, `out_of_range`
+or `skipped`. Lines that choose the same product are one purchase
+(`also_lines`), priced once — or `packs` times when their summed quantity,
+known in the pack's unit, needs more than one pack.
 
 ### Retrieval efficiency
 
 Ingredient matching never scans: seeds precompute a **`product_terms`
-inverted index** (tokenized name+description, same stemmer as the parser), so
+inverted index** (tokenized name+description, same stemmer as the parser;
+words the description negates — "no salt added" — are left out, so "salt"
+never matches a can of tomatoes), so
 t2 is indexed key joins — the recipe's tokens enter as one `VALUES` rowset,
 token-AND via `HAVING COUNT(DISTINCT term) = ntokens`, one window picks each
 product's best store, a second applies the per-ingredient LIMIT. 20
@@ -203,7 +211,7 @@ ingredients cost the same single round trip as 4. Deliberately deferred at
 this catalog size: materialized stats views, a pool/result cache keyed on
 grocery sets, `pg_trgm` fuzzy indexing.
 
-Catalog: 160 products (`seeds/products.json`) — staples plus the Sichuan,
+Catalog: 161 products (`seeds/products.json`) — staples plus the Sichuan,
 Indian, Mexican and baking pantry that real recipe links ask for. The file is
 a byte-identical copy of [pantry-db](https://github.com/pjvjay/pantry-db)'s
 `seeds/products.json`, which also generates the Postgres `seed.sql`; change it
@@ -301,10 +309,11 @@ nothing reaches outside the seeded catalog.
 `exact`, `form` or `generic`), `total_cost`, `origin_status`, `coverage
 {spend_fraction, count_fraction, meets_floor, …}`, the recommended
 `trip`, `not_stocked` / `out_of_range` (what a partial plan left out —
-always present, empty unless `allow_partial` dropped something) and
+always present, empty unless `allow_partial` dropped something),
+`skipped` (water, ice, lines past the cap or without a selection) and
 `notes` (interpretation, "planned K of N ingredients" when anything was
-dropped, every generic match by name, substitutions, the coverage-floor
-warning). `total_cost` and `coverage` cover the planned lines only.
+left out, every shared purchase and generic match by name, substitutions,
+the coverage-floor warning). `total_cost` and `coverage` cover the planned lines only.
 `total_cost` prices every line at its cheapest in-range store; `trip` is one realistic shopping trip priced at
 the stores it visits, with its own per-item prices in `trip.items` and
 its own `basket_cost` / `travel_cost` / `total_cost` — two different
@@ -458,12 +467,13 @@ server only ever receives ingredient text and never fetches a URL.
    verbatim) or 1 when the fetch fails. It never runs page scripts.
 2. Claude calls `plan_from_text` once with `allow_partial: true`, plus
    `lat`/`lon` and `max_km` when the user gave a place or a distance.
-3. It reports every line (generic matches flagged as substitutions),
-   `total_cost` as returned, the recommended trip, every `not_stocked` and
-   `out_of_range` entry, and `origin_status` / `coverage.spend_fraction`
-   verbatim under the `plan_dinner` prompt's rules. It offers a wider
-   `max_km` when something is out of range, and never invents a product,
-   price or store.
+3. It reports every line (generic matches flagged as substitutions, a
+   shared purchase once), `total_cost` as returned, the recommended trip,
+   every `not_stocked`, `out_of_range` and `skipped` entry, and
+   `origin_status` / `coverage.spend_fraction` verbatim under the
+   `plan_dinner` prompt's rules. It offers a wider `max_km` only when an
+   offer is beyond the distance limit, and never invents a product, price
+   or store.
 
 **Install** — copy the directory into your personal or a project's skills:
 
@@ -478,6 +488,14 @@ http pantry <url>/mcp --header "Authorization: Bearer <token>"`, and
 `python3`. Through the ContextForge gateway the tool is
 `pantry-plan-from-text`; the skill uses whichever name the session lists.
 Each plan costs Claude credits on the server and takes 10-60 s.
+
+**Deploying a server change behind a gateway** — ContextForge keeps its own
+copy of each federated tool's input schema, taken when the gateway was
+registered or last refreshed. After deploying a version of this server whose
+tool parameters changed (this one added `max_km` and `allow_partial` to
+`plan_from_text`), refresh the pantry gateway's tools in ContextForge, or
+the gateway keeps offering the old schema. SKILL.md checks for the two
+parameters and says so when they are missing.
 
 **What a session looks like:**
 

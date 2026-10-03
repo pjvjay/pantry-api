@@ -23,11 +23,17 @@ be a string or a list), then microdata (itemprop="recipeIngredient" inside an
 itemtype=".../Recipe" scope). The page is parsed as text only: no script on
 it is ever executed, and no other URL it names is fetched.
 
+Fetching: http(s) only, a redirect included (a redirect to ftp:, file: or
+any other scheme is refused, never followed); at most 5 MB; and the whole
+fetch gives up once 20 seconds have passed since it started (checked
+between reads, and no single read waits longer than that either), so a
+server that drips bytes cannot stall it.
+
 Exit codes: 0 found; 1 the input could not be read (network, HTTP status,
-missing file, unsupported scheme); 2 the input was read but holds no
-recipe (common on pages behind a bot challenge, or sites that publish no
-structured data) — then read the page another way and copy the
-ingredient lines verbatim.
+timeout, missing file, unsupported scheme or redirect); 2 the input was
+read but holds no recipe (common on pages behind a bot challenge, or sites
+that publish no structured data) — then read the page another way and copy
+the ingredient lines verbatim.
 
 Python 3 standard library only.
 """
@@ -38,6 +44,7 @@ import http.client
 import json
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 import zlib
@@ -45,7 +52,8 @@ from html.parser import HTMLParser
 from typing import Any
 
 MAX_BYTES = 5 * 1024 * 1024          # read at most 5 MB of page
-TIMEOUT_S = 20
+TIMEOUT_S = 20                       # the whole fetch, not one read
+CHUNK = 64 * 1024
 MAX_RECIPE_TEXT = 8000               # plan_from_text's recipe_text limit
 USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
@@ -122,8 +130,23 @@ def servings_from(yield_text: str) -> int | None:
     return None
 
 
+_LINE_BREAK = re.compile(r"\r\n|\r|\n|<br\s*/?>", re.IGNORECASE)
+
+
 def _ingredient_lines(value: Any) -> list[str]:
-    items = value if isinstance(value, list) else [value]
+    """recipeIngredient lines. A list holds one ingredient per item (a line
+    break inside an item is just wrapping). schema.org also allows a single
+    Text value, and the legacy "ingredients" often is one string with a line
+    per ingredient: that string is split at its line breaks, never collapsed
+    into one line."""
+    if isinstance(value, list):
+        items = value
+    elif value is None:
+        items = []
+    elif isinstance(value, dict):
+        items = [value]
+    else:
+        items = _LINE_BREAK.split(str(value))
     lines = []
     for item in items:
         text = _first_text(item) if isinstance(item, dict) else clean(item)
@@ -408,18 +431,63 @@ def _decompress(body: bytes, encoding: str) -> bytes:
     raise FetchError(f"unsupported Content-Encoding {encoding!r}")
 
 
+_HTTP = re.compile(r"^https?://", re.IGNORECASE)
+
+
+class _HttpOnlyRedirects(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only to another http(s) URL. urllib's own handler
+    also follows ftp://, which let a recipe page send this script to an
+    arbitrary FTP host (internal ones included) and parse what it served."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not _HTTP.match(newurl):
+            raise FetchError(f"refused a redirect from {req.full_url} to {newurl}: "
+                             "only http(s) URLs are fetched")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = urllib.request.build_opener(_HttpOnlyRedirects)
+
+
+def _urlopen(req: urllib.request.Request, timeout: float):
+    """The one network call (tests replace it): http(s) redirects only."""
+    return _OPENER.open(req, timeout=timeout)
+
+
+def _read_body(resp, url: str, deadline: float) -> bytes:
+    """At most MAX_BYTES + 1 bytes, in whatever pieces arrive, giving up at
+    the deadline. read1 returns as soon as any data is there, so a server
+    sending a byte at a time is caught between reads."""
+    read = getattr(resp, "read1", None) or resp.read
+    chunks: list[bytes] = []
+    size = 0
+    while size <= MAX_BYTES:
+        if time.monotonic() > deadline:
+            raise FetchError(f"timed out after {TIMEOUT_S}s fetching {url}")
+        chunk = read(min(CHUNK, MAX_BYTES + 1 - size))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        size += len(chunk)
+    return b"".join(chunks)
+
+
 def fetch(url: str) -> tuple[str, str]:
-    """(final URL after redirects, page text). urllib follows redirects."""
+    """(final URL after redirects, page text). Redirects are followed to
+    http(s) URLs only, and the whole fetch is bounded by TIMEOUT_S."""
     req = urllib.request.Request(url, headers={
         "User-Agent": USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
         "Accept-Encoding": "gzip, deflate",
     })
+    deadline = time.monotonic() + TIMEOUT_S
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp:
-            body = resp.read(MAX_BYTES + 1)
+        with _urlopen(req, timeout=TIMEOUT_S) as resp:
             final_url = resp.geturl()
+            if not _HTTP.match(final_url):
+                raise FetchError(f"refused {final_url}: only http(s) URLs are fetched")
+            body = _read_body(resp, url, deadline)
             encoding = resp.headers.get("Content-Encoding", "")
             charset = resp.headers.get_content_charset()
     except urllib.error.HTTPError as e:

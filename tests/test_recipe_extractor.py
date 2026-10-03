@@ -122,6 +122,21 @@ def test_type_list_top_level_array_and_a_broken_block_are_handled(tmp_path):
     assert alone == {"name": "Second", "yield": "", "ingredients": ["1 egg"]}
 
 
+@pytest.mark.parametrize("key,value", [
+    ("recipeIngredient", "1 cup flour\n2 eggs\r\n1 cup milk\n"),
+    ("ingredients", "1 cup flour<br>2 eggs<br />1 cup milk"),
+])
+def test_one_string_of_ingredients_is_split_at_its_line_breaks(key, value):
+    """schema.org lets recipeIngredient be a single Text, and the legacy
+    "ingredients" usually is one: a line per ingredient, never one merged
+    line. (A line break INSIDE a list item is wrapping — see the next test.)"""
+    page = _ld({"@type": "Recipe", "name": "Pancakes", "recipeYield": "4", key: value})
+    assert ex.extract(page)["ingredients"] == ["1 cup flour", "2 eggs", "1 cup milk"]
+    text, omitted = ex.build_recipe_text("Pancakes", "4", ex.extract(page)["ingredients"])
+    assert text == "Pancakes (serves 4)\n- 1 cup flour\n- 2 eggs\n- 1 cup milk"
+    assert omitted == []
+
+
 def test_entities_tags_and_stray_whitespace_are_cleaned(tmp_path):
     raw = ('<script type="application/ld+json">\n'
            '{"@type": "Recipe", "name": "Tom&#039;s  Chili &amp;amp; Beans",\n'
@@ -269,7 +284,7 @@ def test_fetch_sends_a_browser_user_agent_honours_the_timeout_and_decodes_gzip(m
         return _FakeResponse(body, "https://example.com/final/", {
             "Content-Encoding": "gzip", "Content-Type": "text/html; charset=utf-8"})
 
-    monkeypatch.setattr(ex.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(ex, "_urlopen", fake_urlopen)
     source, page = ex.fetch("https://example.com/start")
     assert seen == {"ua": ex.USER_AGENT, "timeout": 20, "url": "https://example.com/start"}
     assert "Mozilla/5.0" in ex.USER_AGENT
@@ -279,7 +294,7 @@ def test_fetch_sends_a_browser_user_agent_honours_the_timeout_and_decodes_gzip(m
 
 def test_fetch_caps_the_page_at_5_mb(monkeypatch, capsys):
     big = b"<p>" + b"a" * (6 * 1024 * 1024)
-    monkeypatch.setattr(ex.urllib.request, "urlopen",
+    monkeypatch.setattr(ex, "_urlopen",
                         lambda req, timeout: _FakeResponse(big, req.full_url, {}))
     _, page = ex.fetch("https://example.com/big")
     assert len(page) == 5 * 1024 * 1024
@@ -292,10 +307,89 @@ def test_http_errors_exit_1(monkeypatch, capsys):
     def refuse(req, timeout):
         raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", None, None)
 
-    monkeypatch.setattr(ex.urllib.request, "urlopen", refuse)
+    monkeypatch.setattr(ex, "_urlopen", refuse)
     assert ex.main(["https://example.com/blocked"]) == 1
     err = capsys.readouterr().err
     assert "HTTP 403 Forbidden" in err
+
+
+@pytest.mark.parametrize("target", ["ftp://10.0.0.5:21/etc/passwd", "file:///etc/passwd",
+                                    "gopher://internal/"])
+def test_a_redirect_to_anything_but_http_is_refused_before_connecting(target):
+    """urllib's own redirect handler follows ftp://, so a recipe page could
+    send the script to any FTP host. The opener's handler refuses every
+    non-http(s) target in redirect_request, before a connection is made."""
+    import urllib.request
+
+    handler = next(h for h in ex._OPENER.handlers
+                   if isinstance(h, urllib.request.HTTPRedirectHandler))
+    assert isinstance(handler, ex._HttpOnlyRedirects)
+    req = urllib.request.Request("https://example.com/recipe")
+    with pytest.raises(ex.FetchError, match="only http"):
+        handler.redirect_request(req, None, 302, "Found", {}, target)
+    # an http(s) redirect is still followed
+    nxt = handler.redirect_request(req, None, 302, "Found", {}, "https://example.com/r2")
+    assert nxt.full_url == "https://example.com/r2"
+
+
+def test_a_refused_redirect_exits_1_and_names_it(tmp_path, capsys):
+    """End to end through a real local socket: the page redirects to ftp://
+    on a listener that records any connection. Exit 1, nothing connects."""
+    import socket
+    import socketserver
+    import threading
+    from http.server import BaseHTTPRequestHandler
+
+    ftp = socket.socket()
+    ftp.bind(("127.0.0.1", 0))
+    ftp.listen(1)
+    ftp.settimeout(0.5)
+    ftp_port = ftp.getsockname()[1]
+
+    class Redirect(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 — http.server's hook name
+            self.send_response(302)
+            self.send_header("Location", f"ftp://127.0.0.1:{ftp_port}/etc/passwd")
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    # TCPServer, not HTTPServer: HTTPServer.server_bind reverse-resolves the
+    # host name, which can stall for seconds on a machine without DNS.
+    http = socketserver.TCPServer(("127.0.0.1", 0), Redirect)
+    threading.Thread(target=http.serve_forever, daemon=True).start()
+    try:
+        code = ex.main([f"http://127.0.0.1:{http.server_address[1]}/recipe"])
+        err = capsys.readouterr().err
+        with pytest.raises(socket.timeout):
+            ftp.accept()                         # nobody ever connected
+    finally:
+        http.shutdown()
+        ftp.close()
+    assert code == 1
+    assert f"to ftp://127.0.0.1:{ftp_port}/etc/passwd: only http(s) URLs are fetched" in err
+
+
+def test_the_whole_fetch_times_out_even_when_bytes_keep_arriving(monkeypatch, capsys):
+    """A server dripping one byte at a time never trips a per-read socket
+    timeout. The deadline covers the whole fetch: a fake clock advances two
+    seconds per byte, and the fetch fails at TIMEOUT_S, not at 5 MB."""
+    clock = {"now": 1000.0}
+    reads = {"n": 0}
+
+    class Drip(_FakeResponse):
+        def read1(self, n=-1):
+            reads["n"] += 1
+            clock["now"] += 2.0
+            return b"x"
+
+    monkeypatch.setattr(ex.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(ex, "_urlopen",
+                        lambda req, timeout: Drip(b"", req.full_url, {}))
+    assert ex.main(["https://example.com/slow"]) == 1
+    assert f"timed out after {ex.TIMEOUT_S}s" in capsys.readouterr().err
+    assert reads["n"] == ex.TIMEOUT_S // 2 + 1         # stopped at the deadline
 
 
 def test_the_extractor_never_executes_or_imports_anything_from_the_page():
@@ -305,7 +399,7 @@ def test_the_extractor_never_executes_or_imports_anything_from_the_page():
     assert not re.search(r"(?<![.\w])(eval|exec|compile|__import__)\(", src)
     imported = set(re.findall(r"^(?:import|from) ([a-z_.]+)", src, re.MULTILINE))
     assert imported <= {"__future__", "html", "html.parser", "http.client", "json", "re",
-                        "sys", "urllib.error", "urllib.request", "zlib", "typing"}
+                        "sys", "time", "urllib.error", "urllib.request", "zlib", "typing"}
     assert all(m.split(".")[0] in sys.stdlib_module_names for m in imported)
 
 
@@ -347,6 +441,84 @@ def _schema_names(schema) -> set[str]:
         for v in schema:
             names |= _schema_names(v)
     return names
+
+
+def _props(root: dict, node) -> dict:
+    """The properties an output-schema node offers, through $ref, anyOf /
+    oneOf / allOf (Optional fields) and array items."""
+    if not isinstance(node, dict):
+        return {}
+    if "$ref" in node:
+        target = root
+        for part in node["$ref"].lstrip("#/").split("/"):
+            target = target[part]
+        return _props(root, target)
+    out = dict(node.get("properties", {}))
+    for key in ("anyOf", "oneOf", "allOf"):
+        for option in node.get(key, []):
+            out.update(_props(root, option))
+    if "items" in node:
+        out.update(_props(root, node["items"]))
+    return out
+
+
+def _schema_path_exists(root: dict, path: list[str]) -> bool:
+    """`summary.trip.stores` style: the first segment may be any property
+    anywhere in the schema ("coverage.spend_fraction" starts below
+    summary); every later one must be a property of the one before it."""
+    starts = []
+
+    def collect(node):
+        if isinstance(node, dict):
+            for name, sub in node.get("properties", {}).items():
+                if name == path[0]:
+                    starts.append(sub)
+            for v in node.values():
+                collect(v)
+        elif isinstance(node, list):
+            for v in node:
+                collect(v)
+    collect(root)
+    for node in starts:
+        ok = True
+        for seg in path[1:]:
+            props = _props(root, node)
+            if seg not in props:
+                ok = False
+                break
+            node = props[seg]
+        if ok:
+            return True
+    return False
+
+
+def _bad_paths(body: str, output_schema: dict) -> list[str]:
+    """Dotted inline-code spans in SKILL.md prose that are not real paths
+    through plan_from_text's output schema."""
+    prose = re.sub(r"```.*?```", "", body, flags=re.DOTALL)
+    bad = []
+    for span in re.findall(r"`([^`\n]+)`", prose):
+        if re.fullmatch(r"[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+", span) and \
+                not _schema_path_exists(output_schema, span.split(".")):
+            bad.append(span)
+    return bad
+
+
+@pytest.mark.asyncio
+async def test_skill_md_field_paths_are_real_paths_not_just_real_names():
+    """Each segment existing somewhere is not enough: `trip.spend_fraction`
+    (Trip has no spend_fraction) and `summary.trip_options` (the summary
+    has no trip_options) are made of real names and must still fail."""
+    from pantry_planner.mcp_server import server
+
+    plan = {t.name: t for t in await server.list_tools()}["plan_from_text"]
+    _, body = _frontmatter_and_body()
+    assert _bad_paths(body, plan.output_schema) == []
+    for wrong in ("trip.spend_fraction", "summary.trip_options", "summary.lines.basket_cost"):
+        assert _bad_paths(f"see `{wrong}`", plan.output_schema) == [wrong]
+    for right in ("coverage.spend_fraction", "summary.trip", "summary.lines.also_lines",
+                  "summary.skipped"):
+        assert _bad_paths(f"see `{right}`", plan.output_schema) == []
 
 
 @pytest.mark.asyncio
