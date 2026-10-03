@@ -117,8 +117,24 @@ def test_existence_sql_shape_and_binding():
     assert "strict_matches" in sql and "relaxed_matches" in sql
     assert params["i0t0"] == "canned" and params["i0t1"] == "tomato"
     assert params["i1t0"] == "spaghetti"
-    # form token is strict-only: base flag 0 in the VALUES rowset
-    assert "(0, :i0t0, 0)" in sql and "(0, :i0t1, 1)" in sql
+    # form token is strict-only: base flag 0 in the VALUES rowset; neither
+    # name has a descriptor word to drop, so no row carries the generic flag
+    assert "(0, :i0t0, 0, 0)" in sql and "(0, :i0t1, 1, 0)" in sql
+    assert "(0, 1, 2, 0)" in sql and "(1, 1, 1, 0)" in sql   # n_base, n_all, n_gen
+
+
+def test_existence_sql_flags_generic_terms():
+    """"light soy sauce": the descriptor stays a base token (the relaxed
+    level still needs it) but only soy + sauce count at the generic level."""
+    from pantry_planner.nlsearch.schemas import IngredientSpec
+    from pantry_planner.nlsearch.sql_builder import build_existence_sql
+
+    sql, params = build_existence_sql([IngredientSpec(name="light soy sauce")])
+    assert [params["i0t0"], params["i0t1"], params["i0t2"]] == ["light", "soy", "sauce"]
+    assert "(0, :i0t0, 1, 0)" in sql                   # light: base, not generic
+    assert "(0, :i0t1, 1, 1)" in sql and "(0, :i0t2, 1, 1)" in sql
+    assert "(0, 3, 3, 2)" in sql                       # 2 generic tokens to match
+    assert "generic_matches" in sql
 
 
 def test_options_sql_patterns_and_binding():

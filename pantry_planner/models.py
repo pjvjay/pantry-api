@@ -4,6 +4,8 @@ API boundary; plain dataclasses inside would also work.
 """
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from .nlsearch.plan import StepResult  # import-safe: plan.py is pydantic-only
@@ -280,6 +282,26 @@ class TripOption(BaseModel):
 
 # ─── Final plan ───────────────────────────────────────────────
 
+# How retrieval matched a line's ingredient to the catalog:
+#   exact   — every word of the ingredient as written (the purchase form
+#             included); always the case on the classic seeded-recipe path,
+#             whose ingredient names are used verbatim
+#   form    — only after dropping the purchase form ("powdered tomato" ->
+#             tomato products)
+#   generic — only after dropping descriptor words (units.DESCRIPTORS:
+#             light/dark/toasted/ground/...): "light soy sauce" -> Soy Sauce.
+#             On the week path, a line rescued by the head-noun fallback.
+MatchLevel = Literal["exact", "form", "generic"]
+
+
+class DroppedIngredient(BaseModel):
+    """An ingredient a partial plan (allow_partial) left out instead of
+    aborting: what it was, why, and what to try instead."""
+    ingredient: str
+    reason: str
+    suggestions: list[str] = Field(default_factory=list)
+
+
 class PlanLineItem(BaseModel):
     line_no: int
     ingredient_name: str
@@ -295,6 +317,7 @@ class PlanLineItem(BaseModel):
     store_price: float | None = None
     # Provenance of this line, when origin evidence exists for it
     origin: OriginReceipt | None = None
+    match: MatchLevel = "exact"
 
 
 class ShoppingPlan(BaseModel):
@@ -321,6 +344,15 @@ class ShoppingPlan(BaseModel):
     # describing a basket as clean. "unverified" means coverage is below the
     # floor, not that anything excluded shipped.
     origin_status: str = "not_requested"
+    # Partial plans (NL path, allow_partial=True): ingredients left out
+    # instead of aborting. not_stocked = the catalog has no match at all (t1);
+    # out_of_range = stocked, but no offer within the distance/price/diet
+    # constraints (t2). total_cost, origin_coverage and trip_options cover
+    # the planned line_items only. ingredient_count is how many ingredients
+    # the recipe asked for, before anything was dropped.
+    not_stocked: list[DroppedIngredient] = Field(default_factory=list)
+    out_of_range: list[DroppedIngredient] = Field(default_factory=list)
+    ingredient_count: int = 0
 
 
 # ─── Weekly menu optimizer (5A) ───────────────────────────────

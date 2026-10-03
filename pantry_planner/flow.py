@@ -39,23 +39,27 @@ from .tracing import llm_span, make_tracker
 
 
 def _selector_constraints(parsed, brand_stats: dict | None = None,
-                          preference: list | None = None) -> dict | None:
+                          preference: list | None = None,
+                          planned: set[str] | None = None) -> dict | None:
     """Condense the NL parse into the binding-constraints object the
     selector prompt understands. On the classic path only the origin
-    preference (if any) is carried."""
+    preference (if any) is carried. `planned` limits the per-ingredient
+    hints to the ingredients still in the plan (a partial plan dropped the
+    rest; the selector is never told about them)."""
     if parsed is None:
         return {"origin_preference": list(preference)} if preference else None
     c = parsed.constraints
+    ings = [i for i in parsed.recipe.ingredients if planned is None or i.name in planned]
     quantities = {
         ing.name: f"{ing.quantity:g} {ing.unit}"
-        for ing in parsed.recipe.ingredients
+        for ing in ings
         if ing.quantity is not None and ing.unit
     }
     out = {
         "max_total_budget": c.max_total_budget,
         "preferences": c.soft_text or None,
         "quantities_needed": quantities or None,
-        "preps": {i.name: i.prep for i in parsed.recipe.ingredients if i.prep} or None,
+        "preps": {i.name: i.prep for i in ings if i.prep} or None,
         # t3's per-ingredient brand aggregates (options/avg price/avg rating/
         # review count) — context for the final mapping, not a hard rule
         "brand_statistics": brand_stats or None,
@@ -96,17 +100,22 @@ def load_products(state: State, exclude: list | None = None,
 @action(reads=[], writes=["recipe", "products", "parsed_input", "location",
                           "plan_trace", "brand_stats", "retrieval_stats",
                           "origins", "origin_dropped", "preference",
-                          "origin_requested"])
+                          "origin_requested", "not_stocked", "out_of_range",
+                          "match_levels", "ingredient_count"])
 def parse_and_retrieve(state: State, recipe_text: str,
                        lat: float | None = None,
                        lon: float | None = None,
                        exclude: list | None = None,
-                       preference: list | None = None) -> tuple[dict, State]:
+                       preference: list | None = None,
+                       max_km: float | None = None,
+                       allow_partial: bool = False) -> tuple[dict, State]:
     """NL2SQL entrypoint: pasted recipe text → query-plan execution
     (t1 existence → t2 options → t3 brand stats → t4 lookups) producing an
     ad-hoc Recipe + store-priced candidate pools. Replaces load_recipe +
     load_products on the NL path; downstream actions consume the same state
-    keys. Gate aborts raise nlsearch.PlanAborted → API 409."""
+    keys. Gate aborts raise nlsearch.PlanAborted → API 409. `max_km`
+    overrides the parsed distance; with `allow_partial` the recipe in state
+    holds only the ingredients still planned, and the drops ride along."""
     from . import nlsearch
 
     # With an exclusion active, retrieve wider than the usual cheapest-8 so
@@ -115,7 +124,8 @@ def parse_and_retrieve(state: State, recipe_text: str,
     from .nlsearch.sql_builder import PER_INGREDIENT_LIMIT
     limit = 10_000 if exclude else PER_INGREDIENT_LIMIT
     r = nlsearch.run_query_plan(recipe_text, lat=lat, lon=lon,
-                                per_ingredient_limit=limit)
+                                per_ingredient_limit=limit, max_km=max_km,
+                                allow_partial=allow_partial)
     names = {i: ing.name for i, ing in enumerate(r.recipe.ingredients)}
     kept, dropped, origins, kept_pools = apply_origin_constraint(
         r.products, r.pools, names, exclude=exclude, preference=preference)
@@ -143,7 +153,9 @@ def parse_and_retrieve(state: State, recipe_text: str,
         parsed_input=r.parsed,
         location={"lat": r.lat, "lon": r.lon, "max_km": r.max_km},
         plan_trace=r.execution.steps, brand_stats=r.brand_stats,
-        retrieval_stats=r.stats)
+        retrieval_stats=r.stats, not_stocked=r.not_stocked,
+        out_of_range=r.out_of_range, match_levels=r.match_levels,
+        ingredient_count=r.ingredient_count)
 
 
 @action(reads=["recipe", "products"], writes=["preselect_result"])
@@ -179,7 +191,8 @@ def select_products(state: State) -> tuple[dict, State]:
         model=preselect.model,
         enable_thinking=False,
         constraints=_selector_constraints(parsed, state.get("brand_stats"),
-                                          preference=state.get("preference")),
+                                          preference=state.get("preference"),
+                                          planned={i.name for i in recipe.ingredients}),
         origins_by_id=state.get("origins") or {},
         preference=state.get("preference") or [],
     )
@@ -315,6 +328,9 @@ def build_plan(state: State) -> tuple[dict, State]:
 
     from . import origins as origins_mod
     origins_map = state.get("origins") or {}
+    # NL path: how t1 matched each line's ingredient. The classic path uses
+    # its seeded ingredient names verbatim, which is what "exact" means.
+    match_levels = state.get("match_levels") or {}
 
     line_items: list[PlanLineItem] = []
     total_cost = 0.0
@@ -339,6 +355,7 @@ def build_plan(state: State) -> tuple[dict, State]:
             store_name=prod.store_name,
             store_price=prod.store_price,
             origin=origins_mod.origin_receipt(origins_map.get(prod.id)),
+            match=match_levels.get(s.line_no, "exact"),
         ))
         total_cost += charged
 
@@ -374,6 +391,9 @@ def build_plan(state: State) -> tuple[dict, State]:
         plan_trace=state.get("plan_trace") or [],
         candidate_count=len(state["products"]) if parsed else 0,
         trip_options=state.get("trip_options") or [],
+        not_stocked=state.get("not_stocked") or [],
+        out_of_range=state.get("out_of_range") or [],
+        ingredient_count=state.get("ingredient_count") or len(recipe.ingredients),
     )
     return {"total_cost": plan.total_cost, "n_line_items": len(plan.line_items)}, \
         state.update(plan=plan)
@@ -533,7 +553,9 @@ def build_application(recipe_slug: str | None = None,
                       lat: float | None = None,
                       lon: float | None = None,
                       exclude: list | None = None,
-                      preference: list | None = None) -> Application:
+                      preference: list | None = None,
+                      max_km: float | None = None,
+                      allow_partial: bool = False) -> Application:
     """Construct the Burr Application for one run.
 
     Two entry variants sharing the router/selector/plan tail:
@@ -575,7 +597,9 @@ def build_application(recipe_slug: str | None = None,
             .with_actions(parse_and_retrieve.bind(recipe_text=recipe_text,
                                                   lat=lat, lon=lon,
                                                   exclude=exclude,
-                                                  preference=preference),
+                                                  preference=preference,
+                                                  max_km=max_km,
+                                                  allow_partial=allow_partial),
                           *common_actions)
             .with_transitions(("parse_and_retrieve", "preselect_model"),
                               *shared_tail)
@@ -613,14 +637,20 @@ def run(recipe_slug: str, *, exclude: list | None = None,
 
 def run_nl(recipe_text: str, lat: float | None = None,
            lon: float | None = None, *, exclude: list | None = None,
-           preference: list | None = None) -> ShoppingPlan:
+           preference: list | None = None, max_km: float | None = None,
+           allow_partial: bool = False) -> ShoppingPlan:
     """Run the NL2SQL pipeline on pasted recipe text.
 
     Raises nlsearch.UnparseableRecipe when no ingredient list is found
     (API → 422 with guidance) and nlsearch.PlanAborted when a query-plan
-    gate fires (API → 409 with the PlanAlert + trace).
+    gate fires (API → 409 with the PlanAlert + trace). `max_km` overrides
+    any distance stated in the text; `allow_partial` plans the stocked,
+    in-range ingredients and reports the rest on the plan's `not_stocked` /
+    `out_of_range` instead of aborting (a gate still fires when nothing
+    would remain).
     """
     app = build_application(recipe_text=recipe_text, lat=lat, lon=lon,
-                            exclude=exclude, preference=preference)
+                            exclude=exclude, preference=preference,
+                            max_km=max_km, allow_partial=allow_partial)
     _action, _result, state = app.run(halt_after=["build_plan"])
     return state["plan"]

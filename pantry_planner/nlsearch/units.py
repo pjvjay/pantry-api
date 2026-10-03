@@ -47,3 +47,47 @@ def tokens(name: str) -> list[str]:
     """Match tokens for an ingredient name: lowercase, stemmed, stopwords out."""
     raw = re.findall(r"[a-zA-Z]+", name.lower())
     return [stem(t) for t in raw if t not in _STOPWORDS and len(t) > 1]
+
+
+# ─── generic matching: the third retrieval level ─────────────
+# A recipe names "light soy sauce"; the shelf says "Soy Sauce 500ml". When
+# neither the strict match (every token, purchase form included) nor the
+# form-relaxed one finds a product, the planner retries without these
+# descriptor words and labels the line match="generic".
+#
+# A small FIXED vocabulary on purpose: every word here is one a recipe adds
+# and a shelf label routinely omits, and none of them names the product
+# itself. It applies to tokens() OUTPUT, so entries are lowercase, stemmed
+# tokens. tokens() itself is untouched — pantry-db's seed generator keeps a
+# copy of it and the parity test guards that copy. "fresh", "large",
+# "small" and "medium" are already stopwords there; they are listed so the
+# vocabulary reads complete. Two-word descriptors are matched as phrases,
+# so "sodium" alone is never dropped.
+DESCRIPTORS = frozenset({
+    "light", "dark", "toasted", "roasted", "ground", "whole", "dried", "fresh",
+    "frozen", "boneless", "skinless", "large", "small", "medium", "extra",
+    "chopped", "sliced", "minced", "diced", "raw", "organic",
+})
+DESCRIPTOR_PHRASES = (("low", "sodium"), ("reduced", "sodium"))
+
+
+def generic_tokens(name: str) -> list[str]:
+    """tokens(name) without descriptor words: "light soy sauce" -> soy, sauce.
+
+    Returns [] when the generic level does not apply: nothing was dropped
+    (it would only repeat the relaxed match) or nothing would remain (a bare
+    descriptor must never match the whole catalog)."""
+    toks = tokens(name)
+    out: list[str] = []
+    dropped = False
+    i = 0
+    while i < len(toks):
+        if tuple(toks[i:i + 2]) in DESCRIPTOR_PHRASES:
+            dropped, i = True, i + 2
+            continue
+        if toks[i] in DESCRIPTORS:
+            dropped = True
+        elif toks[i] not in out:            # token-AND counts distinct terms
+            out.append(toks[i])
+        i += 1
+    return out if dropped else []

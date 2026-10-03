@@ -21,7 +21,7 @@ from __future__ import annotations
 import math
 
 from .schemas import Constraints, IngredientSpec
-from .units import normalize_quantity, tokens
+from .units import generic_tokens, normalize_quantity, tokens
 
 PRODUCT_COLS = ("p.id AS id, p.name AS name, p.description AS description, "
                 "p.price AS price, p.category AS category, "
@@ -67,9 +67,15 @@ def _constraint_where(c: Constraints, params: dict) -> list[str]:
     return where
 
 
-def _ingredient_terms(ing: IngredientSpec, *, relaxed: bool) -> list[str]:
-    """TOKEN_AND_MATCH terms. The purchase form is a required token unless
-    this ingredient is on the form-relaxed path (t1 said strict = 0)."""
+def _ingredient_terms(ing: IngredientSpec, *, relaxed: bool,
+                      generic: bool = False) -> list[str]:
+    """TOKEN_AND_MATCH terms, by match level:
+      exact   — every name token, plus the purchase form as a required token
+      form    — the form dropped (t1 said strict = 0)
+      generic — the form AND descriptor words dropped (t1 said strict =
+                relaxed = 0, generic > 0); see units.DESCRIPTORS"""
+    if generic:
+        return generic_tokens(ing.name)
     toks = tokens(ing.name)
     if ing.form and not relaxed:
         toks = [ing.form, *toks]
@@ -80,37 +86,46 @@ def _ingredient_terms(ing: IngredientSpec, *, relaxed: bool) -> list[str]:
 
 def build_existence_sql(ingredients: list[IngredientSpec]) -> tuple[str, dict]:
     """One batched probe: per ingredient, how many products match ALL its
-    tokens (strict = incl. purchase form) and ALL its base tokens (form
-    relaxed). Catalog-level on purpose — constraints don't apply here, so
-    'not stocked at all' stays distinct from 'not within constraints'."""
+    tokens (strict = incl. purchase form), ALL its base tokens (form
+    relaxed) and ALL its descriptor-free tokens (generic; 0 when the name
+    has no descriptor word to drop). Catalog-level on purpose — constraints
+    don't apply here, so 'not stocked at all' stays distinct from 'not
+    within constraints'."""
     params: dict = {}
     term_rows: list[str] = []
     count_rows: list[str] = []
     for n, ing in enumerate(ingredients):
         base = tokens(ing.name)
         all_toks = ([ing.form, *base] if ing.form else base)
+        gen = set(generic_tokens(ing.name))
         for j, t in enumerate(all_toks):
             params[f"i{n}t{j}"] = t
             is_base = 0 if (ing.form and j == 0) else 1
-            term_rows.append(f"({n}, :i{n}t{j}, {is_base})")
-        count_rows.append(f"({n}, {len(base)}, {len(all_toks)})")
+            is_gen = 1 if (is_base and t in gen) else 0
+            term_rows.append(f"({n}, :i{n}t{j}, {is_base}, {is_gen})")
+        count_rows.append(f"({n}, {len(base)}, {len(all_toks)}, {len(gen)})")
     if not term_rows:                        # fully tokenless recipe: no matches
         params["noterm"] = ""
-        term_rows = ["(-1, :noterm, 1)"]
+        term_rows = ["(-1, :noterm, 1, 0)"]
     if not count_rows:                       # sibling of the guard above —
-        count_rows = ["(-1, 0, 0)"]          # an empty VALUES () is a syntax error
+        count_rows = ["(-1, 0, 0, 0)"]       # an empty VALUES () is a syntax error
     sql = (
-        f"WITH ing_terms(ing_no, term, base) AS (VALUES {', '.join(term_rows)}),\n"
-        f" ing_counts(ing_no, n_base, n_all) AS (VALUES {', '.join(count_rows)}),\n"
+        f"WITH ing_terms(ing_no, term, base, gen) AS (VALUES {', '.join(term_rows)}),\n"
+        f" ing_counts(ing_no, n_base, n_all, n_gen) AS (VALUES {', '.join(count_rows)}),\n"
         " m AS (\n"
         "   SELECT it.ing_no, pt.product_id,\n"
         "          COUNT(DISTINCT CASE WHEN it.base = 1 THEN it.term END) AS base_hits,\n"
+        "          COUNT(DISTINCT CASE WHEN it.gen = 1 THEN it.term END) AS gen_hits,\n"
         "          COUNT(DISTINCT it.term) AS all_hits\n"
         "   FROM ing_terms it JOIN product_terms pt ON pt.term = it.term\n"
         "   GROUP BY it.ing_no, pt.product_id)\n"
         "SELECT c.ing_no,\n"
-        "       COALESCE(SUM(CASE WHEN m.all_hits = c.n_all THEN 1 ELSE 0 END), 0) AS strict_matches,\n"
-        "       COALESCE(SUM(CASE WHEN m.base_hits = c.n_base THEN 1 ELSE 0 END), 0) AS relaxed_matches\n"
+        "       COALESCE(SUM(CASE WHEN m.all_hits = c.n_all THEN 1 ELSE 0 END), 0)"
+        " AS strict_matches,\n"
+        "       COALESCE(SUM(CASE WHEN m.base_hits = c.n_base THEN 1 ELSE 0 END), 0)"
+        " AS relaxed_matches,\n"
+        "       COALESCE(SUM(CASE WHEN c.n_gen > 0 AND m.gen_hits = c.n_gen"
+        " THEN 1 ELSE 0 END), 0) AS generic_matches\n"
         "FROM ing_counts c LEFT JOIN m ON m.ing_no = c.ing_no\n"
         "GROUP BY c.ing_no ORDER BY c.ing_no"
     )
@@ -122,18 +137,26 @@ def build_existence_sql(ingredients: list[IngredientSpec]) -> tuple[str, dict]:
 def build_options_sql(c: Constraints, ingredients: list[IngredientSpec],
                       relaxed: set[int], lat: float, lon: float,
                       max_km: float | None = None,
-                      per_ingredient_limit: int = PER_INGREDIENT_LIMIT) -> tuple[str, dict]:
+                      per_ingredient_limit: int = PER_INGREDIENT_LIMIT, *,
+                      generic: set[int] | None = None,
+                      nearest_store: bool = False) -> tuple[str, dict]:
     """All ingredients resolved in one pass: token VALUES -> product_terms
     join -> token-AND -> per-product cheapest in-range store (rn_store) ->
-    per-ingredient size-fit/price ranking (rn) capped at :lim."""
+    per-ingredient size-fit/price ranking (rn) capped at :lim.
+
+    `relaxed` / `generic` are the ingredient indexes t1 resolved at the form
+    or generic level (see _ingredient_terms). `nearest_store` pins each
+    product to its NEAREST store instead of its cheapest — the attribution
+    probe uses it to name the closest offer outside a distance limit."""
     params: dict = {"lim": per_ingredient_limit}
     _location_params(params, lat, lon)
+    generic = generic or set()
 
     term_rows: list[str] = []
     count_rows: list[str] = []
     need_rows: list[str] = []
     for n, ing in enumerate(ingredients):
-        toks = _ingredient_terms(ing, relaxed=(n in relaxed))
+        toks = _ingredient_terms(ing, relaxed=(n in relaxed), generic=(n in generic))
         for j, t in enumerate(toks):
             params[f"i{n}t{j}"] = t
             term_rows.append(f"({n}, :i{n}t{j})")
@@ -193,6 +216,8 @@ def build_options_sql(c: Constraints, ingredients: list[IngredientSpec],
     if not count_rows:
         count_rows = ["(-1, 0)"]
 
+    store_order = (f"{DIST_EXPR} ASC, sp.price ASC, s.id ASC" if nearest_store
+                   else "sp.price ASC, s.id ASC")
     sql = (
         f"WITH ing_terms(ing_no, term) AS (VALUES {', '.join(term_rows)}),\n"
         f" ing_counts(ing_no, ntok) AS (VALUES {', '.join(count_rows)})"
@@ -209,7 +234,7 @@ def build_options_sql(c: Constraints, ingredients: list[IngredientSpec],
         "          sp.price AS store_price, s.name AS store_name,\n"
         f"          {DIST_EXPR} AS dist_km2,\n"
         "          ROW_NUMBER() OVER (PARTITION BY m.ing_no, p.id "
-        "ORDER BY sp.price ASC, s.id ASC) AS rn_store\n"
+        f"ORDER BY {store_order}) AS rn_store\n"
         "   FROM matches m\n"
         "   JOIN products p ON p.id = m.product_id\n"
         "   JOIN store_products sp ON sp.product_id = p.id\n"
