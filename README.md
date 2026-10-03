@@ -137,6 +137,7 @@ pantry-planner/
 │       ├── three_phase.py     # ThreePhaseRouter
 │       └── cascade.py         # CascadeRouter
 ├── seeds/                 # recipes + products JSON (copies of pantry-db's)
+├── skills/recipe-shopper/ # Agent Skill: recipe link → cheapest basket nearby
 ├── tests/                 # pytest, LLM mocked
 ├── evals/                 # golden set + comparison harness
 └── ARCHITECTURE.md
@@ -440,6 +441,61 @@ claude mcp add pantry-planner --env ANTHROPIC_API_KEY=sk-ant-... --env DB_URL=sq
 
 Burr traces from stdio runs land in `~/.pantry-planner/burr`
 (override with `BURR_TRACKING_DIR`).
+
+## Agent Skill: recipe-shopper
+
+`skills/recipe-shopper/` is an Agent Skill (a `SKILL.md` Claude loads when
+a request matches its description, plus a script) that turns a recipe link
+into the cheapest basket at nearby stores, using the MCP server above. Claude fetches the page on the user's machine; the
+server only ever receives ingredient text and never fetches a URL.
+
+1. `scripts/extract_recipe.py <url | file | ->` (standard library only)
+   fetches the page and reads its schema.org Recipe: every
+   `application/ld+json` block (`@graph`, arrays, `@type` lists), then
+   microdata. It prints `{source, name, yield, servings, ingredients,
+   recipe_text, omitted}` and exits 2 when the page has no structured
+   recipe (the skill then reads the page with WebFetch and copies the lines
+   verbatim) or 1 when the fetch fails. It never runs page scripts.
+2. Claude calls `plan_from_text` once with `allow_partial: true`, plus
+   `lat`/`lon` and `max_km` when the user gave a place or a distance.
+3. It reports every line (generic matches flagged as substitutions),
+   `total_cost` as returned, the recommended trip, every `not_stocked` and
+   `out_of_range` entry, and `origin_status` / `coverage.spend_fraction`
+   verbatim under the `plan_dinner` prompt's rules. It offers a wider
+   `max_km` when something is out of range, and never invents a product,
+   price or store.
+
+**Install** — copy the directory into your personal or a project's skills:
+
+```bash
+cp -r skills/recipe-shopper ~/.claude/skills/          # every project
+cp -r skills/recipe-shopper <project>/.claude/skills/  # one project
+```
+
+**Prerequisites** — the pantry MCP server connected (see [Client
+configuration](#client-configuration)), e.g. `claude mcp add --transport
+http pantry <url>/mcp --header "Authorization: Bearer <token>"`, and
+`python3`. Through the ContextForge gateway the tool is
+`pantry-plan-from-text`; the skill uses whichever name the session lists.
+Each plan costs Claude credits on the server and takes 10-60 s.
+
+**What a session looks like:**
+
+```
+you    What would https://omnivorescookbook.com/mala-chicken/ cost within 5 km?
+claude [runs extract_recipe.py] "La Zi Ji (Sichuan Mala Chicken)", serves 4,
+       17 ingredient lines. Planning them calls Claude on the pantry server
+       (about a minute).
+claude [plan_from_text: recipe_text, allow_partial=true, max_km=5]
+       | ingredient | product | store | price |   (generic matches flagged)
+       total_cost (planned lines only: K of 17), the recommended trip
+       (stores, basket + travel), not stocked + suggestions, out of range +
+       the nearest offer, origin_status, every note
+```
+
+`tests/test_recipe_extractor.py` runs the extractor on synthetic pages and
+checks that every tool, parameter, prompt and result field SKILL.md names
+exists in `mcp_server.py`, which is why the skill lives next to the server.
 
 ## Where things come from (provenance)
 
