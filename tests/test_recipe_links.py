@@ -180,7 +180,8 @@ def test_partial_drops_out_of_range_and_names_the_nearest_offer(reseed):
     (d,) = r.out_of_range
     assert d.ingredient == "cornstarch"
     assert d.reason == ("available only outside the constraints — nearest: Cornstarch 450g "
-                        f"at {_store_name(EAST_VAN)} ($5.00, {_store_km(EAST_VAN)} km)")
+                        f"at {_store_name(EAST_VAN)} ($5.00, {_store_km(EAST_VAN)} km), "
+                        "beyond the 3 km limit")
     assert {p.store_name for p in r.pools[0]} <= {
         _store_name(i) for i in (1, 2, 3, 4) if _store_km(i) <= 3}
 
@@ -196,8 +197,10 @@ def test_partial_price_cap_reason_and_suggestions_come_from_the_nearest_store():
     shop = _store_name(DOWNTOWN)
     (p0, n0), (p1, n1) = at_downtown
     assert p0 > 5 and p1 > 5                           # really priced out
+    # the offer is inside any distance; the PRICE cap is what excludes it
     assert d.reason == ("available only outside the constraints — nearest: "
-                        f"{n0} at {shop} (${p0:.2f}, {km} km)")
+                        f"{n0} at {shop} (${p0:.2f}, {km} km), "
+                        "over the $5.00 per-item price cap")
     assert d.suggestions == [f"{n1} at {shop} (${p1:.2f}, {km} km)"]
 
 
@@ -373,8 +376,9 @@ async def test_plan_from_text_partial_summary(server):
     assert s.total_cost == round(sum(ln.price for ln in s.lines), 2)
     assert [d.ingredient for d in s.not_stocked] == ["potato starch", "msg"]
     assert s.out_of_range == []
-    assert ("planned 4 of 6 ingredients: 2 not stocked, 0 out of range (see not_stocked / "
-            "out_of_range); total_cost covers the planned lines only") in s.notes
+    assert ("planned 4 of 6 ingredients: 2 not stocked, 0 out of range, 0 skipped (see "
+            "not_stocked / out_of_range / skipped); total_cost covers the planned lines "
+            "only") in s.notes
     assert "light brown sugar matched generically: Brown Sugar 1kg" in s.notes
     assert not any("light soy sauce matched" in n for n in s.notes)
     # the empty lists are on the wire, not merely defaulted by the model

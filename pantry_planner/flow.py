@@ -19,6 +19,8 @@ Both routers use the same graph. The only difference is which nodes
 """
 from __future__ import annotations
 
+import math
+from dataclasses import dataclass, field
 from typing import Any
 
 from burr.core import Application, ApplicationBuilder, State, action, expr
@@ -26,16 +28,95 @@ from burr.core import Application, ApplicationBuilder, State, action, expr
 from . import db
 from .config import get_router, settings
 from .models import (
+    DroppedIngredient,
     EscalationDecision,
     PlanLineItem,
     PreselectResult,
     Product,
     Recipe,
+    RecipeIngredient,
+    Selection,
     SelectorResult,
     ShoppingPlan,
 )
 from .selector import call_selector, merge_selections
 from .tracing import llm_span, make_tracker
+
+# ─── Purchases: selections -> what is actually bought ────────
+# Two recipe lines can resolve to one product (mala chicken's "ground
+# Sichuan peppercorns" and "Sichuan peppercorns" both became the whole 50 g
+# bag). Pricing each selection separately charged that bag twice in
+# total_cost and listed it twice on the trip. A purchase is one product,
+# bought once for every line that chose it — more than one pack only when
+# the lines' summed need, known in the pack's own unit, exceeds one pack.
+
+_MATCH_ORDER = {"exact": 0, "form": 1, "generic": 2}
+NO_SELECTION = "the selector returned no product for this line"
+
+
+@dataclass
+class Purchase:
+    product: Product
+    lines: list[tuple[Selection, RecipeIngredient]] = field(default_factory=list)
+    packs: int = 1
+
+    @property
+    def unit_price(self) -> float:
+        p = self.product
+        return p.store_price if p.store_price is not None else p.price
+
+
+def _packs(product: Product, needs: list[tuple[float, str] | None]) -> int:
+    """Packs a shared purchase takes: the summed need over the pack size,
+    rounded up — or 1 when any line's need is unknown or in another unit
+    (a teaspoon of peppercorns against a 50 g bag says nothing about bags)."""
+    if (len(needs) < 2 or not product.unit_qty
+            or any(n is None or n[1] != product.unit_uom for n in needs)):
+        return 1
+    total = sum(n[0] for n in needs if n is not None)
+    return max(1, math.ceil(total / product.unit_qty - 1e-9))
+
+
+def group_purchases(selections: list[Selection], products_by_id: dict[int, Product],
+                    ingredients_by_line: dict[int, RecipeIngredient],
+                    needs: dict[int, tuple[float, str] | None] | None = None,
+                    ) -> tuple[list[Purchase], list[tuple[RecipeIngredient, str]]]:
+    """(purchases in recipe order, lines with no valid selection + why).
+
+    The first valid selection per line counts; a repeat for the same line is
+    ignored, and a product_id that is not a candidate is no selection."""
+    needs = needs or {}
+    purchases: dict[int, Purchase] = {}
+    chosen: set[int] = set()
+    invalid: dict[int, str] = {}
+    for sel in selections:
+        ing = ingredients_by_line.get(sel.line_no)
+        if ing is None or sel.line_no in chosen:
+            continue
+        prod = products_by_id.get(sel.product_id)
+        if prod is None:
+            invalid.setdefault(sel.line_no, f"the selector named product {sel.product_id}, "
+                                            "which is not a candidate for this line")
+            continue
+        chosen.add(sel.line_no)
+        purchases.setdefault(prod.id, Purchase(product=prod)).lines.append((sel, ing))
+    for pu in purchases.values():
+        pu.lines.sort(key=lambda t: t[0].line_no)
+        pu.packs = _packs(pu.product, [needs.get(sel.line_no) for sel, _ in pu.lines])
+    ordered = sorted(purchases.values(), key=lambda pu: pu.lines[0][0].line_no)
+    unselected = [(ing, invalid.get(line, NO_SELECTION))
+                  for line, ing in sorted(ingredients_by_line.items()) if line not in chosen]
+    return ordered, unselected
+
+
+def _needs(parsed) -> dict[int, tuple[float, str] | None]:
+    """recipe line_no -> canonical need (qty, g|ml|each) from the NL parse."""
+    from .nlsearch.units import normalize_quantity
+
+    if parsed is None:
+        return {}
+    return {i + 1: normalize_quantity(ing.quantity, ing.unit)
+            for i, ing in enumerate(parsed.recipe.ingredients)}
 
 
 def _selector_constraints(parsed, brand_stats: dict | None = None,
@@ -101,7 +182,8 @@ def load_products(state: State, exclude: list | None = None,
                           "plan_trace", "brand_stats", "retrieval_stats",
                           "origins", "origin_dropped", "preference",
                           "origin_requested", "not_stocked", "out_of_range",
-                          "match_levels", "ingredient_count"])
+                          "skipped", "pool_hints", "match_levels",
+                          "ingredient_count"])
 def parse_and_retrieve(state: State, recipe_text: str,
                        lat: float | None = None,
                        lon: float | None = None,
@@ -146,6 +228,13 @@ def parse_and_retrieve(state: State, recipe_text: str,
         "plan_steps": [s.step_id for s in r.execution.steps],
         "parse_cost_usd": r.parsed.cost_usd,
     }
+    # Each line's best candidates, named on `skipped` if the selector then
+    # returns no product for the line.
+    kept_ids = {p.id for p in kept}
+    pool_hints = {
+        ing.line_no: [f"{p.name} (${p.store_price if p.store_price is not None else p.price:.2f})"
+                      for p in r.pools.get(i, []) if p.id in kept_ids and not p.substitute][:3]
+        for i, ing in enumerate(r.recipe.ingredients)}
     return result, state.update(
         recipe=r.recipe, products=kept, origins=origins,
         origin_dropped=dropped, preference=list(preference or []),
@@ -154,8 +243,8 @@ def parse_and_retrieve(state: State, recipe_text: str,
         location={"lat": r.lat, "lon": r.lon, "max_km": r.max_km},
         plan_trace=r.execution.steps, brand_stats=r.brand_stats,
         retrieval_stats=r.stats, not_stocked=r.not_stocked,
-        out_of_range=r.out_of_range, match_levels=r.match_levels,
-        ingredient_count=r.ingredient_count)
+        out_of_range=r.out_of_range, skipped=r.skipped, pool_hints=pool_hints,
+        match_levels=r.match_levels, ingredient_count=r.ingredient_count)
 
 
 @action(reads=["recipe", "products"], writes=["preselect_result"])
@@ -265,11 +354,14 @@ def skip_escalation(state: State) -> tuple[dict, State]:
     return {"escalated": False}, state.update(final_result=state["initial_result"])
 
 
-@action(reads=["final_result", "products"], writes=["trip_options", "plan_trace"])
+@action(reads=["final_result", "products", "recipe", "parsed_input", "location",
+               "plan_trace"],
+        writes=["trip_options", "plan_trace"])
 def optimize_trips(state: State) -> tuple[dict, State]:
     """4A: deterministic split-trip optimizer over the chosen basket.
-    Prices every line at every in-range store (one templated query), then
-    enumerates store subsets with exact travel loops — no LLM. NL path
+    Prices every PURCHASE (group_purchases: a product shared by two lines
+    once, times its packs) at every in-range store (one templated query),
+    then enumerates store subsets with exact travel loops — no LLM. NL path
     only; the classic path has no location and passes straight through."""
     import time as _time
 
@@ -283,8 +375,11 @@ def optimize_trips(state: State) -> tuple[dict, State]:
     loc = state.get("location")
     final: SelectorResult = state["final_result"]
     products_by_id = {p.id: p for p in state["products"]}
-    basket = [(s.product_id, products_by_id[s.product_id].name)
-              for s in final.selections if s.product_id in products_by_id]
+    recipe: Recipe = state["recipe"]
+    purchases, _ = group_purchases(final.selections, products_by_id,
+                                   {i.line_no: i for i in recipe.ingredients},
+                                   _needs(state.get("parsed_input")))
+    basket = [(pu.product.id, pu.product.name) for pu in purchases]
     if loc is None or not basket:
         # Burr requires every declared write; pass the trace through untouched.
         return {"skipped": True}, state.update(
@@ -299,7 +394,8 @@ def optimize_trips(state: State) -> tuple[dict, State]:
 
     options = tripopt.optimize_trips(
         rows, basket, home_lat=loc["lat"], home_lon=loc["lon"],
-        cost_per_km=settings().travel_cost_per_km)
+        cost_per_km=settings().travel_cost_per_km,
+        packs={pu.product.id: pu.packs for pu in purchases})
     best = next((o for o in options if o.recommended), None)
     label = (f"{len(options)} trip options · best: {len(best.stores)} stop(s), "
              f"${best.total_cost:.2f} total"
@@ -315,7 +411,10 @@ def optimize_trips(state: State) -> tuple[dict, State]:
 
 @action(
     reads=["recipe", "products", "final_result", "preselect_result",
-           "escalation_decision", "trip_options"],
+           "escalation_decision", "trip_options", "parsed_input", "origins",
+           "origin_requested", "origin_dropped", "match_levels", "not_stocked",
+           "out_of_range", "skipped", "pool_hints", "ingredient_count",
+           "plan_trace"],
     writes=["plan"],
 )
 def build_plan(state: State) -> tuple[dict, State]:
@@ -332,32 +431,43 @@ def build_plan(state: State) -> tuple[dict, State]:
     # its seeded ingredient names verbatim, which is what "exact" means.
     match_levels = state.get("match_levels") or {}
 
+    parsed = state.get("parsed_input")   # NL path only
+    purchases, unselected = group_purchases(final.selections, products_by_id,
+                                            ingredients_by_line, _needs(parsed))
     line_items: list[PlanLineItem] = []
-    total_cost = 0.0
-    for s in final.selections:
-        prod = products_by_id.get(s.product_id)
-        ing = ingredients_by_line.get(s.line_no)
-        if prod is None or ing is None:
-            # Defensive: the LLM referenced a product_id or line_no we
-            # don't have. Skip; downstream can flag/re-run.
-            continue
-        charged = prod.store_price if prod.store_price is not None else prod.price
+    for pu in purchases:
+        prod = pu.product
+        sels = [sel for sel, _ in pu.lines]
+        first, others = sels[0], sels[1:]
+        reasoning = first.reasoning + "".join(
+            f" | line {sel.line_no}: {sel.reasoning}" for sel in others)
         line_items.append(PlanLineItem(
-            line_no=s.line_no,
-            ingredient_name=ing.name,
+            line_no=first.line_no,
+            ingredient_name=" + ".join(ing.name for _, ing in pu.lines),
             product_id=prod.id,
             product_name=prod.name,
             product_description=prod.description,
-            price=charged,
-            confidence=s.confidence,
-            reasoning=s.reasoning,
+            price=round(pu.unit_price * pu.packs, 2),
+            confidence=min(sel.confidence for sel in sels),
+            reasoning=reasoning,
             model_used=final.model_used,
             store_name=prod.store_name,
             store_price=prod.store_price,
             origin=origins_mod.origin_receipt(origins_map.get(prod.id)),
-            match=match_levels.get(s.line_no, "exact"),
+            # the loosest level among the lines, so a generic one is never hidden
+            match=max((match_levels.get(sel.line_no, "exact") for sel in sels),
+                      key=_MATCH_ORDER.__getitem__),
+            also_lines=[sel.line_no for sel in others],
+            packs=pu.packs,
         ))
-        total_cost += charged
+    total_cost = sum(li.price for li in line_items)
+    # A line the selector left without a valid product is reported, never
+    # silently dropped: every ingredient lands somewhere on the plan.
+    pool_hints = state.get("pool_hints") or {}
+    skipped = list(state.get("skipped") or []) + [
+        DroppedIngredient(ingredient=ing.name, reason=why,
+                          suggestions=pool_hints.get(ing.line_no, []))
+        for ing, why in unselected]
 
     # Coverage is an answer to an origin question. Computing it for every
     # plan stamped "UNVERIFIED" on baskets nobody asked about, which made the
@@ -371,7 +481,6 @@ def build_plan(state: State) -> tuple[dict, State]:
             excluded_lines=len(state.get("origin_dropped") or []))
         origin_status = "verified" if coverage.meets_floor else "unverified"
 
-    parsed = state.get("parsed_input")   # NL path only
     plan = ShoppingPlan(
         recipe_slug=recipe.slug,
         recipe_name=recipe.name,
@@ -393,6 +502,7 @@ def build_plan(state: State) -> tuple[dict, State]:
         trip_options=state.get("trip_options") or [],
         not_stocked=state.get("not_stocked") or [],
         out_of_range=state.get("out_of_range") or [],
+        skipped=skipped,
         ingredient_count=state.get("ingredient_count") or len(recipe.ingredients),
     )
     return {"total_cost": plan.total_cost, "n_line_items": len(plan.line_items)}, \

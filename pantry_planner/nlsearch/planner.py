@@ -17,10 +17,18 @@ miss is reported in `not_stocked`, a t2 miss in `out_of_range`, and the
 plan prices what remains. Only when nothing remains does the gate abort as
 before. The budget gate is a basket-level verdict and always aborts.
 
-Matching runs at three levels, each tried only when the one before found
-nothing in the catalog: exact (every token, purchase form included), form
-(the form dropped) and generic (descriptor words dropped too — "light brown
-sugar" -> brown sugar; units.DESCRIPTORS). The level is reported per line.
+Some lines are never retrieved at all and land in `skipped`, whatever
+allow_partial says: non-purchases (water, ice; units.NON_PURCHASES), which
+are never priced, and ingredients past the parser's 40-ingredient cap. So
+every parsed ingredient is in exactly one of: the planned recipe,
+not_stocked, out_of_range, skipped.
+
+Matching runs at four levels, each tried only when the one before found
+nothing in the catalog: exact (every token, purchase form included),
+equivalent form (powder/ground swapped — "cumin powder" -> Cumin Ground),
+form (the form dropped) and generic (descriptor words dropped too — "light
+brown sugar" -> brown sugar; units.DESCRIPTORS). The level is reported per
+line; the two middle levels both report "form".
 """
 from __future__ import annotations
 
@@ -42,8 +50,14 @@ from .schemas import ParsedInput, RecipeSpec, RetrievalStats
 from .sql_builder import (PER_INGREDIENT_LIMIT, THIN_POOL, build_existence_sql,
                           build_options_sql,
                           build_stats_sql, build_substitute_sql,
-                          build_suggestions_sql, inline_for_display)
+                          build_suggestions_sql, build_token_suggestions_sql,
+                          inline_for_display)
+from .units import DESCRIPTORS, PURCHASE_FORMS, head_noun, is_non_purchase, tokens
 from .vocab import db_vocab
+
+# Reasons on `skipped` entries.
+NOT_BOUGHT = "not bought: water and ice are never priced"
+OVER_CAP = "over the 40-ingredient cap: not planned"
 
 
 class UnparseableRecipe(Exception):
@@ -74,9 +88,11 @@ class PlanRunResult:
     # allow_partial drops (empty unless allow_partial=True dropped something)
     not_stocked: list[DroppedIngredient] = field(default_factory=list)
     out_of_range: list[DroppedIngredient] = field(default_factory=list)
+    # never retrieved: non-purchases and lines past the 40-ingredient cap
+    skipped: list[DroppedIngredient] = field(default_factory=list)
     # recipe line_no -> "exact" | "form" | "generic" for every planned line
     match_levels: dict[int, str] = field(default_factory=dict)
-    ingredient_count: int = 0                  # parsed ingredients, before drops
+    ingredient_count: int = 0                  # ingredients in the recipe, before drops
 
 
 def _slugify(title: str) -> str:
@@ -203,20 +219,36 @@ def _offer_text(p: Product) -> str:
     return f"{p.name} at {p.store_name} (${p.store_price:.2f}, {p.distance_km} km)"
 
 
+def _outside(p: Product, c, max_km: float | None) -> str:
+    """Which limit an offer breaks — the knob that would bring it in."""
+    broken = []
+    if max_km is not None and p.distance_km is not None and p.distance_km > max_km:
+        broken.append(f"beyond the {max_km:g} km limit")
+    if (c.max_item_price is not None and p.store_price is not None
+            and p.store_price > c.max_item_price):
+        broken.append(f"over the ${c.max_item_price:.2f} per-item price cap")
+    return " and ".join(broken)
+
+
 def _attribute(s: Session, c, ingredients, empty: list[int], relaxed: set[int],
-               generic: set[int], lat: float, lon: float) -> list[dict]:
+               generic: set[int], lat: float, lon: float,
+               max_km: float | None = None,
+               equivalent: set[int] | None = None) -> list[dict]:
     """Constraint attribution for t2 misses: the same template with the
     distance and price caps stripped, each product pinned to its NEAREST
     store. Anything that reappears was located or priced out, not missing
-    (t1 already proved it exists); the reason names the nearest such offer,
-    the suggestions the next ones. Nothing reappearing means the diet or
+    (t1 already proved it exists); the reason names the nearest such offer
+    and which limit it breaks (distance, price cap or both), the
+    suggestions the next ones. Nothing reappearing means the diet or
     category filters exclude every match."""
+    equivalent = equivalent or set()
     probe_ings = [ingredients[n] for n in empty]
     probe_c = c.model_copy(update={"max_item_price": None})
     sql, params = build_options_sql(
         probe_c, probe_ings, {i for i, n in enumerate(empty) if n in relaxed},
         lat, lon, None, per_ingredient_limit=10_000,
         generic={i for i, n in enumerate(empty) if n in generic},
+        equivalent={i for i, n in enumerate(empty) if n in equivalent},
         nearest_store=True)
     probe: dict[int, list[Product]] = {}
     for row in s.execute(text(sql), params).mappings():
@@ -226,8 +258,9 @@ def _attribute(s: Session, c, ingredients, empty: list[int], relaxed: set[int],
         alt = sorted(probe.get(n, []),
                      key=lambda p: (p.distance_km, p.store_price, p.id))
         if alt:
+            why = _outside(alt[0], c, max_km)
             reason = ("available only outside the constraints — nearest: "
-                      + _offer_text(alt[0]))
+                      + _offer_text(alt[0]) + (f", {why}" if why else ""))
             suggestions = [_offer_text(p) for p in alt[1:4]]
         else:
             reason, suggestions = "no offer passes the dietary/category constraints", []
@@ -236,12 +269,52 @@ def _attribute(s: Session, c, ingredients, empty: list[int], relaxed: set[int],
     return details
 
 
+# Words too common or too vague to make a product "related" on their own: a
+# not_stocked "brown rice" must not be offered Brown Sugar for sharing
+# "brown", nor "Kashmiri chili powder" Baking Powder for sharing "powder".
+# They still break ties between products that share a strong word.
+WEAK_SUGGESTION_WORDS = DESCRIPTORS | PURCHASE_FORMS | {
+    "red", "green", "white", "black", "yellow", "orange", "brown", "golden",
+    "purple", "sweet", "hot", "mild", "spicy", "plain", "pure", "powder",
+}
+
+
+def _related(s: Session, name: str, catalog_size: int, limit: int = 3) -> list[str]:
+    """Products sharing a strong word with a not-stocked ingredient, best
+    first: the summed rarity (log N/df) of the strong words they share; then
+    whether the product is ABOUT the ingredient's head noun ("brown rice":
+    Basmati Rice before Rice Vinegar); then weak shared words; then price.
+    [] when no product shares a strong word."""
+    toks = list(dict.fromkeys(tokens(name)))
+    strong = {t for t in toks if t not in WEAK_SUGGESTION_WORDS}
+    if not strong:
+        return []
+    head = toks[-1]
+    sql, params = build_token_suggestions_sql(toks)
+    scored: dict[int, list] = {}         # id -> [strong score, head miss, weak hits, price, name]
+    for r in s.execute(text(sql), params).mappings():
+        row = scored.setdefault(r["id"], [0.0, int(head_noun(r["name"]) != head), 0,
+                                          r["price"], r["name"]])
+        if r["term"] in strong:
+            row[0] += math.log(max(catalog_size, 1) / max(r["df"], 1)) + 1e-6
+        else:
+            row[2] += 1
+    best = sorted((v for v in scored.values() if v[0] > 0),
+                  key=lambda v: (-round(v[0], 6), v[1], -v[2], v[3], v[4]))
+    return [f"{name_} (${price:.2f})" for *_k, price, name_ in best[:limit]]
+
+
 def _missing_details(s: Session, ingredients, missing: list[int]) -> list[dict]:
+    """not_stocked entries. Suggestions are products related to the
+    ingredient by a shared word (see _related); only when nothing shares one
+    do they fall back to the cheapest products of the parser's category
+    hint, which names an aisle, not the ingredient."""
+    catalog_size = s.execute(text("SELECT COUNT(*) FROM products")).scalar_one()
     details = []
     for n in missing:
         ing = ingredients[n]
-        suggestions: list[str] = []
-        if ing.category_hint:
+        suggestions = _related(s, ing.name, catalog_size)
+        if not suggestions and ing.category_hint:
             sg_sql, sg_params = build_suggestions_sql(ing.category_hint.lower())
             suggestions = [f"{r['name']} (${r['price']:.2f})"
                            for r in s.execute(text(sg_sql), sg_params).mappings()]
@@ -265,34 +338,57 @@ def execute_plan(parsed: ParsedInput, plan: QueryPlan, *,
     execution = PlanExecution()
     not_stocked: list[DroppedIngredient] = []
     out_of_range: list[DroppedIngredient] = []
+    # Never retrieved, whatever allow_partial says: what nobody buys, and
+    # what the parser's 40-ingredient cap cut (validate_parsed).
+    skipped = [DroppedIngredient(ingredient=ing.name, reason=NOT_BOUGHT)
+               for ing in every if is_non_purchase(ing.name)]
+    skipped += [DroppedIngredient(ingredient=ing.name, reason=OVER_CAP)
+                for ing in parsed.over_cap]
+    # positions into the recipe as written that retrieval sees
+    buyable = [n for n in range(len(every)) if not is_non_purchase(every[n].name)]
+    if not buyable:
+        _abort(execution, PlanAlert(
+            stage="t1_existence", code=GateCode.missing_ingredients,
+            message=("Nothing to buy: " + ", ".join(ing.name for ing in every)
+                     + " — water and ice are never bought."),
+            details=[{"name": d.ingredient, "reason": d.reason, "suggestions": []}
+                     for d in skipped], partial_would_plan=0))
 
     with Session(db.engine()) as s:
-        # ── t1: existence probe (exact -> form -> generic) ──
-        sql, params = build_existence_sql(every)
+        # ── t1: existence probe (exact -> equivalent form -> form -> generic) ──
+        probed = [every[n] for n in buyable]
+        sql, params = build_existence_sql(probed)
         rows, ms = _timed(s, sql, params)
-        counts = {r["ing_no"]: (r["strict_matches"], r["relaxed_matches"],
-                                r["generic_matches"]) for r in rows}
-        level: dict[int, str] = {}
-        for n in range(len(every)):
-            strict, rel, gen = counts.get(n, (0, 0, 0))
+        counts = {buyable[r["ing_no"]]: (r["strict_matches"], r["equivalent_matches"],
+                                         r["relaxed_matches"], r["generic_matches"])
+                  for r in rows if r["ing_no"] >= 0}
+        how: dict[int, str] = {}                # recipe position -> term level
+        for n in buyable:
+            strict, eqv, rel, gen = counts.get(n, (0, 0, 0, 0))
             if strict:
-                level[n] = "exact"
+                how[n] = "exact"
+            elif eqv:
+                how[n] = "equivalent"
             elif rel:
-                level[n] = "form"
+                how[n] = "relaxed"
             elif gen:
-                level[n] = "generic"
-        missing = [n for n in range(len(every)) if n not in level]
-        drop_missing = allow_partial and bool(missing) and len(missing) < len(every)
+                how[n] = "generic"
+        level = {n: {"exact": "exact", "generic": "generic"}.get(h, "form")
+                 for n, h in how.items()}
+        missing = [n for n in buyable if n not in level]
+        drop_missing = allow_partial and bool(missing) and len(missing) < len(buyable)
         n_form = sum(1 for v in level.values() if v == "form")
         n_generic = sum(1 for v in level.values() if v == "generic")
+        not_bought = len(every) - len(buyable)
         execution.steps.append(StepResult(
             step_id="t1_existence", kind=StepKind.existence,
             sql_display=inline_for_display(sql, params),
             row_count=len(rows), duration_ms=ms,
             outcome="aborted" if missing and not drop_missing else "ok",
-            label=(f"{len(every) - len(missing)}/{len(every)} ingredients stocked"
+            label=(f"{len(buyable) - len(missing)}/{len(buyable)} ingredients stocked"
                    + (f" ({n_form} via form relaxation)" if n_form else "")
                    + (f" ({n_generic} via generic match)" if n_generic else "")
+                   + (f"; {not_bought} not bought (water/ice)" if not_bought else "")
                    + (f"; {len(missing)} not stocked, dropped (allow_partial)"
                       if drop_missing else ""))))
         if missing:
@@ -303,21 +399,24 @@ def execute_plan(parsed: ParsedInput, plan: QueryPlan, *,
                     message=("We don't stock: "
                              + ", ".join(every[n].name for n in missing)
                              + ". Remove or substitute them and retry."),
-                    details=details))
+                    details=details,
+                    partial_would_plan=len(buyable) - len(missing)))
             not_stocked = _dropped(details)
 
         # `alive`: positions into the recipe as written that are still being
         # planned. Every index below (pools, t2 rows) is into `ingredients`,
         # the alive subset in recipe order.
-        alive = [n for n in range(len(every)) if n in level]
+        alive = [n for n in buyable if n in level]
         ingredients = [every[n] for n in alive]
-        relaxed = {i for i, n in enumerate(alive) if level[n] == "form"}
-        generic = {i for i, n in enumerate(alive) if level[n] == "generic"}
+
+        def at(kind: str) -> set[int]:
+            return {i for i, n in enumerate(alive) if how[n] == kind}
+        relaxed, generic, equivalent = at("relaxed"), at("generic"), at("equivalent")
 
         # ── t2: options under constraints ──
         sql, params = build_options_sql(c, ingredients, relaxed, lat, lon, max_km,
                                         per_ingredient_limit=per_ingredient_limit,
-                                        generic=generic)
+                                        generic=generic, equivalent=equivalent)
         rows, ms = _timed(s, sql, params)
         pools: dict[int, list[Product]] = {}
         for row in rows:
@@ -333,7 +432,8 @@ def execute_plan(parsed: ParsedInput, plan: QueryPlan, *,
                    + (f"; {len(empty)} with no offer within the constraints, "
                       "dropped (allow_partial)" if drop_empty else ""))))
         if empty:
-            details = _attribute(s, c, ingredients, empty, relaxed, generic, lat, lon)
+            details = _attribute(s, c, ingredients, empty, relaxed, generic, lat, lon,
+                                 max_km=max_km, equivalent=equivalent)
             if not drop_empty:
                 # Nothing left to plan: the gate aborts as it always has, and
                 # anything t1 already dropped is named too, so the alert
@@ -343,12 +443,9 @@ def execute_plan(parsed: ParsedInput, plan: QueryPlan, *,
                     message=("No options within the current constraints for: "
                              + ", ".join(ingredients[i].name for i in empty)
                              + ". Widen the distance/budget or relax a filter."
-                             + (" Not stocked at all: "
-                                + ", ".join(d.ingredient for d in not_stocked) + "."
-                                if not_stocked else "")),
-                    details=details + [
-                        {"name": d.ingredient, "reason": d.reason,
-                         "suggestions": d.suggestions} for d in not_stocked]))
+                             + _left_out(not_stocked, [])),
+                    details=details + _as_details(not_stocked),
+                    partial_would_plan=len(ingredients) - len(empty)))
             out_of_range = _dropped(details)
             keep = [i for i in range(len(ingredients)) if i not in set(empty)]
             pools = {j: pools[i] for j, i in enumerate(keep)}
@@ -360,15 +457,19 @@ def execute_plan(parsed: ParsedInput, plan: QueryPlan, *,
             floor = sum(min(p.store_price for p in pool) for pool in pools.values())
             if floor > c.max_total_budget:
                 execution.steps[-1].outcome = "aborted"
+                # A partial plan cannot fix a budget, so this aborts even with
+                # allow_partial — and names what was already left out, so the
+                # alert still accounts for every ingredient.
                 _abort(execution, PlanAlert(
                     stage="t2_options", code=GateCode.budget_infeasible,
                     message=(f"Cheapest possible basket is ${floor:.2f} — over the "
                              f"${c.max_total_budget:.2f} budget. Raise the budget or "
-                             "trim the recipe."),
+                             "trim the recipe." + _left_out(not_stocked, out_of_range)),
                     details=[{"name": ingredients[n].name,
                               "reason": f"cheapest option ${min(p.store_price for p in pool):.2f}",
                               "suggestions": []}
-                             for n, pool in sorted(pools.items())]))
+                             for n, pool in sorted(pools.items())]
+                    + _as_details(not_stocked) + _as_details(out_of_range)))
 
         # ── t3: per-brand statistics over the pooled products ──
         pool_ids = sorted({p.id for pool in pools.values() for p in pool})
@@ -425,8 +526,26 @@ def execute_plan(parsed: ParsedInput, plan: QueryPlan, *,
                          stats=stats, parsed=parsed, execution=execution,
                          brand_stats=brand_stats, lat=lat, lon=lon, max_km=max_km,
                          not_stocked=not_stocked, out_of_range=out_of_range,
+                         skipped=skipped,
                          match_levels={n + 1: level[n] for n in alive},
-                         ingredient_count=len(every))
+                         ingredient_count=len(every) + len(parsed.over_cap))
+
+
+def _as_details(dropped: list[DroppedIngredient]) -> list[dict]:
+    return [{"name": d.ingredient, "reason": d.reason, "suggestions": d.suggestions}
+            for d in dropped]
+
+
+def _left_out(not_stocked: list[DroppedIngredient],
+              out_of_range: list[DroppedIngredient]) -> str:
+    """The alert sentence naming ingredients a gate's predecessors dropped."""
+    out = ""
+    if not_stocked:
+        out += " Not stocked at all: " + ", ".join(d.ingredient for d in not_stocked) + "."
+    if out_of_range:
+        out += (" No offer within the constraints: "
+                + ", ".join(d.ingredient for d in out_of_range) + ".")
+    return out
 
 
 def run_query_plan(text_input: str, *, parsed: ParsedInput | None = None,

@@ -303,12 +303,17 @@ class DroppedIngredient(BaseModel):
 
 
 class PlanLineItem(BaseModel):
+    """One PURCHASE. Recipe lines that resolve to the same product are one
+    purchase: `line_no` is the first of them, `also_lines` the rest,
+    `ingredient_name` names every one ("ground Sichuan peppercorn + Sichuan
+    peppercorn"), and `packs` is how many packs their summed need takes
+    (1 unless the need is known in the pack's unit and one pack is short)."""
     line_no: int
     ingredient_name: str
     product_id: int
     product_name: str
     product_description: str
-    price: float                       # the charged price (store offer when known)
+    price: float                       # the charged price: store offer x packs
     confidence: float
     reasoning: str
     model_used: str
@@ -317,7 +322,9 @@ class PlanLineItem(BaseModel):
     store_price: float | None = None
     # Provenance of this line, when origin evidence exists for it
     origin: OriginReceipt | None = None
-    match: MatchLevel = "exact"
+    match: MatchLevel = "exact"        # the loosest level among the lines it covers
+    also_lines: list[int] = Field(default_factory=list)
+    packs: int = 1
 
 
 class ShoppingPlan(BaseModel):
@@ -347,11 +354,16 @@ class ShoppingPlan(BaseModel):
     # Partial plans (NL path, allow_partial=True): ingredients left out
     # instead of aborting. not_stocked = the catalog has no match at all (t1);
     # out_of_range = stocked, but no offer within the distance/price/diet
-    # constraints (t2). total_cost, origin_coverage and trip_options cover
-    # the planned line_items only. ingredient_count is how many ingredients
-    # the recipe asked for, before anything was dropped.
+    # constraints (t2). skipped = never planned, whatever allow_partial says:
+    # water and ice (never bought), lines past the 40-ingredient cap, and
+    # lines the selector returned no valid product for. total_cost,
+    # origin_coverage and trip_options cover the planned line_items only.
+    # ingredient_count is how many ingredients the recipe asked for, before
+    # anything was dropped: the lines covered by line_items (line_no plus
+    # also_lines) + not_stocked + out_of_range + skipped == ingredient_count.
     not_stocked: list[DroppedIngredient] = Field(default_factory=list)
     out_of_range: list[DroppedIngredient] = Field(default_factory=list)
+    skipped: list[DroppedIngredient] = Field(default_factory=list)
     ingredient_count: int = 0
 
 

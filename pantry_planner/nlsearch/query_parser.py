@@ -18,6 +18,7 @@ from ..config import estimate_cost_usd, settings
 from .schemas import Constraints, IngredientSpec, ParsedInput, RecipeSpec
 
 ALLOWED_TAGS = {"dairy", "gluten", "meat", "nuts", "egg", "soy"}
+MAX_INGREDIENTS = 40
 ALLOWED_FORMS = {"canned", "frozen", "dried", "ground", "smoked", "pickled", "powdered"}
 
 PARSER_SYSTEM = """\
@@ -27,16 +28,27 @@ planner. Extract TWO things via the submit_parse tool:
 1. recipe — title, servings, and the ingredient list. Normalize each
    ingredient:
    * name: the PRODUCT to buy — no quantities, no units, no prep words.
-     When a form IS the product, keep the compound name ("tomato sauce",
-     "ground beef").
+     KEEP every word the recipe wrote that changes WHICH product is bought:
+     boneless, skinless, bone-in, whole, unsalted, salted, smoked,
+     low-sodium, extra-virgin, light/dark, toasted, and the variety
+     (Sichuan, basmati, Kashmiri). "1 lb boneless skinless chicken thighs"
+     -> name "boneless skinless chicken thigh", NOT "chicken thigh": a
+     bone-in thigh is a different product. Never add a word the recipe did
+     not write. When a form IS the product, keep the compound name
+     ("tomato sauce", "ground beef").
    * form: a PURCHASE form only if the shelf product differs:
      canned/frozen/dried/ground/smoked/pickled/powdered.
-     "canned tomatoes" -> name "tomato", form "canned".
-   * prep: what the COOK does (mashed/diced/shredded/minced) — record it,
-     but it must NOT stay in name. "mashed potatoes" -> name "potato",
-     prep "mashed" (you buy fresh potatoes to mash).
+     "canned tomatoes" -> name "tomato", form "canned";
+     "ground Sichuan peppercorns" -> name "Sichuan peppercorn", form
+     "ground". Never drop a written form: ground and whole peppercorns are
+     different products.
+   * prep: what the COOK does (mashed/diced/shredded/minced/sliced/chopped)
+     — record it, but it must NOT stay in name. "mashed potatoes" -> name
+     "potato", prep "mashed" (you buy fresh potatoes to mash).
    * quantity + unit exactly as written ("400g" -> 400, "g").
    * category_hint: your best guess from the known vocabulary below.
+   * water and ice: list them like any other line (name "water"); the
+     planner knows they are never bought.
 
 2. constraints — budget/dietary/scope filters from the notes or title:
    * "no dairy" (dietary) -> exclude_tags ["dairy"]  (strictest reading)
@@ -91,6 +103,15 @@ E) "Baking day! 2.5kg all-purpose flour, dozen eggs, 454g butter,
 
 F) "Grilled cheese x2 — bread, cheddar, butter" (no notes)
    -> three ingredients, no constraints at all (all fields null/empty).
+
+G) "Mala chicken (serves 4)\\n- 1 lb boneless skinless chicken thighs, cubed
+   \\n- 1 tsp ground Sichuan peppercorns\\n- 2 tsp Sichuan peppercorns
+   \\n- 3/4 cup water"
+   -> {{name "boneless skinless chicken thigh", prep "cubed", quantity 1,
+        unit "lb", category_hint "poultry"}},
+      {{name "Sichuan peppercorn", form "ground", quantity 1, unit "tsp"}},
+      {{name "Sichuan peppercorn", quantity 2, unit "tsp"}},
+      {{name "water", quantity 0.75, unit "cup"}}
 """
 
 _ING_SCHEMA = {
@@ -221,9 +242,11 @@ def validate_parsed(parsed: ParsedInput, vocab: dict[str, str]) -> ParsedInput:
     parsed.recipe.servings = max(1, parsed.recipe.servings)
     # Public-endpoint bound: cap the plan at 40 ingredients (keeps the
     # VALUES rowsets well under SQLite's parameter limit). Surfaced, not
-    # silent — the dropped count lands in the interpretation chips.
-    if len(parsed.recipe.ingredients) > 40:
-        dropped = len(parsed.recipe.ingredients) - 40
-        parsed.recipe.ingredients = parsed.recipe.ingredients[:40]
-        parsed.ignored.append(f"{dropped} ingredients over the 40-ingredient cap")
+    # silent — the dropped count lands in the interpretation chips and the
+    # dropped ingredients, by name, on the plan's `skipped` list.
+    if len(parsed.recipe.ingredients) > MAX_INGREDIENTS:
+        parsed.over_cap = parsed.recipe.ingredients[MAX_INGREDIENTS:]
+        parsed.recipe.ingredients = parsed.recipe.ingredients[:MAX_INGREDIENTS]
+        parsed.ignored.append(f"{len(parsed.over_cap)} ingredients over the "
+                              f"{MAX_INGREDIENTS}-ingredient cap")
     return parsed
