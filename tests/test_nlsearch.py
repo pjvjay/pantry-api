@@ -117,10 +117,12 @@ def test_existence_sql_shape_and_binding():
     assert "strict_matches" in sql and "relaxed_matches" in sql
     assert params["i0t0"] == "canned" and params["i0t1"] == "tomato"
     assert params["i1t0"] == "spaghetti"
-    # form token is strict-only: base flag 0 in the VALUES rowset; neither
-    # name has a descriptor word to drop, so no row carries the generic flag
-    assert "(0, :i0t0, 0, 0)" in sql and "(0, :i0t1, 1, 0)" in sql
-    assert "(0, 1, 2, 0)" in sql and "(1, 1, 1, 0)" in sql   # n_base, n_all, n_gen
+    # rows are (ing_no, term, strict, base, gen, eqv): the form token is
+    # strict-only; neither name has a descriptor to drop or a form word with
+    # an equivalent, so no row carries the gen or eqv flag
+    assert "(0, :i0t0, 1, 0, 0, 0)" in sql and "(0, :i0t1, 1, 1, 0, 0)" in sql
+    # counts are (ing_no, n_all, n_base, n_gen, n_eqv)
+    assert "(0, 2, 1, 0, 0)" in sql and "(1, 1, 1, 0, 0)" in sql
 
 
 def test_existence_sql_flags_generic_terms():
@@ -131,10 +133,37 @@ def test_existence_sql_flags_generic_terms():
 
     sql, params = build_existence_sql([IngredientSpec(name="light soy sauce")])
     assert [params["i0t0"], params["i0t1"], params["i0t2"]] == ["light", "soy", "sauce"]
-    assert "(0, :i0t0, 1, 0)" in sql                   # light: base, not generic
-    assert "(0, :i0t1, 1, 1)" in sql and "(0, :i0t2, 1, 1)" in sql
-    assert "(0, 3, 3, 2)" in sql                       # 2 generic tokens to match
+    assert "(0, :i0t0, 1, 1, 0, 0)" in sql             # light: base, not generic
+    assert "(0, :i0t1, 1, 1, 1, 0)" in sql and "(0, :i0t2, 1, 1, 1, 0)" in sql
+    assert "(0, 3, 3, 2, 0)" in sql                    # 2 generic tokens to match
     assert "generic_matches" in sql
+
+
+def test_existence_sql_flags_equivalent_form_terms():
+    """"cumin powder": the equivalent level swaps powder for ground, so it
+    needs cumin + ground; "powder" is strict-only and "ground" eqv-only."""
+    from pantry_planner.nlsearch.schemas import IngredientSpec
+    from pantry_planner.nlsearch.sql_builder import build_existence_sql
+
+    sql, params = build_existence_sql([IngredientSpec(name="cumin powder")])
+    assert [params["i0t0"], params["i0t1"], params["i0t2"]] == ["cumin", "powder", "ground"]
+    assert "(0, :i0t0, 1, 1, 0, 1)" in sql             # cumin: every level but generic
+    assert "(0, :i0t1, 1, 1, 0, 0)" in sql             # powder: not at the eqv level
+    assert "(0, :i0t2, 0, 0, 0, 1)" in sql             # ground: only the eqv level
+    assert "(0, 2, 2, 0, 2)" in sql and "equivalent_matches" in sql
+
+
+def test_a_form_word_repeated_in_the_name_is_counted_once():
+    """Parsed as name "ground Sichuan peppercorn" AND form "ground", the
+    strict level must need "ground" once: token-AND compares distinct hits
+    with the term count, and a duplicate made it unmatchable."""
+    from pantry_planner.nlsearch.schemas import IngredientSpec
+
+    r = _run(_parsed(ingredients=[IngredientSpec(name="ground Sichuan peppercorn",
+                                                 form="ground")]))
+    assert r.match_levels == {1: "exact"}
+    assert [p.name for p in r.pools[0] if not p.substitute] == \
+        ["Sichuan Peppercorns Ground 40g"]
 
 
 def test_options_sql_patterns_and_binding():
@@ -330,15 +359,36 @@ def test_regression_condiment_quantities_do_not_abort_t2():
 
 def test_size_cap_still_drops_catering_packs_when_a_fitting_pack_exists():
     """50 g ground beef: the 300 g pack is within 6x, so 450 g and 900 g stay
-    out. 50 ml olive oil: 500 ml is the smallest bottle (exempt), the 1 L
-    one is still a catering pack."""
+    out. 50 ml olive oil: no bottle is within 6x (300 ml), so the cap scales
+    to the smallest bottle — 500 ml and 1 L (within 6 x 500 ml) both stay,
+    ranked by price because neither fits the need any better."""
     from pantry_planner.nlsearch.schemas import IngredientSpec
 
     r = _run(_parsed(ingredients=[
         IngredientSpec(name="ground beef", quantity=50, unit="g"),
         IngredientSpec(name="olive oil", quantity=50, unit="ml")]))
     assert [p.name for p in r.pools[0] if not p.substitute] == ["Ground Beef Extra Lean 300g"]
-    assert [p.name for p in r.pools[1] if not p.substitute] == ["Extra Virgin Olive Oil 500ml"]
+    assert [p.name for p in r.pools[1] if not p.substitute] == \
+        ["Extra Virgin Olive Oil 500ml", "Olive Oil 1L"]
+
+
+@pytest.mark.parametrize("name,qty,unit,cheapest", [
+    # every salt box is over 6 x 5 g: Table Salt 1kg ($1.46) is the cheapest,
+    # and the smallest-pack-only rule kept just Fine Sea Salt 750g ($3.22)
+    ("salt", 5, "g", "Table Salt 1kg"),
+    ("salt", 1, "tsp", "Table Salt 1kg"),
+    # 2 tbsp of any oil: every bottle is over 180 ml; the cheapest neutral oil
+    # leads, not the 250 ml sesame oil that used to be the only candidate
+    ("oil", 2, "tbsp", "Canola Oil 1L"),
+    ("vinegar", 2, "tbsp", "White Vinegar 1L"),
+])
+def test_when_no_pack_fits_the_need_the_cheapest_pack_leads(name, qty, unit, cheapest):
+    from pantry_planner.nlsearch.schemas import IngredientSpec
+
+    r = _run(_parsed(ingredients=[IngredientSpec(name=name, quantity=qty, unit=unit)]))
+    direct = [p for p in r.pools[0] if not p.substitute]
+    assert direct[0].name == cheapest
+    assert direct[0].store_price == min(p.store_price for p in direct)
 
 
 # ─── gate: missing_ingredients ───────────────────────────────
@@ -473,8 +523,9 @@ def test_thin_pool_gets_labeled_substitutes():
 # ─── efficiency layer ────────────────────────────────────────
 
 def test_product_terms_tokenizer_parity():
-    """The DB's precomputed terms must equal the parser's tokenizer output —
-    guards the KEEP-IN-SYNC duplicate in pantry-db's gen-seed-sql.py. Every
+    """The DB's precomputed terms must equal the parser's tokenizer output
+    (units.index_text: name + description, negated words cut). pantry-db's
+    KEEP-IN-SYNC copy is held to the GOLDEN_TERMS table below. Every
     product, not a sample: the catalog grows by copying pantry-db's seed
     (pjvjay/pantry-api#22), and a new row ("Jalapeno", "Whipping Cream
     35%") is where a tokenizer edge case would first show."""
@@ -482,7 +533,7 @@ def test_product_terms_tokenizer_parity():
     from sqlalchemy.orm import Session
 
     from pantry_planner import db
-    from pantry_planner.nlsearch.units import tokens
+    from pantry_planner.nlsearch.units import index_text, tokens
     from tests.seed_catalog import CATALOG
 
     with Session(db.engine()) as s:
@@ -492,7 +543,36 @@ def test_product_terms_tokenizer_parity():
             db_terms.setdefault(pid, set()).add(term)
     assert len(rows) == CATALOG
     for pid, name, desc in rows:
-        assert db_terms.get(pid) == set(tokens(f"{name} {desc}")), name
+        assert db_terms.get(pid) == set(tokens(index_text(name, desc))), name
+
+
+# pantry-db's scripts/gen-seed-sql.py holds this table verbatim (GOLDEN_TERMS)
+# and asserts it on every run, so its tokenizer copy and this one agree on
+# the cases that matter: irregular plurals, negated description words, and
+# what must NOT change (olives/cloves/chives, "dairy-free", the split "ñ").
+GOLDEN_TERMS = [
+    (("Bay Leaves 10g", "Dried whole bay leaves, 10g bag"),
+     ["bag", "bay", "dried", "leaf", "whole"]),
+    (("Olives", "Cloves, chives, two loaves and halves"),
+     ["and", "chive", "clove", "half", "loaf", "olive", "two"]),
+    (("Roma Tomato", "Fresh Roma tomatoes, 500g pack"), ["pack", "roma", "tomato"]),
+    (("Crushed Tomatoes Canned 796ml", "Canned crushed tomatoes, no salt added, 796ml"),
+     ["canned", "crushed", "ml", "tomato"]),
+    (("Canadian Peanut Butter Cream", "Smooth peanut butter, no jelly, 500g"),
+     ["butter", "canadian", "cream", "peanut", "smooth"]),
+    (("Oat Milk 1L", "Unsweetened oat beverage, dairy-free, 1L carton"),
+     ["beverage", "carton", "dairy", "free", "milk", "oat", "unsweetened"]),
+    (("Jalapeno Peppers", "Fresh jalapeño peppers (jalapeños, jalapenos), ~200g"),
+     ["jalape", "jalapeno", "os", "pepper"]),
+]
+
+
+@pytest.mark.parametrize("product,terms", GOLDEN_TERMS)
+def test_tokenizer_golden_cases_shared_with_pantry_db(product, terms):
+    from pantry_planner.storeseed import product_terms
+
+    name, description = product
+    assert product_terms({"name": name, "description": description}) == terms
 
 
 def test_single_pass_matches_naive_reference():
@@ -508,10 +588,12 @@ def test_single_pass_matches_naive_reference():
     ings = [IngredientSpec(name="rice"),
             IngredientSpec(name="ground beef", quantity=225, unit="g"),
             IngredientSpec(name="cheddar"),
-            # every pack > 6x the need: the smallest one stays admissible
+            # every pack > 6x the need: packs within 6x the smallest stay
             IngredientSpec(name="soy sauce", quantity=1, unit="tbsp"),
-            # the 500 ml bottle is the smallest; the 1 L one is still capped
-            IngredientSpec(name="olive oil", quantity=50, unit="ml")]
+            # no bottle within 6x 50 ml: 500 ml and 1 L both stay, by price
+            IngredientSpec(name="olive oil", quantity=50, unit="ml"),
+            # 50 g ground beef: the 300 g pack fits, so 450 g / 900 g are capped
+            IngredientSpec(name="ground beef", quantity=50, unit="g")]
     r = _run(_parsed(ingredients=ings))
 
     with Session(db.engine()) as s:
@@ -533,23 +615,27 @@ def test_single_pass_matches_naive_reference():
         offers = []
         for pid in matched:
             p = products[pid]
-            if (need and p.unit_qty is not None and p.unit_uom == need[1]
-                    and p.unit_qty > need[0] * 6 and p.unit_qty > smallest):
-                continue                               # size cap, smallest exempt
+            sized = need and p.unit_qty is not None and p.unit_uom == need[1]
+            fits = sized and p.unit_qty <= need[0] * 6
+            if sized and not fits:
+                # nothing fits: the cap scales to 6x the smallest pack
+                if not (smallest > need[0] * 6 and p.unit_qty <= smallest * 6):
+                    continue
             price = best_price[pid]
-            if need is None or p.unit_qty is None or p.unit_uom != need[1]:
+            if not sized:
                 key = (1, 0, 0.0, price, pid)
             else:
                 key = (0, 1 if p.unit_qty < need[0] else 0,
-                       abs(p.unit_qty - need[0]), price, pid)
+                       abs(p.unit_qty - need[0]) if fits else 0.0, price, pid)
             offers.append((key, pid))
         expected = [pid for _, pid in sorted(offers)][:8]
         got = [p.id for p in r.pools[n] if not p.substitute]
         assert got == expected, ing.name
-    # the two size-cap cases, stated outright (seeds/products.json ids)
-    # Soy, Dark Soy, Light Soy Sauce 500ml: each is the smallest pack
+    # the size-cap cases, stated outright (seeds/products.json ids)
+    # Soy, Dark Soy, Light Soy Sauce 500ml: no bottle fits 15 ml, cheapest first
     assert [p.id for p in r.pools[3] if not p.substitute] == [59, 65, 64]
-    assert [p.id for p in r.pools[4] if not p.substitute] == [16]   # EVOO 500ml, not 1 L
+    assert [p.id for p in r.pools[4] if not p.substitute] == [16, 62]   # EVOO, then 1 L
+    assert [p.id for p in r.pools[5] if not p.substitute] == [36]       # 300 g pack only
 
 
 def test_twenty_ingredients_one_round_trip():

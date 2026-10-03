@@ -4,15 +4,16 @@ KEEP-IN-SYNC: this is the same deterministic algorithm as pantry-db's
 scripts/gen-seed-sql.py (which renders it into seed.sql for the Postgres
 migration Job). The store list, brand derivation, ±15% price variance and
 review generation are duplicated verbatim; the tokenizer is NOT duplicated
-here — we import the real one (nlsearch.units.tokens), and the test-suite
-parity test guards pantry-db's copy of it. Change either side → change both.
+here — we import the real one (nlsearch.units.tokens / index_text), and the
+golden tokenizer cases in tests/test_nlsearch.py are asserted by pantry-db's
+generator too. Change either side → change both.
 """
 from __future__ import annotations
 
 import hashlib
 import random
 
-from .nlsearch.units import tokens
+from .nlsearch.units import index_text, tokens
 
 # Reference shopping location (49.28, -123.12) — three stores within
 # 10 km, one at ~14 km so the distance constraint is demonstrable.
@@ -66,5 +67,6 @@ def reviews_for(product: dict, brand: str) -> list[tuple[int, str, str]]:
 
 
 def product_terms(product: dict) -> list[str]:
-    text = f"{product['name']} {product.get('description', '')}"
-    return sorted(set(tokens(text)))
+    """The product_terms rows: tokens of the name plus the description, with
+    negated phrases ("no salt added") cut — units.index_text."""
+    return sorted(set(tokens(index_text(product["name"], product.get("description", "")))))
