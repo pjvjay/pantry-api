@@ -50,7 +50,7 @@ def tokens(name: str) -> list[str]:
 
 
 # ─── generic matching: the third retrieval level ─────────────
-# A recipe names "light soy sauce"; the shelf says "Soy Sauce 500ml". When
+# A recipe names "light brown sugar"; the shelf says "Brown Sugar 1kg". When
 # neither the strict match (every token, purchase form included) nor the
 # form-relaxed one finds a product, the planner retries without these
 # descriptor words and labels the line match="generic".

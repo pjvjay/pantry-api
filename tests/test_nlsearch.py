@@ -279,7 +279,8 @@ def test_regression_condiment_quantities_do_not_abort_t2():
     SIZE_RANGE cap dropped every pack over 6x the need (500 ml for 15 ml,
     1 L for 83 ml), and the attribution probe kept the cap, so the alert
     blamed the dietary filter. The smallest pack on offer is now always
-    admissible."""
+    admissible — for soy sauce that is every 500 ml bottle (plain, dark and
+    light since the 160-product catalog), cheapest first."""
     from sqlalchemy import text
     from sqlalchemy.orm import Session
 
@@ -305,7 +306,16 @@ def test_regression_condiment_quantities_do_not_abort_t2():
         cheapest_soy = s.execute(text(
             "SELECT MIN(price) FROM store_products WHERE product_id = :a"),
             {"a": soy}).scalar_one()
+        # every product the token-AND match admits, by its cheapest offer
+        soy_sauces = [(pid, qty) for pid, qty in s.execute(text(
+            "SELECT p.id, p.unit_qty FROM products p "
+            "JOIN product_terms a ON a.product_id = p.id AND a.term = 'soy' "
+            "JOIN product_terms b ON b.product_id = p.id AND b.term = 'sauce' "
+            "JOIN store_products sp ON sp.product_id = p.id "
+            "GROUP BY p.id, p.unit_qty ORDER BY MIN(sp.price), p.id"))]
     assert sizes[soy] > 15 * 6 and sizes[canola] > 250 / 3 * 6   # every pack over the cap
+    assert soy_sauces[0][0] == soy and len(soy_sauces) >= 1
+    assert {qty for _, qty in soy_sauces} == {sizes[soy]}         # all the smallest pack
     assert offers == {soy: n_stores, canola: n_stores}            # stocked everywhere
     p = _parsed(ingredients=ings)
     assert "max_km" not in build_plan(p, max_km=None).steps[1].params_summary
@@ -313,7 +323,7 @@ def test_regression_condiment_quantities_do_not_abort_t2():
     r = _run(p)                                    # must not raise PlanAborted
     assert r.execution.aborted is None
     direct = {n: [x.id for x in pool if not x.substitute] for n, pool in r.pools.items()}
-    assert direct[1] == [soy] and direct[2] == [canola]
+    assert direct[1] == [pid for pid, _ in soy_sauces] and direct[2] == [canola]
     assert direct[0][0] == thighs                  # Chicken Thighs Boneless 450g
     assert r.pools[1][0].store_price == pytest.approx(float(cheapest_soy))
 
@@ -464,21 +474,25 @@ def test_thin_pool_gets_labeled_substitutes():
 
 def test_product_terms_tokenizer_parity():
     """The DB's precomputed terms must equal the parser's tokenizer output —
-    guards the KEEP-IN-SYNC duplicate in pantry-db's gen-seed-sql.py."""
+    guards the KEEP-IN-SYNC duplicate in pantry-db's gen-seed-sql.py. Every
+    product, not a sample: the catalog grows by copying pantry-db's seed
+    (pjvjay/pantry-api#22), and a new row ("Jalapeno", "Whipping Cream
+    35%") is where a tokenizer edge case would first show."""
     from sqlalchemy import text
     from sqlalchemy.orm import Session
 
     from pantry_planner import db
     from pantry_planner.nlsearch.units import tokens
+    from tests.seed_catalog import CATALOG
 
     with Session(db.engine()) as s:
-        rows = s.execute(text(
-            "SELECT p.id, p.name, p.description FROM products p LIMIT 10")).all()
-        for pid, name, desc in rows:
-            db_terms = {t for (t,) in s.execute(
-                text("SELECT term FROM product_terms WHERE product_id = :pid"),
-                {"pid": pid})}
-            assert db_terms == set(tokens(f"{name} {desc}")), name
+        rows = s.execute(text("SELECT id, name, description FROM products")).all()
+        db_terms: dict[int, set[str]] = {}
+        for pid, term in s.execute(text("SELECT product_id, term FROM product_terms")):
+            db_terms.setdefault(pid, set()).add(term)
+    assert len(rows) == CATALOG
+    for pid, name, desc in rows:
+        assert db_terms.get(pid) == set(tokens(f"{name} {desc}")), name
 
 
 def test_single_pass_matches_naive_reference():
@@ -533,7 +547,8 @@ def test_single_pass_matches_naive_reference():
         got = [p.id for p in r.pools[n] if not p.substitute]
         assert got == expected, ing.name
     # the two size-cap cases, stated outright (seeds/products.json ids)
-    assert [p.id for p in r.pools[3] if not p.substitute] == [59]   # Soy Sauce 500ml
+    # Soy, Dark Soy, Light Soy Sauce 500ml: each is the smallest pack
+    assert [p.id for p in r.pools[3] if not p.substitute] == [59, 65, 64]
     assert [p.id for p in r.pools[4] if not p.substitute] == [16]   # EVOO 500ml, not 1 L
 
 

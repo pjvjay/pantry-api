@@ -289,7 +289,7 @@ class TripOption(BaseModel):
 #   form    — only after dropping the purchase form ("powdered tomato" ->
 #             tomato products)
 #   generic — only after dropping descriptor words (units.DESCRIPTORS:
-#             light/dark/toasted/ground/...): "light soy sauce" -> Soy Sauce.
+#             light/dark/toasted/ground/...): "light brown sugar" -> Brown Sugar.
 #             On the week path, a line rescued by the head-noun fallback.
 MatchLevel = Literal["exact", "form", "generic"]
 

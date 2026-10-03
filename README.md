@@ -136,7 +136,7 @@ pantry-planner/
 │       ├── decision.py        # Phase C: weighted-sum thresholding
 │       ├── three_phase.py     # ThreePhaseRouter
 │       └── cascade.py         # CascadeRouter
-├── seeds/                 # recipes + products JSON
+├── seeds/                 # recipes + products JSON (copies of pantry-db's)
 ├── tests/                 # pytest, LLM mocked
 ├── evals/                 # golden set + comparison harness
 └── ARCHITECTURE.md
@@ -168,7 +168,7 @@ model never writes SQL and never composes the plan. Structured per the
 
 | Stage | Template | What it does | Abort gate |
 |---|---|---|---|
-| t1 | `existence_probe` | One batched probe: is every ingredient stocked at all? Three match levels, each tried only when the one before finds nothing: exact (every token, purchase form included), form (form dropped), generic (descriptor words such as light/dark/toasted/ground dropped too — "light soy sauce" → Soy Sauce) | `missing_ingredients` → 409 listing what's missing + same-category suggestions |
+| t1 | `existence_probe` | One batched probe: is every ingredient stocked at all? Three match levels, each tried only when the one before finds nothing: exact (every token, purchase form included), form (form dropped), generic (descriptor words such as light/dark/toasted/ground dropped too — "light brown sugar" → Brown Sugar) | `missing_ingredients` → 409 listing what's missing + same-category suggestions |
 | t2 | `options_single_pass` | All ingredients resolved in ONE query: per-product cheapest in-range store offer, ranked per ingredient by size-fit then price, under budget/distance constraints. Packs over 6× the need are dropped as catering packs unless no smaller pack is on offer (a tablespoon of soy sauce is bought as a 500 ml bottle) | `unavailable_within_constraints` (attribution re-probe names the nearest out-of-range offer); `budget_infeasible` (cheapest-basket floor vs budget) |
 | t3 | `brand_stats` | Per-brand price/rating/review aggregates over the retrieved pools — context the selector uses to break ties | — |
 | t4 | `substitute_lookup` | Data-driven: same-subcategory alternatives for thin pools, labeled `substitute`, never silently swapped in | — |
@@ -201,6 +201,14 @@ product's best store, a second applies the per-ingredient LIMIT. 20
 ingredients cost the same single round trip as 4. Deliberately deferred at
 this catalog size: materialized stats views, a pool/result cache keyed on
 grocery sets, `pg_trgm` fuzzy indexing.
+
+Catalog: 160 products (`seeds/products.json`) — staples plus the Sichuan,
+Indian, Mexican and baking pantry that real recipe links ask for. The file is
+a byte-identical copy of [pantry-db](https://github.com/pjvjay/pantry-db)'s
+`seeds/products.json`, which also generates the Postgres `seed.sql`; change it
+there first, copy it here (`cmp` the two files), and the derived rows (terms,
+store prices, brands, reviews) come out the same on both sides because
+`storeseed.py` and pantry-db's `gen-seed-sql.py` share one algorithm.
 
 Store model: 4 seeded stores with lat/lon (one at ~14 km to demo the distance
 gate), per-store prices (±15% deterministic variance), and per-product reviews

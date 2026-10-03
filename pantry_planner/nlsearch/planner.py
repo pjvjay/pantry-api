@@ -19,8 +19,8 @@ before. The budget gate is a basket-level verdict and always aborts.
 
 Matching runs at three levels, each tried only when the one before found
 nothing in the catalog: exact (every token, purchase form included), form
-(the form dropped) and generic (descriptor words dropped too — "light soy
-sauce" -> soy sauce; units.DESCRIPTORS). The level is reported per line.
+(the form dropped) and generic (descriptor words dropped too — "light brown
+sugar" -> brown sugar; units.DESCRIPTORS). The level is reported per line.
 """
 from __future__ import annotations
 

@@ -17,10 +17,11 @@ from mcp.server.mcpserver.exceptions import ToolError
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from tests.seed_catalog import CATALOG, count
+
 _TMP_DB = None
 TEXT = "Garlic Pasta (serves 2)\n- 500g penne\n- 2 cloves garlic\n- 1 can crushed tomatoes\n"
 GARLIC, BASMATI = 13, 8          # seeds/products.json: Fresh Garlic, Basmati Rice 2kg
-CATALOG = 62
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -250,16 +251,16 @@ async def test_list_products_pages_by_id(server):
     assert [p.id for p in page.items] == ordered[:10]
     assert (page.total, page.next_offset) == (CATALOG, 10)
 
-    tail = ProductPage.model_validate(
-        (await server.call_tool("list_products", {"offset": 60})).structured_content)
-    assert [p.id for p in tail.items] == ordered[60:]
+    tail = ProductPage.model_validate((await server.call_tool(
+        "list_products", {"offset": CATALOG - 2})).structured_content)
+    assert [p.id for p in tail.items] == ordered[CATALOG - 2:]
     assert len(tail.items) == 2 and tail.next_offset is None
 
     (n_dairy,), = _sql("SELECT COUNT(*) FROM products WHERE category = 'dairy'")
     dairy = ProductPage.model_validate(
         (await server.call_tool("list_products", {"category": "Dairy"})).structured_content)
-    assert int(n_dairy) == 12
-    assert dairy.total == len(dairy.items) == 12 and dairy.next_offset is None
+    assert int(n_dairy) == count("dairy") > 0
+    assert dairy.total == len(dairy.items) == count("dairy") and dairy.next_offset is None
     assert {p.category for p in dairy.items} == {"dairy"}
 
     default = await server.call_tool("list_products", {})

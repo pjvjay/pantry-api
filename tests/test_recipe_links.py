@@ -1,8 +1,11 @@
 """Planning a real recipe: partial plans, a distance limit, generic matching.
 
-A recipe fetched from a link (pjvjay/pantry-api#21) names far more than the
-seeded catalog stocks, says "light soy sauce" where the shelf says "Soy
-Sauce", and wants "nearby" to mean something. (The size-cap regression from
+A recipe fetched from a link (pjvjay/pantry-api#21) names more than the
+seeded catalog stocks, says "light brown sugar" where the shelf says "Brown
+Sugar", and wants "nearby" to mean something. The fixtures name ingredients
+the 160-product catalog (pjvjay/pantry-api#22) still lacks — saffron,
+lemongrass, potato starch, MSG — since it now stocks Sichuan peppercorns,
+cornstarch and light soy sauce. (The size-cap regression from
 the same live run is in test_nlsearch.py, next to the cap's other tests.) Each test states the right
 answer from somewhere other than the code under test — seeds/products.json
 ids, a direct SQL read, or the store coordinates — so it fails when the
@@ -23,6 +26,7 @@ from sqlalchemy.orm import Session
 
 # seeds/products.json
 SPAGHETTI, CANOLA, EVOO, OLIVE_1L, SOY_SAUCE = 21, 17, 16, 62, 59
+LIGHT_SOY, DARK_SOY, CORNSTARCH, BROWN_SUGAR = 64, 65, 81, 120
 DARK_CHOC, WHOLE_MILK, CHICKEN_STOCK = 3, 19, 57
 DOWNTOWN, RICHMOND, EAST_VAN = 1, 4, 3        # storeseed.STORES ids
 HOME = (49.28, -123.12)                       # config default_lat/default_lon
@@ -115,13 +119,13 @@ def _direct(pool):
 def test_partial_drops_unstocked_ingredients_and_plans_the_rest():
     r = _run([_ing("saffron", category_hint="spice"),
               _ing("spaghetti", quantity=400, unit="g"),
-              _ing("dried chili pepper")], allow_partial=True)
+              _ing("lemongrass")], allow_partial=True)
     assert [i.name for i in r.recipe.ingredients] == ["spaghetti"]
     assert [i.line_no for i in r.recipe.ingredients] == [2]   # numbering as written
     assert r.match_levels == {2: "exact"}
     assert r.ingredient_count == 3
     assert r.out_of_range == []
-    assert [d.ingredient for d in r.not_stocked] == ["saffron", "dried chili pepper"]
+    assert [d.ingredient for d in r.not_stocked] == ["saffron", "lemongrass"]
     assert all(d.reason == "not in the catalog" for d in r.not_stocked)
     cheapest_spices = [f"{n} (${float(p):.2f})" for n, p in _sql(
         "SELECT name, price FROM products WHERE subcategory = 'spice' OR category = 'spice' "
@@ -156,24 +160,26 @@ def test_default_still_aborts_on_one_missing_ingredient():
 # ─── allow_partial: out of range ─────────────────────────────
 
 def test_partial_drops_out_of_range_and_names_the_nearest_offer(reseed):
-    """Soy sauce only at East Van (~4 km, dearer) and Richmond (~14 km,
+    """Cornstarch only at East Van (~4 km, dearer) and Richmond (~14 km,
     cheaper); a 3 km limit. The reason must name the NEAREST offer — the
     old probe pinned each product to its cheapest store and would have
     named Richmond."""
+    (n,), = _sql("SELECT COUNT(*) FROM product_terms WHERE term = 'cornstarch'")
+    assert n == 1                                    # one product answers "cornstarch"
     _sql("DELETE FROM store_products WHERE product_id = :p AND store_id NOT IN (:e, :r)",
-         p=SOY_SAUCE, e=EAST_VAN, r=RICHMOND)
+         p=CORNSTARCH, e=EAST_VAN, r=RICHMOND)
     _sql("UPDATE store_products SET price = 5.00 WHERE product_id = :p AND store_id = :e",
-         p=SOY_SAUCE, e=EAST_VAN)
+         p=CORNSTARCH, e=EAST_VAN)
     _sql("UPDATE store_products SET price = 3.00 WHERE product_id = :p AND store_id = :r",
-         p=SOY_SAUCE, r=RICHMOND)
+         p=CORNSTARCH, r=RICHMOND)
     assert _store_km(EAST_VAN) > 3 and _store_km(RICHMOND) > _store_km(EAST_VAN)
 
-    r = _run([_ing("spaghetti"), _ing("soy sauce")], allow_partial=True, max_km=3)
+    r = _run([_ing("spaghetti"), _ing("cornstarch")], allow_partial=True, max_km=3)
     assert [i.name for i in r.recipe.ingredients] == ["spaghetti"]
     assert r.not_stocked == []
     (d,) = r.out_of_range
-    assert d.ingredient == "soy sauce"
-    assert d.reason == ("available only outside the constraints — nearest: Soy Sauce 500ml "
+    assert d.ingredient == "cornstarch"
+    assert d.reason == ("available only outside the constraints — nearest: Cornstarch 450g "
                         f"at {_store_name(EAST_VAN)} ($5.00, {_store_km(EAST_VAN)} km)")
     assert {p.store_name for p in r.pools[0]} <= {
         _store_name(i) for i in (1, 2, 3, 4) if _store_km(i) <= 3}
@@ -263,12 +269,25 @@ def test_generic_tokens_vocabulary():
     assert generic_tokens("extra light") == []
 
 
-def test_light_soy_sauce_matches_generically():
-    r = _run([_ing("light soy sauce", quantity=1, unit="tbsp")])
+def test_light_brown_sugar_matches_generically():
+    (n,), = _sql("SELECT COUNT(*) FROM product_terms WHERE term = 'light' AND product_id = :p",
+                 p=BROWN_SUGAR)
+    assert n == 0                                    # the shelf never says "light"
+    r = _run([_ing("light brown sugar", quantity=1, unit="tbsp")])
     assert r.match_levels == {1: "generic"}
-    assert _direct(r.pools[0]) == [SOY_SAUCE]
+    assert _direct(r.pools[0]) == [BROWN_SUGAR]
     assert "(1 via generic match)" in r.execution.steps[0].label
     assert r.stats.zero_hit_ingredients == 1         # the router sees the loosened match
+
+
+def test_light_soy_sauce_is_exact_once_the_catalog_stocks_it():
+    """#21's motivating case. The 160-product catalog sells Light Soy Sauce,
+    so the exact level answers and the generic level (plain and dark soy
+    sauce too) never runs."""
+    r = _run([_ing("light soy sauce", quantity=1, unit="tbsp")])
+    assert r.match_levels == {1: "exact"}
+    assert _direct(r.pools[0]) == [LIGHT_SOY]
+    assert "generic" not in r.execution.steps[0].label
 
 
 @pytest.mark.parametrize("name,form,level,expected", [
@@ -280,7 +299,8 @@ def test_light_soy_sauce_matches_generically():
     # form relaxation also wins over generic: "frozen" is dropped as the
     # purchase form, "dark" stays required
     ("dark chocolate", "frozen", "form", [DARK_CHOC]),
-    ("low-sodium soy sauce", None, "generic", [SOY_SAUCE]),
+    # every soy sauce, cheapest first (by its cheapest store offer)
+    ("low-sodium soy sauce", None, "generic", [SOY_SAUCE, DARK_SOY, LIGHT_SOY]),
 ])
 def test_exact_and_form_matches_win_over_generic(name, form, level, expected):
     r = _run([_ing(name, form=form)])
@@ -314,9 +334,10 @@ def test_selector_hints_omit_dropped_ingredients():
 MALA = ("Mala Chicken (serves 4)\n"
         "- 450g boneless skinless chicken thigh\n"
         "- 15ml light soy sauce\n"
+        "- 10g light brown sugar\n"
         "- 80ml canola oil\n"
-        "- 10g sichuan peppercorns\n"
-        "- 5g cornstarch\n")
+        "- 5g potato starch\n"
+        "- 2g msg\n")
 
 
 @pytest.fixture()
@@ -332,15 +353,17 @@ async def test_plan_from_text_partial_summary(server):
     from pantry_planner.mcp_server import PlanResult
 
     parsed = [i.name for i in demomode.parse_recipe(MALA).recipe.ingredients]
-    assert parsed == ["boneless skinless chicken thigh", "light soy sauce", "canola oil",
-                      "sichuan peppercorns", "cornstarch"]
+    assert parsed == ["boneless skinless chicken thigh", "light soy sauce",
+                      "light brown sugar", "canola oil", "potato starch", "msg"]
 
     res = await server.call_tool("plan_from_text", {"recipe_text": MALA, "allow_partial": True})
     s = PlanResult.model_validate(res.structured_content).summary
     by = {ln.ingredient: ln for ln in s.lines}
-    assert list(by) == parsed[:3]
-    assert [ln.line_no for ln in s.lines] == [1, 2, 3]
-    assert (by["light soy sauce"].product_id, by["light soy sauce"].match) == (SOY_SAUCE, "generic")
+    assert list(by) == parsed[:4]
+    assert [ln.line_no for ln in s.lines] == [1, 2, 3, 4]
+    assert (by["light soy sauce"].product_id, by["light soy sauce"].match) == (LIGHT_SOY, "exact")
+    assert (by["light brown sugar"].product_id,
+            by["light brown sugar"].match) == (BROWN_SUGAR, "generic")
     assert (by["canola oil"].product_id, by["canola oil"].match) == (CANOLA, "exact")
     assert by["boneless skinless chicken thigh"].match == "exact"
     for ln in s.lines:                               # each at its cheapest store
@@ -348,25 +371,26 @@ async def test_plan_from_text_partial_summary(server):
                        p=ln.product_id)
         assert ln.price == pytest.approx(float(low))
     assert s.total_cost == round(sum(ln.price for ln in s.lines), 2)
-    assert [d.ingredient for d in s.not_stocked] == ["sichuan peppercorns", "cornstarch"]
+    assert [d.ingredient for d in s.not_stocked] == ["potato starch", "msg"]
     assert s.out_of_range == []
-    assert ("planned 3 of 5 ingredients: 2 not stocked, 0 out of range (see not_stocked / "
+    assert ("planned 4 of 6 ingredients: 2 not stocked, 0 out of range (see not_stocked / "
             "out_of_range); total_cost covers the planned lines only") in s.notes
-    assert "light soy sauce matched generically: Soy Sauce 500ml" in s.notes
+    assert "light brown sugar matched generically: Brown Sugar 1kg" in s.notes
+    assert not any("light soy sauce matched" in n for n in s.notes)
     # the empty lists are on the wire, not merely defaulted by the model
     assert res.structured_content["summary"]["out_of_range"] == []
 
 
 @pytest.mark.asyncio
 async def test_plan_from_text_without_partial_errors_and_says_how_to_retry(server):
-    with pytest.raises(ToolError, match=r"(?s)missing_ingredients.*sichuan peppercorns, "
-                                        r"cornstarch.*allow_partial=true"):
+    with pytest.raises(ToolError, match=r"(?s)missing_ingredients.*potato starch, "
+                                        r"msg.*allow_partial=true"):
         await server.call_tool("plan_from_text", {"recipe_text": MALA})
 
 
 @pytest.mark.asyncio
 async def test_plan_from_text_nothing_stocked_errors_even_with_partial(server):
-    text_ = "Nothing (serves 1)\n- 10g sichuan peppercorns\n- 5g cornstarch\n"
+    text_ = "Nothing (serves 1)\n- 1g saffron\n- 5g potato starch\n"
     with pytest.raises(ToolError, match="missing_ingredients") as exc:
         await server.call_tool("plan_from_text", {"recipe_text": text_, "allow_partial": True})
     assert "allow_partial=true" not in str(exc.value)    # retrying would not help
@@ -431,10 +455,14 @@ async def test_find_product_generic_tier_matches_the_planner(server):
     from pantry_planner.mcp_server import ProductSearch
 
     light = ProductSearch.model_validate((await server.call_tool(
-        "find_product", {"query": "light soy sauce"})).structured_content)
+        "find_product", {"query": "light brown sugar"})).structured_content)
     assert light.match == "generic"
-    assert [i.id for i in light.items] == [SOY_SAUCE] and light.total == 1
-    assert "'soy sauce'" in light.note
+    assert [i.id for i in light.items] == [BROWN_SUGAR] and light.total == 1
+    assert "'brown sugar'" in light.note
+
+    soy = ProductSearch.model_validate((await server.call_tool(
+        "find_product", {"query": "light soy sauce"})).structured_content)
+    assert soy.match == "direct" and [i.id for i in soy.items] == [LIGHT_SOY]
 
     dark = ProductSearch.model_validate((await server.call_tool(
         "find_product", {"query": "dark chocolate"})).structured_content)
@@ -487,12 +515,11 @@ def test_rest_plan_nl_partial_and_max_km():
                                          "max_km": 1})
     assert resp.status_code == 200, resp.text
     plan = resp.json()
-    assert [d["ingredient"] for d in plan["not_stocked"]] == ["sichuan peppercorns",
-                                                              "cornstarch"]
-    assert plan["ingredient_count"] == 5 and len(plan["line_items"]) == 3
+    assert [d["ingredient"] for d in plan["not_stocked"]] == ["potato starch", "msg"]
+    assert plan["ingredient_count"] == 6 and len(plan["line_items"]) == 4
     assert {li["store_name"] for li in plan["line_items"]} == {_store_name(DOWNTOWN)}
     assert {li["ingredient_name"]: li["match"] for li in plan["line_items"]}[
-        "light soy sauce"] == "generic"
+        "light brown sugar"] == "generic"
     # defaults unchanged: the same text is still a 409 without allow_partial
     gated = client.post("/plan/nl", json={"recipe_text": MALA})
     assert gated.status_code == 409

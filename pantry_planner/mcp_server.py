@@ -246,8 +246,8 @@ class LeanLine(BaseModel):
     """One planned line. `match` says how the ingredient met the catalog:
     "exact" — every word as written; "form" — only once the purchase form
     was dropped ("powdered tomato" -> tomato products); "generic" — only
-    once descriptor words were dropped too ("light soy sauce" -> Soy Sauce
-    500ml; the vocabulary is fixed: light, dark, toasted, roasted, ground,
+    once descriptor words were dropped too ("light brown sugar" -> Brown
+    Sugar 1kg; the vocabulary is fixed: light, dark, toasted, roasted, ground,
     whole, dried, fresh, frozen, boneless, skinless, large, small, medium,
     extra, chopped, sliced, minced, diced, raw, organic, low/reduced
     sodium). Every generic line is also named in the summary's notes.
@@ -686,8 +686,8 @@ def find_product(query: Annotated[str, Field(min_length=1, max_length=MAX_SEARCH
 
     Read `match` before `items`: "direct" — every token matched;
     "generic" — nothing matched every token, but dropping descriptor words
-    (light, dark, toasted, ground, whole, dried, ...) did: "light soy sauce"
-    finds Soy Sauce 500ml. These ARE planning candidates — the planner
+    (light, dark, toasted, ground, whole, dried, ...) did: "light brown
+    sugar" finds Brown Sugar 1kg. These ARE planning candidates — the planner
     selects them and labels the line match="generic"; "relaxed" — not
     even that, so these are same-aisle alternatives on the last word only,
     which the planner would OFFER as substitutes but never select; "none" —
@@ -876,7 +876,7 @@ def plan_from_text(recipe_text: Annotated[str, Field(max_length=MAX_TEXT)],
 
     Each line's `match` is "exact", "form" (purchase form dropped) or
     "generic" (descriptor words such as light/dark/toasted dropped:
-    "light soy sauce" -> Soy Sauce 500ml); generic lines are named in
+    "light brown sugar" -> Brown Sugar 1kg); generic lines are named in
     `notes`. `summary.notes` starts with how the text was interpreted;
     `trip` is the recommended store split. `verbose=True` attaches `full`
     with the retrieval `plan_trace` and every trip option."""
@@ -968,8 +968,8 @@ def get_product_origins(product_ids: Annotated[list[int] | None, Field(max_lengt
     product id. Free, no LLM calls.
 
     `by_status` counts EVERY product the ids/search selected, before the
-    `status` filter and before paging, so one call answers "62 products:
-    2 resolved, 60 unknown"; then `status="resolved"` pages through just
+    `status` filter and before paging, so one call answers "160 products:
+    2 resolved, 158 unknown"; then `status="resolved"` pages through just
     those. Read `status` before using `country`: only "resolved" carries
     usable evidence. "unknown" means no source published an origin,
     "conflicting" means sources disagreed and no winner was picked,
