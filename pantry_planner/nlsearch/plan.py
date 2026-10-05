@@ -23,6 +23,7 @@ class StepKind(str, Enum):
     options = "options"          # t2 — offers per ingredient under constraints
     statistics = "statistics"    # t3 — per-brand price/rating stats for the pools
     lookup = "lookup"            # t4 — extra lookups (substitutes for thin pools)
+    llm = "llm"                  # an LLM call (select_products, escalate), phase by phase
 
 
 class GateCode(str, Enum):
@@ -46,14 +47,23 @@ class QueryPlan(BaseModel):
     steps: list[QueryStep]
 
 
+class StepPhase(BaseModel):
+    """One stretch of a step's time, for the timeline's bar. LLM calls: DNS lookup, TCP
+    connect, TLS handshake, upload, waiting for the provider, download, retry wait."""
+    name: str
+    ms: int
+    attempt: int = 1                 # which HTTP attempt it belongs to
+
+
 class StepResult(BaseModel):
     step_id: str
     kind: StepKind
     label: str = ""                  # human summary: "6 ingredients stocked"
-    sql_display: str = ""            # params inlined — display only
+    sql_display: str = ""            # params inlined — display only (LLM steps: the trace)
     row_count: int = 0
     duration_ms: int = 0
     outcome: Literal["ok", "aborted", "skipped"] = "ok"
+    phases: list[StepPhase] = Field(default_factory=list)
 
 
 class PlanAlert(BaseModel):

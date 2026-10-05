@@ -45,14 +45,18 @@ def llm_span(
     cost_usd: float,
     latency_ms: int,
     retry_count: int = 0,
+    http: dict | None = None,
 ) -> dict:
     """
     Shape of the metadata dict that LLM-calling actions write to state.
 
     Kept as a helper so all LLM actions record the same shape — makes
-    the Burr UI (and any downstream analysis) uniform.
+    the Burr UI (and any downstream analysis) uniform. `http` is the call's
+    httptrace record (Gemini): its attempts, phase by phase, so the Burr UI
+    shows where the latency went; it also sets retry_count to the HTTP
+    retries the call made.
     """
-    return {
+    span = {
         "step": step,
         "model": model,
         "input_tokens": input_tokens,
@@ -61,3 +65,50 @@ def llm_span(
         "latency_ms": latency_ms,
         "retry_count": retry_count,
     }
+    if http:
+        span["retry_count"] = max(retry_count, len(http.get("attempts") or []) - 1)
+        span["http"] = http
+    return span
+
+
+def _server(http: dict) -> str:
+    return "Google" if http.get("provider") == "gemini" else "the server"
+
+
+def llm_call_trace(step: str, http: dict):
+    """The plan's (and the MCP summary's) record of one LLM call."""
+    from .httptrace import phase_list
+    from .models import LlmCallTrace
+    attempts = http.get("attempts") or []
+    last = attempts[-1] if attempts else {}
+    return LlmCallTrace(step=step, model=str(http.get("model", "")),
+                        total_ms=int(http.get("total_ms") or 0), attempts=len(attempts),
+                        status=last.get("status"), server_ms=last.get("server_ms"),
+                        phases=phase_list(http, _server(http)))
+
+
+def llm_step(span: dict):
+    """The plan trace's step for one LLM call: its phases as the timeline's bar and the
+    per-attempt breakdown as the step's detail."""
+    from .httptrace import describe, phase_list
+    from .nlsearch.plan import StepKind, StepResult
+    http = span.get("http")
+    label = span["model"]
+    if span["input_tokens"] or span["output_tokens"]:
+        label += f" · {span['input_tokens']:,} in / {span['output_tokens']:,} out tokens"
+    if http:
+        server = _server(http)
+        phases = phase_list(http, server)
+        wait = sum(p["ms"] for p in phases if p["name"] == f"waiting for {server}")
+        own = sum(a.get("server_ms") or 0 for a in http.get("attempts") or [])
+        label += f" · waiting for {server} {wait / 1000:.1f} s"
+        if own:
+            label += f" ({server} reports {own / 1000:.1f} s)"
+        if len(http.get("attempts") or []) > 1:
+            label += f" · {len(http['attempts'])} attempts"
+        detail = describe(http, server)
+    else:
+        phases, detail = [], "No HTTP trace for this call (Anthropic, or demo mode)."
+    return StepResult(step_id=f"llm_{span['step']}", kind=StepKind.llm, label=label,
+                      sql_display=detail, duration_ms=int(span["latency_ms"]),
+                      phases=phases)

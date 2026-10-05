@@ -1,22 +1,25 @@
 """
-The main selector — one Anthropic call, structured output via tool use.
+The main selector — one LLM call, structured output via tool use.
 
 Given a recipe + a subset of products, returns per-item choices with
 per-item confidence. The confidence is what the cascade router keys off.
 
-We use tool_choice to force the model to call submit_plan — this
-guarantees valid structured output. No JSON parsing.
+We force the model to call submit_plan (llm.forced_tool_call) — this
+guarantees structured output. The model spec picks the provider
+("gemini:<model>" or an Anthropic name).
 """
 from __future__ import annotations
 
 import json
 import time
 
-from anthropic import Anthropic
-
 from .config import estimate_cost_usd, settings
-from .models import Product, Recipe, RecipeIngredient, Selection, SelectorResult
+from .llm import forced_tool_call
+from .models import Product, RecipeIngredient, Selection, SelectorResult
 from .prompts import SELECTOR_SYSTEM, SELECTOR_TOOL
+
+# Extended thinking on escalation (Anthropic only; Gemini ignores it)
+THINKING_BUDGET_TOKENS = 4000
 
 
 def _serialize_products(products: list[Product],
@@ -91,8 +94,6 @@ def call_selector(
                                         constraints=constraints,
                                         origins_by_id=origins_by_id,
                                         preference=preference)
-    client = Anthropic(api_key=cfg.anthropic_api_key)
-
     payload: dict = {
         "recipe_ingredients": _serialize_ingredients(ingredients),
         "available_products": _serialize_products(products, origins_by_id),
@@ -102,28 +103,19 @@ def call_selector(
         payload["constraints"] = constraints
     user_msg = json.dumps(payload, indent=2)
 
-    kwargs: dict = {
-        "model": model,
-        "max_tokens": 4096,
-        "system": SELECTOR_SYSTEM,
-        "tools": [SELECTOR_TOOL],
-        "tool_choice": {"type": "tool", "name": "submit_plan"},
-        "messages": [{"role": "user", "content": user_msg}],
-    }
-
-    # Thinking is opt-in — the escalation model may or may not use it.
-    if enable_thinking:
-        kwargs["thinking"] = {"type": "enabled", "budget_tokens": 4000}
-
     t0 = time.perf_counter()
-    resp = client.messages.create(**kwargs)
+    reply = forced_tool_call(
+        model=model,
+        system=SELECTOR_SYSTEM,
+        messages=[{"role": "user", "content": user_msg}],
+        tool=SELECTOR_TOOL,
+        max_tokens=4096,
+        # Thinking is opt-in — the escalation model may or may not use it.
+        thinking_budget=THINKING_BUDGET_TOKENS if enable_thinking else None,
+    )
     latency_ms = int((time.perf_counter() - t0) * 1000)
 
-    tool_block = next((b for b in resp.content if b.type == "tool_use"), None)
-    if tool_block is None:
-        raise ValueError(f"Selector didn't call the tool. Response: {resp.content!r}")
-
-    args = tool_block.input
+    args = reply.input
     selections = [
         Selection(
             line_no=s["line_no"],
@@ -137,11 +129,12 @@ def call_selector(
     return SelectorResult(
         selections=selections,
         total_cost=float(args["total_cost"]),
-        model_used=model,
-        input_tokens=resp.usage.input_tokens,
-        output_tokens=resp.usage.output_tokens,
+        model_used=model,               # the spec: "gemini:<model>" or the Anthropic name
+        input_tokens=reply.input_tokens,
+        output_tokens=reply.output_tokens,
         latency_ms=latency_ms,
-        cost_usd=estimate_cost_usd(model, resp.usage.input_tokens, resp.usage.output_tokens),
+        cost_usd=estimate_cost_usd(model, reply.input_tokens, reply.output_tokens),
+        http=[reply.http] if reply.http else [],
     )
 
 
@@ -173,4 +166,5 @@ def merge_selections(
         output_tokens=base.output_tokens + escalated.output_tokens,
         latency_ms=base.latency_ms + escalated.latency_ms,
         cost_usd=base.cost_usd + escalated.cost_usd,
+        http=[*base.http, *escalated.http],
     )
