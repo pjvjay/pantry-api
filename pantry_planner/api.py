@@ -209,6 +209,27 @@ def metrics():
     return Response(generate_latest(m.REGISTRY), media_type=CONTENT_TYPE_LATEST)
 
 
+class Store(BaseModel):
+    id: int
+    name: str
+    lat: float
+    lon: float
+    address: str = ""
+
+
+@app.get("/stores", response_model=list[Store])
+def list_stores() -> list[Store]:
+    """Every store the catalog prices products at: what a client checks store names against
+    (an answer naming a store that is not here made it up)."""
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    with Session(db.engine()) as s:
+        rows = s.execute(select(db.StoreRow).order_by(db.StoreRow.id)).scalars().all()
+        return [Store(id=r.id, name=r.name, lat=r.lat, lon=r.lon, address=r.address or "")
+                for r in rows]
+
+
 @app.get("/recipes", response_model=list[Recipe])
 def list_recipes() -> list[Recipe]:
     return db.load_all_recipes()

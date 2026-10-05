@@ -357,8 +357,11 @@ class PlanSummary(BaseModel):
     # Where the plan's LLM time went, call by call and phase by phase (connect, TLS, waiting
     # for Google, ...). For people and trace views: an agent can ignore it.
     llm_calls: list[LlmCallTrace] = Field(default_factory=list)
-    # The Burr run that traced this plan, step by step (its app id in the Burr UI).
+    # The Burr run that traced this plan, step by step (its app id in the Burr UI), and each of
+    # its steps' time in ms, in order ({step: ms}; the full plan has errors too). For people and
+    # trace views: an agent can ignore them.
     burr_run: str = ""
+    pipeline: dict[str, float] = Field(default_factory=dict)
 
 
 class PlanResult(BaseModel):
@@ -634,7 +637,8 @@ def _summarize_plan(plan: ShoppingPlan) -> PlanSummary:
         not_stocked=list(plan.not_stocked), out_of_range=list(plan.out_of_range),
         skipped=list(plan.skipped),
         llm_cost_usd=plan.total_llm_cost_usd, latency_ms=plan.total_latency_ms,
-        llm_calls=plan.llm_calls, burr_run=plan.burr_run)
+        llm_calls=plan.llm_calls, burr_run=plan.burr_run,
+        pipeline={s["step"]: s["ms"] for s in plan.pipeline if s.get("ms") is not None})
 
 
 def _summarize_week(plan: WeekPlan) -> WeekSummary:
