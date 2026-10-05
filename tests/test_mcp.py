@@ -16,8 +16,10 @@ _TMP_DB = None
 
 EXPECTED_TOOLS = {
     "list_recipes", "get_recipe", "list_products",
+    "find_product", "get_product",
     "plan_recipe", "plan_from_text", "plan_week",
     "get_product_origins", "rank_products_by_origin", "origin_triage",
+    "submit_origin_evidence", "list_origin_submissions", "review_origin_submission",
     "pipeline_status",
 }
 
@@ -99,14 +101,16 @@ async def test_get_recipe_unknown_slug_is_tool_error(server):
 @pytest.mark.asyncio
 async def test_list_products_search_filter(server):
     res = await server.call_tool("list_products", {"search": "cheese"})
-    products = res.structured_content["result"]
+    page = res.structured_content
+    products = page["items"]
     assert products
+    assert page["total"] == len(products) and page["next_offset"] is None
     assert all("cheese" in
                f"{p['name']} {p['category']} {p['subcategory']}".lower()
                for p in products)
 
     everything = await server.call_tool("list_products", {})
-    assert len(everything.structured_content["result"]) > len(products)
+    assert everything.structured_content["total"] > len(products)
 
 
 @pytest.mark.asyncio
@@ -115,6 +119,9 @@ async def test_pipeline_status(server):
     status = res.structured_content
     assert status["status"] == "ok"
     assert status["routing_strategy"] in {"cascade", "three_phase"}
+    assert status["mcp_auth"] in {"required", "anonymous"}
+    # In-process is the operator's own process: writes are always allowed.
+    assert status["write_tools"] == "enabled"
     # The invariant is "no plaintext password", not "looks like SQLite":
     # the same suite runs against Postgres in CI, where the URL carries
     # credentials and must come back redacted — and a passwordless URL is
@@ -163,7 +170,9 @@ def evidence():
 @pytest.mark.asyncio
 async def test_get_product_origins_reports_status(server, evidence):
     res = await server.call_tool("get_product_origins", {"search": "basmati"})
-    origins = res.structured_content["result"]
+    page = res.structured_content
+    origins = page["items"]
+    assert page["total"] == 1 and page["by_status"] == {"resolved": 1}
     assert len(origins) == 1
     assert origins[0]["status"] == "resolved"
     assert origins[0]["manufactured_in"] == "India"
