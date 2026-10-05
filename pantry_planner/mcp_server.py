@@ -28,8 +28,10 @@ from mcp.server.mcpserver.exceptions import ResourceNotFoundError, ToolError
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 
+from .llm import LLMError
 from .models import (
     DroppedIngredient,
+    LlmCallTrace,
     MatchLevel,
     OriginCoverage,
     OriginRanking,
@@ -116,6 +118,11 @@ class PipelineStatus(BaseModel):
     demo_mode: bool
     mcp_auth: str               # "required" (tokens configured) | "anonymous"
     write_tools: str            # "enabled" | "disabled" for THIS caller
+    # Added with Gemini support: the other two model specs ("gemini:<model>"
+    # or an Anthropic name) and whether a Gemini key is present.
+    classifier_model: str
+    nl2sql_model: str
+    gemini_key_configured: bool
 
 
 class TriageCandidate(BaseModel):
@@ -274,6 +281,14 @@ class LeanLine(BaseModel):
     packs: int = 1
 
 
+class PlanLine(LeanLine):
+    """A recipe plan's line, with where the recommended `trip` buys it and its price there:
+    the store to send the shopper to ("" and None when the plan has no trip). `store` and
+    `price` are the line's cheapest offer in range, which the trip may skip to save a stop."""
+    trip_store: str = ""
+    trip_price: float | None = None
+
+
 class Coverage(BaseModel):
     spend_fraction: float       # the binding measure: what the money did
     count_fraction: float
@@ -330,7 +345,7 @@ class PlanSummary(BaseModel):
     total_cost: float           # planned lines only
     origin_status: str          # not_requested | verified | unverified
     coverage: Coverage | None   # only when an origin question was asked; planned lines only
-    lines: list[LeanLine]
+    lines: list[PlanLine]
     trip: Trip | None           # None when the planner produced no trip options
     notes: list[str]            # interpretation, planned K of N, generic matches,
                                 # substitutions, coverage warnings
@@ -339,6 +354,11 @@ class PlanSummary(BaseModel):
     skipped: list[DroppedIngredient]
     llm_cost_usd: float
     latency_ms: int
+    # Where the plan's LLM time went, call by call and phase by phase (connect, TLS, waiting
+    # for Google, ...). For people and trace views: an agent can ignore it.
+    llm_calls: list[LlmCallTrace] = Field(default_factory=list)
+    # The Burr run that traced this plan, step by step (its app id in the Burr UI).
+    burr_run: str = ""
 
 
 class PlanResult(BaseModel):
@@ -440,6 +460,13 @@ def _gate_message(e) -> str:
     msg = alert.message if alert else "plan aborted"
     return (f"Plan aborted before product selection — {code}: {msg}{detail}"
             + (f" Steps: {steps}." if steps else ""))
+
+
+def _llm_message(e: LLMError) -> str:
+    """An LLM failure as a tool error. The SDK masks any other exception as
+    "Error executing tool", which would hide the one line that says what to
+    fix (the key, the model spec, the quota)."""
+    return f"LLM call failed — {e}"
 
 
 def _product_summary(p) -> ProductSummary:
@@ -591,15 +618,23 @@ def _summarize_plan(plan: ShoppingPlan) -> PlanSummary:
              + _generic_notes(plan.line_items)
              + _substitution_notes(plan.line_items)
              + _floor_note(plan.origin_coverage))
+    trip = _trip(plan.trip_options)
+    on_trip = {i.product_id: i for i in trip.items} if trip else {}
+    lines = []
+    for li in plan.line_items:
+        stop = on_trip.get(li.product_id)
+        lines.append(PlanLine(**_lean_line(li, products).model_dump(),
+                              trip_store=stop.store if stop else "",
+                              trip_price=stop.price if stop else None))
     return PlanSummary(
         recipe_slug=plan.recipe_slug, recipe_name=plan.recipe_name,
         total_cost=plan.total_cost, origin_status=plan.origin_status,
         coverage=_coverage(plan.origin_coverage),
-        lines=[_lean_line(li, products) for li in plan.line_items],
-        trip=_trip(plan.trip_options), notes=notes,
+        lines=lines, trip=trip, notes=notes,
         not_stocked=list(plan.not_stocked), out_of_range=list(plan.out_of_range),
         skipped=list(plan.skipped),
-        llm_cost_usd=plan.total_llm_cost_usd, latency_ms=plan.total_latency_ms)
+        llm_cost_usd=plan.total_llm_cost_usd, latency_ms=plan.total_latency_ms,
+        llm_calls=plan.llm_calls, burr_run=plan.burr_run)
 
 
 def _summarize_week(plan: WeekPlan) -> WeekSummary:
@@ -860,11 +895,23 @@ def get_product(product_id: int, lat: float | None = None,
 def plan_recipe(slug: str,
                 exclude_origin: Annotated[list[str] | None, Field(max_length=MAX_LIST)] = None,
                 preference: Annotated[list[str] | None, Field(max_length=MAX_LIST)] = None,
-                verbose: bool = False) -> PlanResult:
+                verbose: bool = False,
+                lat: Annotated[float | None, Field(ge=-90, le=90)] = None,
+                lon: Annotated[float | None, Field(ge=-180, le=180)] = None,
+                max_km: Annotated[float | None, Field(ge=0.5, le=100)] = None) -> PlanResult:
     """Run the full shopping-plan pipeline for a seeded recipe: an LLM
     matches every ingredient to the best-value product, with a model
-    router escalating hard cases. SLOW (10-60s) and costs real Claude
-    API credits. Get slugs from list_recipes first.
+    router escalating hard cases. SLOW (10-60s) and costs LLM API credits
+    unless the server runs in demo mode. Get slugs from list_recipes first.
+
+    Pass the shopper's location to get stores: any of lat/lon/max_km makes
+    the plan store-aware. Each line is then priced at its cheapest store
+    within max_km (0.5-100) of lat/lon (the server's default point when
+    omitted; any distance when max_km is omitted), `summary.trip` is the
+    recommended store split, and a chosen product no store in range sells
+    goes to `summary.out_of_range` (naming the nearest offer) instead of
+    being priced. Without a location, lines carry catalog prices and no
+    store.
 
     `exclude_origin` drops candidates positively evidenced as coming from
     those countries (e.g. ["United States"]) before the model ever sees
@@ -880,12 +927,15 @@ def plan_recipe(slug: str,
 
     _check_countries(exclude_origin, preference)
     try:
-        plan = flow.run(slug, exclude=exclude_origin, preference=preference)
+        plan = flow.run(slug, exclude=exclude_origin, preference=preference,
+                        lat=lat, lon=lon, max_km=max_km)
         return PlanResult(summary=_summarize_plan(plan), full=plan if verbose else None)
     except ValueError as e:
         raise ToolError(f"{e}. Call list_recipes for valid slugs.") from e
     except PlanAborted as e:
         raise ToolError(_gate_message(e)) from e
+    except LLMError as e:
+        raise ToolError(_llm_message(e)) from e
 
 
 @server.tool(title="Plan from recipe text", annotations=_PLAN)
@@ -967,6 +1017,8 @@ def plan_from_text(recipe_text: Annotated[str, Field(max_length=MAX_TEXT)],
             f"{alert.code.value if alert else 'gate'}: "
             f"{(alert.message if alert else 'constraint infeasible').rstrip('.')}."
             f"{detail}{hint} (steps: {steps})") from e
+    except LLMError as e:
+        raise ToolError(_llm_message(e)) from e
 
 
 @server.tool(title="Plan a week of dinners", annotations=_PLAN)
@@ -1004,6 +1056,8 @@ def plan_week(days: Annotated[int, Field(ge=1, le=14)] = 5,
             f"Week plan aborted — "
             f"{alert.code.value if alert else 'gate'}: "
             f"{alert.message if alert else 'constraint infeasible'}") from e
+    except LLMError as e:
+        raise ToolError(_llm_message(e)) from e
 
 
 # --- Provenance tools ----------------------------------------
@@ -1215,9 +1269,11 @@ def review_origin_submission(submission_id: int, decision: str,
 
 @server.tool(title="Pipeline status", annotations=_READ)
 def pipeline_status(ctx: Context = None) -> PipelineStatus:  # type: ignore[assignment]
-    """Active configuration: routing strategy, models, confidence
-    threshold, DB target, and whether this caller may submit origin
-    readings (`write_tools`). Free — no LLM calls."""
+    """Active configuration: routing strategy, models (each a spec:
+    "gemini:<model>" or an Anthropic name), confidence threshold, DB
+    target, which LLM keys are configured, and whether this caller may
+    submit origin readings (`write_tools`). Reflects runtime overrides
+    from POST /settings/runtime. Free — no LLM calls."""
     from .config import redact_db_url, settings
 
     cfg = settings()
@@ -1234,6 +1290,9 @@ def pipeline_status(ctx: Context = None) -> PipelineStatus:  # type: ignore[assi
         mcp_auth="required" if cfg.mcp_auth_tokens else "anonymous",
         write_tools=("disabled" if transport == "http" and label == "anonymous"
                      else "enabled"),
+        classifier_model=cfg.classifier_model,
+        nl2sql_model=cfg.nl2sql_model,
+        gemini_key_configured=bool(cfg.gemini_api_key),
     )
 
 

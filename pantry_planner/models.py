@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .nlsearch.plan import StepResult  # import-safe: plan.py is pydantic-only
+from .nlsearch.plan import StepPhase, StepResult  # import-safe: plan.py is pydantic-only
 
 # ─── Domain models ────────────────────────────────────────────
 
@@ -211,6 +211,21 @@ class SelectorResult(BaseModel):
     output_tokens: int = 0
     latency_ms: int = 0
     cost_usd: float = 0.0
+    # One httptrace record per LLM call behind this result (Gemini only): where the time went.
+    http: list[dict] = Field(default_factory=list)
+
+
+class LlmCallTrace(BaseModel):
+    """One LLM call's time, phase by phase (httptrace.py). `server_ms` is the provider's own
+    processing time as its front end reports it (Google's server-timing header), when it
+    does: `waiting for Google` far above it was spent before the request reached Google."""
+    step: str
+    model: str
+    total_ms: int
+    attempts: int = 1
+    status: int | None = None
+    server_ms: int | None = None
+    phases: list[StepPhase] = Field(default_factory=list)
 
 
 # ─── Router I/O ───────────────────────────────────────────────
@@ -341,6 +356,10 @@ class ShoppingPlan(BaseModel):
     interpretation: list[str] = Field(default_factory=list)
     plan_trace: list[StepResult] = Field(default_factory=list)
     candidate_count: int = 0
+    # Every LLM call the plan made, phase by phase (both paths; empty in demo mode).
+    llm_calls: list[LlmCallTrace] = Field(default_factory=list)
+    # The Burr run that traced this plan, step by step (its app id in the Burr UI).
+    burr_run: str = ""
     # Split-trip optimizer: stops-vs-cost frontier for the chosen basket
     trip_options: list[TripOption] = Field(default_factory=list)
     # Provenance of the basket as a whole. Only computed when the caller

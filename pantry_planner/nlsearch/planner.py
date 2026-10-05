@@ -567,6 +567,14 @@ def run_query_plan(text_input: str, *, parsed: ParsedInput | None = None,
             parsed = demomode.parse_recipe(text_input)
         else:
             parsed = parse_input(text_input)
+            if parsed.error:
+                # The parse CALL failed (bad key, quota, provider down, a
+                # reply that didn't validate) — not a recipe without
+                # ingredients. Raise it as what it is rather than letting
+                # the empty parse surface as "couldn't find an ingredient
+                # list", which blames the user's text.
+                from ..llm import LLMError
+                raise LLMError(f"Recipe parse failed ({cfg.nl2sql_model}): {parsed.error}")
     parsed = validate_parsed(parsed, db_vocab())
     if max_km is not None:
         stated = parsed.constraints.max_distance_km

@@ -12,7 +12,6 @@ from __future__ import annotations
 from ..config import HAIKU, SONNET
 from ..models import PhaseAMetrics, PhaseBMetrics
 
-
 # ─── Weights ──────────────────────────────────────────────────
 # Sum = 1.0. Rebalance based on eval results.
 W_INGREDIENT_COUNT = 0.10   # more ingredients → more decisions
@@ -49,9 +48,13 @@ def decide(
     phase_b: PhaseBMetrics,
     *,
     escalation_model: str = SONNET,
+    default_model: str = HAIKU,
 ) -> tuple[str, float, str]:
     """
     Returns (model, complexity_score, reason).
+
+    Low complexity picks `default_model` (SELECTOR_MODEL_DEFAULT when called
+    from the router), so a non-Anthropic default spec is honoured here too.
 
     complexity_score is in [0, 1] — higher = harder task.
     """
@@ -85,8 +88,8 @@ def decide(
         )
 
     if complexity < THRESHOLD_HAIKU:
-        return HAIKU, complexity, (
-            f"low complexity ({complexity:.2f}) → Haiku sufficient"
+        return default_model, complexity, (
+            f"low complexity ({complexity:.2f}) → default model sufficient"
         )
     elif complexity < THRESHOLD_SONNET:
         return escalation_model, complexity, (

@@ -44,6 +44,8 @@ class ParsedInput(BaseModel):
     cost_usd: float = 0.0
     latency_ms: int = 0
     error: str | None = None
+    # The parse call's httptrace record (Gemini): where its latency went. Not shown to users.
+    http: dict | None = Field(default=None, exclude=True)
 
     def display_lines(self) -> list[str]:
         """The UI's 'Interpreted as:' chips."""

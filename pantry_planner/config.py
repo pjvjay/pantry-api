@@ -7,10 +7,10 @@ thresholds) is here so it's easy to point at when explaining the design.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from urllib.parse import quote
-
 
 # ─── Model names ──────────────────────────────────────────────
 # Kept as strings (not enums) so a new model version can be swapped
@@ -18,6 +18,50 @@ from urllib.parse import quote
 HAIKU = "claude-haiku-4-5-20251001"
 SONNET = "claude-sonnet-4-6"
 SONNET_THINKING = "claude-sonnet-4-6"  # same model, thinking enabled at call site
+
+# ─── Model specs: which provider serves a model setting ──────
+# A model setting is a SPEC: "gemini:<model>" routes to Google Gemini,
+# "anthropic:<model>" or a bare name ("claude-haiku-4-5-20251001") to
+# Anthropic. The bare form is what every existing deployment sets, so it
+# keeps meaning Anthropic. llm.forced_tool_call is the one place that acts
+# on the provider; everything else passes the spec through untouched (it is
+# what model_used and the metrics labels show).
+GEMINI = "gemini"
+ANTHROPIC = "anthropic"
+_PROVIDERS = (GEMINI, ANTHROPIC)
+
+
+def split_model_spec(spec: str) -> tuple[str, str]:
+    """(provider, provider-side model name). Never raises: anything without
+    a known `provider:` prefix is a bare Anthropic name."""
+    spec = (spec or "").strip()
+    prefix, sep, rest = spec.partition(":")
+    if sep and prefix.strip().lower() in _PROVIDERS:
+        return prefix.strip().lower(), rest.strip()
+    return ANTHROPIC, spec
+
+
+def validate_model_spec(spec: str) -> str:
+    """Return the normalised spec, or raise ValueError saying what is wrong.
+
+    Accepted: "gemini:<model>", "anthropic:<model>" (non-empty model), or a
+    bare Anthropic name starting "claude-". Used where a spec arrives from a
+    caller at runtime; env values are not re-validated so an existing
+    deployment's bare model names keep working."""
+    raw = (spec or "").strip()
+    if not raw:
+        raise ValueError("model spec must not be empty")
+    prefix, sep, _ = raw.partition(":")
+    if sep and prefix.strip().lower() in _PROVIDERS:
+        provider, name = split_model_spec(raw)
+        if not name:
+            raise ValueError(f"model spec {raw!r} names no model after '{provider}:'")
+        return f"{provider}:{name}"
+    if not raw.startswith("claude-"):
+        raise ValueError(
+            f"model spec {raw!r} must be 'gemini:<model>', 'anthropic:<model>' "
+            "or a bare 'claude-...' name")
+    return raw
 
 
 def _db_url_from_env() -> str:
@@ -155,8 +199,19 @@ class Settings:
     # HTTP (stdio is the operator's own process and stays trusted).
     mcp_auth_tokens: tuple[tuple[str, str], ...]
 
+    # Gemini (any model setting of the form "gemini:<model>"). The key may
+    # be empty: only a Gemini call made without one is an error.
+    gemini_api_key: str = ""
+    gemini_base_url: str = ""          # "" → Google's OpenAI-compatible endpoint
+    gemini_reasoning_effort: str = "low"   # "" → omit (model default)
+
+    # RUNTIME_SETTINGS_ENABLED=1: POST /settings/runtime may switch demo
+    # mode and the model specs without a restart (demo UI). Off by default:
+    # on a public deployment it would let anyone turn real LLM spend on.
+    runtime_settings_enabled: bool = False
+
     @staticmethod
-    def from_env() -> "Settings":
+    def from_env() -> Settings:
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         if not api_key:
             # Don't raise — tests mock the SDK. Runtime code that actually
@@ -188,12 +243,92 @@ class Settings:
             travel_cost_per_km=float(os.environ.get("TRAVEL_COST_PER_KM", "0.50")),
             demo_mode=os.environ.get("DEMO_MODE", "").lower() in {"1", "true", "yes"},
             mcp_auth_tokens=parse_mcp_auth_tokens(os.environ.get("MCP_AUTH_TOKENS", "")),
+            gemini_api_key=os.environ.get("GEMINI_API_KEY", "").strip(),
+            gemini_base_url=os.environ.get("GEMINI_BASE_URL", "").strip(),
+            gemini_reasoning_effort=os.environ.get(
+                "GEMINI_REASONING_EFFORT", "low").strip().lower(),
+            runtime_settings_enabled=(
+                os.environ.get("RUNTIME_SETTINGS_ENABLED", "").lower()
+                in {"1", "true", "yes"}),
         )
 
 
+# ─── Effective settings = env (cached) + runtime overrides ───
+# The demo UI switches demo mode and the model specs without a restart.
+# Overrides live in one module-level mapping applied over the cached env
+# settings with dataclasses.replace, so every settings() caller sees a
+# change on its next call. The mapping is replaced, never mutated, so a
+# reader always gets a consistent snapshot without taking the lock.
+RUNTIME_MODEL_FIELDS: dict[str, str] = {
+    # API name -> Settings field
+    "selector_default": "selector_model_default",
+    "selector_escalation": "selector_model_escalation",
+    "classifier": "classifier_model",
+    "nl2sql": "nl2sql_model",
+}
+_runtime_overrides: dict[str, object] = {}
+_runtime_lock = threading.Lock()
+
+
 @lru_cache(maxsize=1)
-def settings() -> Settings:
+def _env_settings() -> Settings:
     return Settings.from_env()
+
+
+def settings() -> Settings:
+    overrides = _runtime_overrides          # one read: a consistent snapshot
+    base = _env_settings()
+    return replace(base, **overrides) if overrides else base
+
+
+def runtime_overrides() -> dict[str, object]:
+    """The overrides currently applied (a copy), keyed by Settings field."""
+    return dict(_runtime_overrides)
+
+
+def set_runtime_overrides(*, demo_mode: bool | None = None,
+                          models: dict[str, str | None] | None = None) -> Settings:
+    """Apply runtime overrides; returns the new effective settings.
+
+    `models` is keyed by the API names in RUNTIME_MODEL_FIELDS; a None value
+    leaves that model alone. Everything is validated before anything is
+    applied, so a bad spec changes nothing (ValueError names the key)."""
+    updates: dict[str, object] = {}
+    if demo_mode is not None:
+        updates["demo_mode"] = bool(demo_mode)
+    for key, spec in (models or {}).items():
+        if key not in RUNTIME_MODEL_FIELDS:
+            raise ValueError(f"unknown model setting {key!r}; expected one of "
+                             f"{sorted(RUNTIME_MODEL_FIELDS)}")
+        if spec is None:
+            continue
+        try:
+            updates[RUNTIME_MODEL_FIELDS[key]] = validate_model_spec(spec)
+        except ValueError as e:
+            raise ValueError(f"models.{key}: {e}") from None
+    global _runtime_overrides
+    with _runtime_lock:
+        _runtime_overrides = {**_runtime_overrides, **updates}
+    return settings()
+
+
+def clear_runtime_overrides() -> None:
+    global _runtime_overrides
+    with _runtime_lock:
+        _runtime_overrides = {}
+
+
+def _reset_settings() -> None:
+    """Re-read the environment AND drop runtime overrides — a full reset.
+
+    Exposed as settings.cache_clear(), the name every test fixture already
+    calls after changing the environment, so a test that flips a runtime
+    override can never leak it into the next module."""
+    _env_settings.cache_clear()
+    clear_runtime_overrides()
+
+
+settings.cache_clear = _reset_settings  # type: ignore[attr-defined]
 
 
 # ─── Router factory ───────────────────────────────────────────
@@ -211,7 +346,8 @@ def get_router():
 
 # ─── Cost rate cards (per 1M tokens) ──────────────────────────
 # Used by tracing.py to attach cost estimates to each LLM call. Keep in
-# sync with Anthropic's published pricing.
+# sync with Anthropic's published pricing. Keyed by the provider-side
+# model name, so "anthropic:claude-..." and the bare name price the same.
 COST_PER_MTOK: dict[str, tuple[float, float]] = {
     # (input, output) in USD per million tokens
     HAIKU: (1.00, 5.00),
@@ -220,8 +356,14 @@ COST_PER_MTOK: dict[str, tuple[float, float]] = {
 
 
 def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:
-    """Estimate USD cost of a Claude call. Returns 0.0 for unknown models."""
-    rates = COST_PER_MTOK.get(model)
+    """Estimate USD cost of an LLM call. Returns 0.0 for unknown models.
+
+    Gemini is priced at 0.0: this deployment uses the free tier. The token
+    counts still flow to the metrics and traces unchanged."""
+    provider, name = split_model_spec(model)
+    if provider == GEMINI:
+        return 0.0
+    rates = COST_PER_MTOK.get(name)
     if not rates:
         return 0.0
     in_rate, out_rate = rates

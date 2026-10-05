@@ -8,3 +8,11 @@ version of that job never connected to Postgres at all because every module
 hard-set SQLite. The URL is read in each module's fixture so this file only
 documents the contract.
 """
+
+import os
+import tempfile
+
+# Burr traces from the suite go to a throwaway folder, not the developer's .burr: every plan call
+# is its own Burr run, so one suite run would otherwise add a hundred runs to the Burr UI. Read by
+# tracing.py at import, which follows this file. An explicit BURR_TRACKING_DIR still wins.
+os.environ.setdefault("BURR_TRACKING_DIR", tempfile.mkdtemp(prefix="pantry-burr-tests-"))

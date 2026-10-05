@@ -1,7 +1,8 @@
 """TRANSLATION: multi-shot constrained semantic parse of a pasted recipe.
 
-One Claude call with a forced tool (same idiom as selector.py) returns the
-two-part parse: RecipeSpec (what to cook) + Constraints (how to shop).
+One LLM call with a forced tool (llm.forced_tool_call, same idiom as
+selector.py; NL2SQL_MODEL picks the provider) returns the two-part parse:
+RecipeSpec (what to cook) + Constraints (how to shop).
 The model never writes SQL — it parameterizes a fixed pattern menu, and
 validate_parsed() clamps every value against the live DB vocabulary.
 
@@ -12,10 +13,9 @@ from __future__ import annotations
 
 import time
 
-from anthropic import Anthropic
-
 from ..config import estimate_cost_usd, settings
-from .schemas import Constraints, IngredientSpec, ParsedInput, RecipeSpec
+from ..llm import forced_tool_call
+from .schemas import ParsedInput
 
 ALLOWED_TAGS = {"dairy", "gluten", "meat", "nuts", "egg", "soy"}
 MAX_INGREDIENTS = 40
@@ -169,23 +169,21 @@ def parse_input(text_input: str, *, model: str | None = None) -> ParsedInput:
 
     cfg = settings()
     try:
-        client = Anthropic(api_key=cfg.anthropic_api_key)
         t0 = time.perf_counter()
-        resp = client.messages.create(
+        reply = forced_tool_call(
             model=model or cfg.nl2sql_model,
             max_tokens=2048,
             temperature=0.0,   # structured extraction: same input, same parse
             system=PARSER_SYSTEM.format(vocab=prompt_block(db_vocab())),
-            tools=[PARSER_TOOL],
-            tool_choice={"type": "tool", "name": "submit_parse"},
+            tool=PARSER_TOOL,
             messages=[{"role": "user", "content": text_input}],
         )
         latency_ms = int((time.perf_counter() - t0) * 1000)
-        tool_block = next(b for b in resp.content if b.type == "tool_use")
-        parsed = ParsedInput.model_validate(tool_block.input)
+        parsed = ParsedInput.model_validate(reply.input)
         parsed.cost_usd = estimate_cost_usd(
-            resp.model, resp.usage.input_tokens, resp.usage.output_tokens)
+            reply.model, reply.input_tokens, reply.output_tokens)
         parsed.latency_ms = latency_ms
+        parsed.http = reply.http
         return parsed
     except Exception as e:  # noqa: BLE001 — housing failure mode: degrade, don't raise
         return ParsedInput(error=str(e)[:200])

@@ -74,6 +74,11 @@ Everything's env-var driven. Defaults in `pantry_planner/config.py`.
 | `SELECTOR_MODEL_DEFAULT`     | `claude-haiku-4-5-20251001`      | Main selector model                          |
 | `SELECTOR_MODEL_ESCALATION`  | `claude-sonnet-4-6`              | Model to escalate to (both strategies)       |
 | `CLASSIFIER_MODEL`           | `claude-haiku-4-5-20251001`      | Phase B classifier (three_phase only)        |
+| `NL2SQL_MODEL`               | `claude-sonnet-4-6`              | Recipe-text parser (`/plan/nl`)              |
+| `GEMINI_API_KEY`             | *(unset)*                        | Auth for any `gemini:<model>` setting; only an actual Gemini call without it is an error |
+| `GEMINI_REASONING_EFFORT`    | `low`                            | Sent as `reasoning_effort` to Gemini; empty = omit (model default) |
+| `GEMINI_BASE_URL`            | Google's OpenAI-compatible URL   | Override the Gemini endpoint (`…/v1beta/openai`) |
+| `RUNTIME_SETTINGS_ENABLED`   | `false`                          | Allow `POST /settings/runtime` to switch demo mode and models live |
 | `CONFIDENCE_THRESHOLD`       | `0.80`                           | Below this → escalate (cascade only)         |
 | `DB_URL`                     | `sqlite:///./pantry.db`          | SQLAlchemy URL (wins if set)                 |
 | `DEMO_MODE`                  | `false`                          | Deterministic stand-ins replace both LLM calls (public demo: no key, no cost) |
@@ -81,6 +86,22 @@ Everything's env-var driven. Defaults in `pantry_planner/config.py`.
 | `DEFAULT_LAT` / `DEFAULT_LON`| `49.28` / `-123.12`              | Shopping location when the request sends none |
 | `ORIGIN_MIN_COVERAGE`        | `0.6`                            | Spend-weighted origin coverage below which a basket is labelled UNVERIFIED |
 | `DB_HOST` (+ `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`) | *(unset)* | Composed into a Postgres URL when `DB_URL` is unset — the Kubernetes path, parts injected from the CNPG credential secret |
+
+The four model settings are **specs**: `gemini:<model>` (e.g.
+`gemini:gemini-flash-latest`) routes that call to Google Gemini through its
+OpenAI-compatible endpoint; a bare name or `anthropic:<model>` routes to
+Anthropic. Mix freely — e.g. a Gemini default selector escalating to
+Sonnet. Gemini calls are costed at $0 (free tier); `model_used` and the
+metrics labels carry the spec. All three call sites go through one
+function, `pantry_planner/llm.py::forced_tool_call`.
+
+`GET /settings/runtime` shows demo mode, the effective model specs and
+which keys are configured. With `RUNTIME_SETTINGS_ENABLED=1`,
+`POST /settings/runtime` with `{"demo_mode": true}` and/or
+`{"models": {"selector_default": "gemini:…", "selector_escalation": …,
+"classifier": …, "nl2sql": …}}` applies to the next request — no restart;
+`/health` and the MCP `pipeline_status` tool reflect it. Leave it off on a
+public deployment: it lets any caller turn real LLM spend on.
 
 ## Try both routers side-by-side
 
@@ -232,6 +253,28 @@ keyword filter + read-only execution) is a known alternative — deliberately
 not used here; the constrained parse + templated plan is the injection-safe
 hot path.
 
+## Library recipes at nearby stores (`POST /plan/{slug}?lat=&lon=&max_km=`)
+
+The classic path's selector sees the whole catalog and has no location, so a library recipe
+used to come back with catalog prices and no stores. Give it a location (any of `lat`, `lon`,
+`max_km`; lat/lon default to the server's point, no `max_km` means any distance) and, after the
+products are chosen exactly as before:
+
+- each line is priced at its product's cheapest store within range — the convention
+  `plan_from_text`'s lines use — and `total_cost` sums those prices;
+- the split-trip optimizer (`t5_trip_optimizer`) runs over the basket, as on the NL path, so
+  `trip_options` / `summary.trip` recommend which stores to visit;
+- a chosen product that no store in range sells is never priced from the catalog: it moves to
+  `out_of_range` with the nearest offer anywhere ("Fresh Garlic has no offer within 1 km of the
+  shopping location; the nearest is <store>, <distance> km away, at $<price>"), and the total
+  and trip cover the rest. When no chosen product is sold in range the plan is a 409
+  `unavailable_within_constraints` naming every product's nearest offer.
+
+The selector itself still ignores distance, so it can choose a product only sold farther away
+while a nearer alternative exists; that product is then reported, not silently swapped.
+`tests/test_recipe_location.py` covers the unchanged default, the prices and trip, a product
+taken off the only nearby store's shelf, the no-store gate, and the REST and MCP parameters.
+
 ## Weekly menu optimizer (`POST /plan/week`)
 
 Plans N dinners from the recipe library under an optional budget — with no
@@ -252,8 +295,9 @@ optimizer.
 [pantry-planner-demo.onrender.com/pantry/](https://pantry-planner-demo.onrender.com/pantry/)
 (free tier — allow ~a minute to wake if idle).
 
-`DEMO_MODE=1` swaps the two Claude call sites — recipe parse and product
-selection — for deterministic stand-ins (`demomode.py`, labeled
+`DEMO_MODE=1` (or `POST /settings/runtime {"demo_mode": true}`) swaps the
+LLM call sites — recipe parse and product selection — for deterministic
+stand-ins (`demomode.py`, labeled
 `model_used: "demo-deterministic"`; `/health` reports `demo_mode`). The
 public demo runs keyless, free, and abuse-proof while the query-plan
 machinery, gates, and optimizers run unchanged.
@@ -289,7 +333,7 @@ nothing needs a token.
 | `get_product_origins` | free | only when configured | `OriginPage {items, total, by_status, next_offset}` — `by_status` counts the whole selection before paging |
 | `rank_products_by_origin` | free | only when configured | `OriginRanking` — `ranked` / `excluded` / `unranked` kept separate |
 | `origin_triage` | free | only when configured | products worth reading a label for (hints, never origins) |
-| `plan_recipe` | 1–3 Claude calls | only when configured | `PlanResult {summary, full}` for a seeded slug |
+| `plan_recipe` | 1–3 LLM calls | only when configured | `PlanResult {summary, full}` for a seeded slug. Any of `lat`/`lon`/`max_km` makes it store-aware: each line at its cheapest store in range, `summary.trip` the recommended split, and a chosen product no store in range sells in `summary.out_of_range` (naming the nearest offer); without them, catalog prices and no stores |
 | `plan_from_text` | 2–4 Claude calls | only when configured | `PlanResult` for pasted recipe text (NL2SQL path). `lat`/`lon`/`max_km` define "nearby"; `allow_partial=true` plans what is stocked and in range and lists the rest in `summary.not_stocked` / `summary.out_of_range` |
 | `plan_week` | ~1 selector call per day | only when configured | `WeekResult {summary, full}` |
 | `submit_origin_evidence` | free | **always over HTTP** | `Submission` — a PENDING label reading, deduplicated |

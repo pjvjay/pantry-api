@@ -20,7 +20,9 @@ Both routers use the same graph. The only difference is which nodes
 from __future__ import annotations
 
 import math
+import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from burr.core import Application, ApplicationBuilder, State, action, expr
@@ -40,7 +42,7 @@ from .models import (
     ShoppingPlan,
 )
 from .selector import call_selector, merge_selections
-from .tracing import llm_span, make_tracker
+from .tracing import llm_call_trace, llm_span, llm_step, make_tracker
 
 # ─── Purchases: selections -> what is actually bought ────────
 # Two recipe lines can resolve to one product (mala chicken's "ground
@@ -153,11 +155,14 @@ def _selector_constraints(parsed, brand_stats: dict | None = None,
 
 # ─── Actions ─────────────────────────────────────────────────
 
-@action(reads=[], writes=["recipe"])
-def load_recipe(state: State, recipe_slug: str) -> tuple[dict, State]:
+@action(reads=[], writes=["recipe", "location"])
+def load_recipe(state: State, recipe_slug: str,
+                location: dict | None = None) -> tuple[dict, State]:
+    """`location` ({lat, lon, max_km}) makes the plan store-aware: each chosen product is
+    priced at its cheapest store in range and the trip optimizer splits the basket."""
     recipe = db.load_recipe(recipe_slug)
     result = {"ingredient_count": len(recipe.ingredients)}
-    return result, state.update(recipe=recipe)
+    return result, state.update(recipe=recipe, location=location)
 
 
 @action(reads=["recipe"], writes=["products", "origins", "origin_dropped", "preference",
@@ -241,7 +246,7 @@ def parse_and_retrieve(state: State, recipe_text: str,
         origin_requested=bool(exclude or preference),
         parsed_input=r.parsed,
         location={"lat": r.lat, "lon": r.lon, "max_km": r.max_km},
-        plan_trace=r.execution.steps, brand_stats=r.brand_stats,
+        plan_trace=[*_parse_step(r.parsed), *r.execution.steps], brand_stats=r.brand_stats,
         retrieval_stats=r.stats, not_stocked=r.not_stocked,
         out_of_range=r.out_of_range, skipped=r.skipped, pool_hints=pool_hints,
         match_levels=r.match_levels, ingredient_count=r.ingredient_count)
@@ -266,8 +271,9 @@ def preselect_model(state: State) -> tuple[dict, State]:
     return result, state.update(preselect_result=preselect)
 
 
-@action(reads=["recipe", "products", "preselect_result", "origins", "preference"],
-        writes=["initial_result"])
+@action(reads=["recipe", "products", "preselect_result", "origins", "preference",
+               "plan_trace"],
+        writes=["initial_result", "plan_trace"])
 def select_products(state: State) -> tuple[dict, State]:
     recipe: Recipe = state["recipe"]
     products: list[Product] = state["products"]
@@ -293,11 +299,13 @@ def select_products(state: State) -> tuple[dict, State]:
         output_tokens=result.output_tokens,
         cost_usd=result.cost_usd,
         latency_ms=result.latency_ms,
+        http=result.http[-1] if result.http else None,
     )
     from . import metrics as _m
     _m.record_llm(span)
     return {"llm_call": span, "n_selections": len(result.selections)}, \
-        state.update(initial_result=result)
+        state.update(initial_result=result,
+                     plan_trace=_with_llm_step(state, span))
 
 
 @action(reads=["initial_result"], writes=["escalation_decision"])
@@ -312,8 +320,8 @@ def check_escalation(state: State) -> tuple[dict, State]:
 
 
 @action(
-    reads=["recipe", "products", "initial_result", "escalation_decision"],
-    writes=["final_result"],
+    reads=["recipe", "products", "initial_result", "escalation_decision", "plan_trace"],
+    writes=["final_result", "plan_trace"],
 )
 def escalate_if_needed(state: State) -> tuple[dict, State]:
     """Only runs when escalation_decision.escalate == True (routed via graph)."""
@@ -343,9 +351,11 @@ def escalate_if_needed(state: State) -> tuple[dict, State]:
         output_tokens=escalated.output_tokens,
         cost_usd=escalated.cost_usd,
         latency_ms=escalated.latency_ms,
+        http=escalated.http[-1] if escalated.http else None,
     )
     return {"llm_call": span, "n_reran": len(flagged_ingredients)}, \
-        state.update(final_result=merged)
+        state.update(final_result=merged,
+                     plan_trace=_with_llm_step(state, span))
 
 
 @action(reads=["initial_result", "final_result"], writes=["final_result"])
@@ -356,13 +366,16 @@ def skip_escalation(state: State) -> tuple[dict, State]:
 
 @action(reads=["final_result", "products", "recipe", "parsed_input", "location",
                "plan_trace"],
-        writes=["trip_options", "plan_trace"])
+        writes=["trip_options", "plan_trace", "store_offers", "nearest_offers"])
 def optimize_trips(state: State) -> tuple[dict, State]:
     """4A: deterministic split-trip optimizer over the chosen basket.
     Prices every PURCHASE (group_purchases: a product shared by two lines
     once, times its packs) at every in-range store (one templated query),
-    then enumerates store subsets with exact travel loops — no LLM. NL path
-    only; the classic path has no location and passes straight through."""
+    then enumerates store subsets with exact travel loops — no LLM. Runs
+    whenever the plan has a location: always on the NL path, and on the
+    classic path when the caller gave one. Also records each product's
+    cheapest in-range offer (the classic path prices its lines with it) and,
+    for a product no store in range sells, the nearest offer anywhere."""
     import time as _time
 
     from sqlalchemy import text as _text
@@ -383,7 +396,8 @@ def optimize_trips(state: State) -> tuple[dict, State]:
     if loc is None or not basket:
         # Burr requires every declared write; pass the trace through untouched.
         return {"skipped": True}, state.update(
-            trip_options=[], plan_trace=state.get("plan_trace") or [])
+            trip_options=[], plan_trace=state.get("plan_trace") or [],
+            store_offers={}, nearest_offers={})
 
     sql, params = build_price_matrix_sql(
         sorted({pid for pid, _ in basket}), loc["lat"], loc["lon"], loc["max_km"])
@@ -391,6 +405,17 @@ def optimize_trips(state: State) -> tuple[dict, State]:
     with _Session(db.engine()) as s:
         rows = list(s.execute(_text(sql), params).mappings())
     duration_ms = int((_time.perf_counter() - t0) * 1000)
+    offers = _best_offers(rows, key=lambda r: (r["price"], r["dist_km2"]))
+    # A product no store in range sells (possible only on the classic path, whose selector
+    # does not see distance) is left out of the trip, and its nearest offer anywhere named.
+    missing = sorted({pid for pid, _ in basket} - offers.keys())
+    nearest: dict[int, dict] = {}
+    if missing:
+        sql2, params2 = build_price_matrix_sql(missing, loc["lat"], loc["lon"], None)
+        with _Session(db.engine()) as s:
+            nearest = _best_offers(list(s.execute(_text(sql2), params2).mappings()),
+                                   key=lambda r: (r["dist_km2"], r["price"]))
+    basket = [(pid, name) for pid, name in basket if pid in offers]
 
     options = tripopt.optimize_trips(
         rows, basket, home_lat=loc["lat"], home_lon=loc["lon"],
@@ -406,15 +431,52 @@ def optimize_trips(state: State) -> tuple[dict, State]:
                       row_count=len(rows), duration_ms=duration_ms, label=label)
     return {"n_options": len(options)}, state.update(
         trip_options=options,
-        plan_trace=[*(state.get("plan_trace") or []), step])
+        plan_trace=[*(state.get("plan_trace") or []), step],
+        store_offers=offers, nearest_offers=nearest)
+
+
+def _with_llm_step(state: State, span: dict) -> list:
+    """The plan trace with this LLM call appended (a demo-mode call, instant and untraced,
+    adds nothing)."""
+    trace = list(state.get("plan_trace") or [])
+    return trace + [llm_step(span)] if span.get("http") or span["latency_ms"] else trace
+
+
+def _parse_step(parsed) -> list:
+    """The recipe parse's LLM call as the plan trace's first step (none in demo mode)."""
+    if parsed is None or not parsed.http:
+        return []
+    return [llm_step(llm_span(step="parse_input", model=parsed.http.get("model", ""),
+                              input_tokens=0, output_tokens=0, cost_usd=parsed.cost_usd,
+                              latency_ms=parsed.latency_ms, http=parsed.http))]
+
+
+def _llm_calls(parsed, initial: SelectorResult | None, final: SelectorResult) -> list:
+    """Every traced LLM call behind the plan, phase by phase: the parse (NL path), the
+    selection and, after an escalation, the re-run (merge_selections appends its trace after
+    the selection's; without one, final_result IS initial_result)."""
+    first = initial.http if initial is not None else []
+    return ([llm_call_trace("parse_input", parsed.http)] if parsed and parsed.http else []) \
+        + [llm_call_trace("select_products", h) for h in first] \
+        + [llm_call_trace("escalate", h) for h in final.http[len(first):]]
+
+
+def _best_offers(rows, *, key) -> dict[int, dict]:
+    """product_id -> the offer that sorts first by `key`: {store, price, dist_km}."""
+    best: dict[int, dict] = {}
+    for r in sorted(rows, key=key):
+        best.setdefault(r["product_id"], {
+            "store": r["store_name"], "price": r["price"],
+            "dist_km": round(math.sqrt(max(r["dist_km2"], 0.0)), 1)})
+    return best
 
 
 @action(
-    reads=["recipe", "products", "final_result", "preselect_result",
+    reads=["recipe", "products", "initial_result", "final_result", "preselect_result",
            "escalation_decision", "trip_options", "parsed_input", "origins",
            "origin_requested", "origin_dropped", "match_levels", "not_stocked",
            "out_of_range", "skipped", "pool_hints", "ingredient_count",
-           "plan_trace"],
+           "plan_trace", "location", "store_offers", "nearest_offers"],
     writes=["plan"],
 )
 def build_plan(state: State) -> tuple[dict, State]:
@@ -432,8 +494,48 @@ def build_plan(state: State) -> tuple[dict, State]:
     match_levels = state.get("match_levels") or {}
 
     parsed = state.get("parsed_input")   # NL path only
+    location = state.get("location")
+    offers = state.get("store_offers") or {}
+    if parsed is None and location is not None:
+        # Classic path with a shopping location: each chosen product priced at its cheapest
+        # store in range, as plan_from_text's lines are.
+        products_by_id = {
+            pid: p.model_copy(update={"store_name": offers[pid]["store"],
+                                      "store_price": offers[pid]["price"]})
+            if pid in offers else p
+            for pid, p in products_by_id.items()}
     purchases, unselected = group_purchases(final.selections, products_by_id,
                                             ingredients_by_line, _needs(parsed))
+    unreachable: list[DroppedIngredient] = []
+    if parsed is None and location is not None:
+        # Reported, never silently dropped: a chosen product no store in range sells leaves
+        # the priced basket (and the trip) for out_of_range, naming the nearest offer.
+        nearest = state.get("nearest_offers") or {}
+        within = (f"within {location['max_km']:g} km of the shopping location"
+                  if location.get("max_km") is not None else "at any store")
+        for pu in [pu for pu in purchases if pu.product.id not in offers]:
+            near = nearest.get(pu.product.id)
+            unreachable.append(DroppedIngredient(
+                ingredient=" + ".join(ing.name for _, ing in pu.lines),
+                reason=(f"{pu.product.name} has no offer {within}"
+                        + (f"; the nearest is {near['store']}, {near['dist_km']:.1f} km away, "
+                           f"at ${near['price']:.2f}" if near else "; no store sells it"))))
+        purchases = [pu for pu in purchases if pu.product.id in offers]
+        if unreachable and not purchases:
+            # Nothing left to price: an error, as plan_from_text's range gate is, naming the
+            # nearest offer for every product.
+            from .nlsearch.plan import GateCode, PlanAlert, PlanExecution
+            from .nlsearch.planner import PlanAborted
+
+            raise PlanAborted(PlanExecution(
+                steps=state.get("plan_trace") or [],
+                aborted=PlanAlert(
+                    stage="t5_trip_optimizer", code=GateCode.unavailable_within_constraints,
+                    message=(f"No store {within} sells any of the chosen products. Widen "
+                             "max_km or move the location."),
+                    details=[{"name": d.ingredient, "reason": d.reason, "suggestions": []}
+                             for d in unreachable],
+                    partial_would_plan=0)))
     line_items: list[PlanLineItem] = []
     for pu in purchases:
         prod = pu.product
@@ -499,9 +601,10 @@ def build_plan(state: State) -> tuple[dict, State]:
         interpretation=parsed.display_lines() if parsed else [],
         plan_trace=state.get("plan_trace") or [],
         candidate_count=len(state["products"]) if parsed else 0,
+        llm_calls=_llm_calls(parsed, state.get("initial_result"), final),
         trip_options=state.get("trip_options") or [],
         not_stocked=state.get("not_stocked") or [],
-        out_of_range=state.get("out_of_range") or [],
+        out_of_range=list(state.get("out_of_range") or []) + unreachable,
         skipped=skipped,
         ingredient_count=state.get("ingredient_count") or len(recipe.ingredients),
     )
@@ -714,12 +817,19 @@ def build_application(recipe_slug: str | None = None,
             .with_transitions(("parse_and_retrieve", "preselect_model"),
                               *shared_tail)
             .with_entrypoint("parse_and_retrieve")
-            .with_identifiers(app_id="run-nl")
+            .with_identifiers(app_id=_run_id("nl"))
         )
     else:
+        # A store-aware classic plan when the caller gives any of lat/lon/max_km; lat/lon
+        # default to the server's shopping point and max_km None means any distance.
+        location = None
+        if lat is not None or lon is not None or max_km is not None:
+            cfg = settings()
+            location = {"lat": cfg.default_lat if lat is None else lat,
+                        "lon": cfg.default_lon if lon is None else lon, "max_km": max_km}
         builder = (
             ApplicationBuilder()
-            .with_actions(load_recipe.bind(recipe_slug=recipe_slug),
+            .with_actions(load_recipe.bind(recipe_slug=recipe_slug, location=location),
                           load_products.bind(exclude=exclude,
                                              preference=preference),
                           *common_actions)
@@ -727,22 +837,32 @@ def build_application(recipe_slug: str | None = None,
                               ("load_products", "preselect_model"),
                               *shared_tail)
             .with_entrypoint("load_recipe")
-            .with_identifiers(app_id=f"run-{recipe_slug}")
+            .with_identifiers(app_id=_run_id(recipe_slug))
         )
     return builder.with_tracker(make_tracker()).build()
 
 
+def _run_id(name: str) -> str:
+    """One Burr run per plan call, so the Burr UI lists each call on its own (newest first)
+    instead of appending every plan of a recipe to one ever-growing run:
+    run-<recipe or nl>-<local time>-<6 hex>."""
+    return f"run-{name}-{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:6]}"
+
+
 def run(recipe_slug: str, *, exclude: list | None = None,
-        preference: list | None = None) -> ShoppingPlan:
+        preference: list | None = None, lat: float | None = None,
+        lon: float | None = None, max_km: float | None = None) -> ShoppingPlan:
     """Run the classic pipeline end-to-end. Returns the final ShoppingPlan.
 
     `exclude` removes candidates positively evidenced as coming from those
     countries; `preference` is passed to the selector as soft guidance.
+    Any of `lat`/`lon`/`max_km` makes the plan store-aware (stores per line,
+    trip options); without them it is priced from the catalog as before.
     """
     app = build_application(recipe_slug=recipe_slug, exclude=exclude,
-                            preference=preference)
+                            preference=preference, lat=lat, lon=lon, max_km=max_km)
     _action, _result, state = app.run(halt_after=["build_plan"])
-    return state["plan"]
+    return state["plan"].model_copy(update={"burr_run": app.uid})
 
 
 def run_nl(recipe_text: str, lat: float | None = None,
@@ -763,4 +883,4 @@ def run_nl(recipe_text: str, lat: float | None = None,
                             exclude=exclude, preference=preference,
                             max_km=max_km, allow_partial=allow_partial)
     _action, _result, state = app.run(halt_after=["build_plan"])
-    return state["plan"]
+    return state["plan"].model_copy(update={"burr_run": app.uid})
