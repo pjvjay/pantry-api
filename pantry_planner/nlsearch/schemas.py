@@ -38,6 +38,9 @@ class ParsedInput(BaseModel):
     recipe: RecipeSpec = Field(default_factory=RecipeSpec)
     constraints: Constraints = Field(default_factory=Constraints)
     ignored: list[str] = Field(default_factory=list)   # values dropped by validation
+    # ingredients past the 40-ingredient cap (validate_parsed): not planned,
+    # but reported by name on the plan's `skipped` list
+    over_cap: list[IngredientSpec] = Field(default_factory=list)
     cost_usd: float = 0.0
     latency_ms: int = 0
     error: str | None = None

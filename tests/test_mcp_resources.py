@@ -17,6 +17,8 @@ from mcp.server.mcpserver.exceptions import ResourceError
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from tests.seed_catalog import CATALOG, categories, count
+
 _TMP_DB = None
 
 RESOURCE_URIS = {
@@ -134,9 +136,11 @@ async def test_categories_resource_matches_a_direct_group_by(server):
             "GROUP BY category, subcategory"):
         expected.setdefault(cat or "", {})[sub or ""] = n
     assert data == expected
-    assert data["pantry"]["pasta"] == 4
-    assert data["produce"]["vegetables"] == 9
-    assert sum(n for subs in data.values() for n in subs.values()) == 62
+    # ...and the database holds what the seed file says, aisle by aisle
+    assert data == categories()
+    assert data["pantry"]["pasta"] == count("pantry", "pasta") > 0
+    assert data["produce"]["vegetables"] == count("produce", "vegetables") > 0
+    assert sum(n for subs in data.values() for n in subs.values()) == CATALOG
 
 
 # ─── Countries ───────────────────────────────────────────────
@@ -181,7 +185,7 @@ async def test_origin_coverage_reflects_evidence_and_the_review_queue(
 
     data = await _read_json(server, "pantry://origins/coverage")
     assert data == {
-        "products": 62, "by_status": {"unknown": 62}, "evidence_rows": 0,
+        "products": CATALOG, "by_status": {"unknown": CATALOG}, "evidence_rows": 0,
         "submissions": {"pending": 0, "approved": 0, "rejected": 0},
         "submissions_note": "",
         "floor": config.settings().origin_min_coverage,
@@ -200,8 +204,8 @@ async def test_origin_coverage_reflects_evidence_and_the_review_queue(
     assert sub["status"] == "pending" and sub["duplicate"] is False
 
     data = await _read_json(server, "pantry://origins/coverage")
-    assert data["products"] == 62
-    assert data["by_status"] == {"resolved": 1, "unknown": 61}
+    assert data["products"] == CATALOG
+    assert data["by_status"] == {"resolved": 1, "unknown": CATALOG - 1}
     assert data["evidence_rows"] == 1
     assert data["submissions"] == {"pending": 1, "approved": 0, "rejected": 0}
     (pending,) = _sql("SELECT COUNT(*) FROM origin_submissions WHERE status = 'pending'")[0]
