@@ -25,7 +25,7 @@ from .config import (
     validate_model_spec,
 )
 from .llm import LLMError
-from .mealplan.models import RecipeRef, ResolvedRecipe
+from .mealplan.models import MealPlanDraft, MealSchedule, RecipeRef, ResolvedRecipe
 from .models import (
     MAX_DOC_LINES,
     MAX_LINE_NAME,
@@ -707,6 +707,40 @@ def mealplan_resolve(req: MealPlanResolveRequest) -> MealPlanResolveResponse:
     return MealPlanResolveResponse(
         resolved=out, llm_cost_usd=round(sum(r.llm_cost_usd for r in out if not r.cached), 6),
         latency_ms=int((time.perf_counter() - t0) * 1000))
+
+
+async def _draft_size(request: Request) -> None:
+    """A draft is at most 256 KB: 413 above it."""
+    from .mealplan.models import MAX_DRAFT_BYTES
+
+    declared = request.headers.get("content-length", "")
+    size = int(declared) if declared.isdigit() else len(await request.body())
+    if size > MAX_DRAFT_BYTES:
+        raise HTTPException(status_code=413, detail={
+            "error": "too_large", "detail": f"A meal plan is at most {MAX_DRAFT_BYTES} bytes."})
+
+
+def _meal_plan_error(e) -> HTTPException:
+    return HTTPException(status_code=422, detail={"error": e.code, "detail": e.detail,
+                                                  **e.extra})
+
+
+@app.post("/mealplan/schedule", response_model=MealSchedule,
+          dependencies=[Depends(_draft_size),
+                        Depends(limits.rate_limit("/mealplan/schedule"))])
+def mealplan_schedule(draft: MealPlanDraft) -> MealSchedule:
+    """Where the meals sit, what each needs, the trips for both strategies (fresh and
+    fewest_trips), warnings with remedies, and each trip's shopping list. Pure: no LLM, no
+    writes, facts re-read by id; the same draft gives byte-identical JSON. 422 with
+    {error: slot_capacity | unknown_recipe_key | stale_product | invalid_dates | pin_invalid
+    | version}."""
+    from .mealplan.models import MealPlanError
+    from .mealplan.schedule import compute
+
+    try:
+        return compute(draft)
+    except MealPlanError as e:
+        raise _meal_plan_error(e) from e
 
 
 class MyRecipeName(BaseModel):
