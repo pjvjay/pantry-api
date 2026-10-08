@@ -22,6 +22,10 @@ products 166-169 are synthetic demo data, and say so.
 | `GET /mealplan/starters` | The 4 demo starter recipes, labelled "demo recipe" | no | none |
 | `GET /shelf-life?product_id=` | Cited storage and thaw rows per product | no | none |
 
+`schedule` also carries nutrition: each day's `nutrition` (one person's day, one serving of
+every meal), `period_nutrition`, per-recipe receipts in `recipe_nutrition`, and the draft may
+send its own `nutrition_targets`. See `docs/nutrition.md`.
+
 `schedule` and `suggest-cook-days` take the draft itself as the body (at most 256 KB; 413
 above). Their 422s are `{"detail": {"error": code, "detail": text}}` with code
 `slot_capacity`, `unknown_recipe_key`, `stale_product`, `invalid_dates`, `pin_invalid` or
@@ -271,6 +275,9 @@ an account.
 - Source: U.S. Department of Agriculture, Food Safety and Inspection Service, The Big Thaw —
   Safe Defrosting Methods, updated 2013-06-15. USDA asks for a credit line for its public
   domain information (Policies and Links page).
+- Nutrition: Health Canada, Canadian Nutrient File (API, edition not stated; most likely the
+  2015 CNF). Contains information licensed under the Open Government Licence – Canada. See
+  `docs/nutrition.md`.
 - Demo starter recipes, the library's house amounts, products 166-169 and every store price
   and stock level: written for this demo, synthetic, and labelled wherever they are shown.
 

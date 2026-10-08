@@ -100,7 +100,8 @@ def test_recipe_nutrition_carries_receipts_and_sources():
         i["name"] for i in next(x for x in RECIPES if x["slug"] == "spaghetti_bolognese")[
             "ingredients"]]
     beef = next(ln for ln in lines if ln["ingredient"] == "Ground Beef")
-    assert beef["ref_id"] == "cnf-api:2690" and beef["ref_description"] == "Beef, ground, medium, raw"
+    assert beef["ref_id"] == "cnf-api:2690"
+    assert beef["ref_description"] == "Beef, ground, medium, raw"
     assert beef["grams"] == 500 and beef["status"] == "counted"
     oil = next(ln for ln in lines if ln["ingredient"] == "Olive Oil")
     assert "source's measure" in oil["conversion"]       # 30 ml through CNF's own measure

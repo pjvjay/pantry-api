@@ -85,6 +85,7 @@ Everything's env-var driven. Defaults in `pantry_planner/config.py`.
 | `TRAVEL_COST_PER_KM`         | `0.50`                           | Split-trip optimizer: $ value of a km of driving |
 | `DEFAULT_LAT` / `DEFAULT_LON`| `49.28` / `-123.12`              | Shopping location when the request sends none |
 | `ORIGIN_MIN_COVERAGE`        | `0.6`                            | Spend-weighted origin coverage below which a basket is labelled UNVERIFIED |
+| `NUTRITION_MIN_COVERAGE`     | `0.8`                            | Share of a meal's ingredients (by count and by weight) below which its nutrition is labelled `below_floor`: totals are minimums |
 | `DB_HOST` (+ `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`) | *(unset)* | Composed into a Postgres URL when `DB_URL` is unset — the Kubernetes path, parts injected from the CNPG credential secret |
 | `TRUSTED_PROXY_HOPS`         | `0`                              | Proxies in front of the API that append to `X-Forwarded-For`; 0 = the header is ignored and the rate limit keys on the TCP peer |
 | `LLM_DAILY_COST_CAP_USD`     | *(unset: no ceiling)*            | Estimated LLM spend per replica per UTC day above which LLM-calling endpoints answer 503 |
@@ -195,6 +196,7 @@ pantry-planner/
 │   ├── packs.py           # pack_count: packs a purchase takes (shared rule)
 │   ├── recipe_doc.py      # RecipeDoc -> RecipeSpec (no parse) / display text
 │   ├── alternatives.py    # rank a plan line's alternatives; pin checks for reprice
+│   ├── nutrition.py       # 8 nutrients per portion from recipe amounts + CNF reference foods
 │   ├── mealplan/          # meal plans: counts, cited storage times, trips (docs/meal-planning.md)
 │   │   ├── selection.py   # Quick add: counted dishes matched exact/plural/alias/fuzzy
 │   │   ├── resolve.py     # products per recipe, once (flow.run / flow.run_spec), demo starters
@@ -222,9 +224,11 @@ pantry-planner/
 │       ├── decision.py        # Phase C: weighted-sum thresholding
 │       ├── three_phase.py     # ThreePhaseRouter
 │       └── cascade.py         # CascadeRouter
-├── seeds/                 # recipes + products JSON (copies of pantry-db's); the meal plan's
-│                          # shelf_life, mealplan_starters, recipe_aliases, demo_products
+├── seeds/                 # recipes, products and nutrients JSON (copies of pantry-db's); the
+│                          # meal plan's shelf_life, mealplan_starters, recipe_aliases,
+│                          # demo_products
 ├── docs/meal-planning.md  # the meal plan: counts, matching, storage times, trips, approval
+├── docs/nutrition.md      # nutrition: sources, the rules, endpoints, shapes, targets
 ├── skills/recipe-shopper/ # Agent Skill: recipe link → cheapest basket nearby
 ├── tests/                 # pytest, LLM mocked
 ├── evals/                 # golden set + comparison harness
@@ -464,6 +468,32 @@ floor **before any LLM spend**. The existing selector maps each dinner
 (one call per day), the shopping list merges shared products once (with
 `used_by` per recipe), and the merged basket runs through the split-trip
 optimizer.
+
+## Nutrition (`GET /nutrition/recipes`, `GET /recipes/{slug}/nutrition`)
+
+Energy, protein, fat, saturated fat, carbohydrate, fibre, sugars and sodium per portion
+eaten. Code computes them, with no LLM, from the recipe's amounts (never the packs bought)
+and one reference food per ingredient from Health Canada's Canadian Nutrient File:
+
+- **Reference values, not labels.** Each value is a published value for a generic food, and
+  each line's receipt quotes the CNF description verbatim. The values were read from the CNF
+  API, whose edition is not stated (most likely 2015, not the 2026 files), and every response
+  says so.
+- **Unknown is never zero.** A line with no amount, no weight or no reference food is named.
+  A nutrient the source did not publish is unknown. A total that misses anything is a lower
+  bound ("≥"). Volumes and counts convert only through the source's own measures, with no
+  assumed density.
+- **Coverage.** Each meal reports coverage by count and by weight, against
+  `NUTRITION_MIN_COVERAGE`.
+- **Demo amounts are labelled.** Library recipes and demo starters use demo house amounts,
+  so their numbers carry `demo_amounts: true` and a "demo amounts" badge.
+- **Additive fields.** `/plan/week` and `/mealplan/schedule` gain nutrition per dinner, per
+  day and per period. Plans keep working before pantry-db 0008 is migrated: nutrition is
+  null with a note.
+
+Raw ingredients are summed and cooking losses are not counted. Not medical or dietary advice.
+Contains information licensed under the Open Government Licence – Canada. Details, shapes and
+targets: `docs/nutrition.md`.
 
 ## Demo mode
 
