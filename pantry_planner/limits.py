@@ -19,8 +19,9 @@ per replica, which is enough for one or two replicas and needs no store:
   Gemini (the free tier) and for any model config.COST_PER_MTOK does not
   list; the first call to an unlisted model logs a warning. Above the ceiling the
   endpoints that call an LLM answer 503, and so do the MCP plan tools; the
-  endpoints that call none (parse-lines, and the meal-plan schedule when it
-  lands) keep working, and so does demo mode, which makes no LLM call.
+  endpoints that call none (parse-lines, the meal-plan schedule, selection
+  parse and suggest-cook-days) keep working, and so does demo mode, which makes
+  no LLM call.
 
 Both refusals are LimitError, which the API renders as {error, detail} with
 `detail` a sentence, the body an LLM failure already has (api._llm_error).
@@ -81,6 +82,7 @@ LIMITS: dict[str, Limit] = {
     "/mealplan/resolve": Limit(per_minute=6, burst=3),
     "/mealplan/schedule": Limit(per_minute=120, burst=120),
     "/mealplan/selection/parse": Limit(per_minute=60, burst=60),
+    "/mealplan/suggest-cook-days": Limit(per_minute=60, burst=60),
 }
 
 # Buckets idle this long are full again and can be forgotten.

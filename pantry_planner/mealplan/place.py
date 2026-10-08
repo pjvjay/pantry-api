@@ -1,4 +1,5 @@
-"""Where meals sit: counts become meals, and unplaced meals are spread.
+"""Where meals sit: counts become meals, unplaced meals are spread, and "Suggest cook days"
+proposes a freshness-aware layout.
 
 The board has one cell per date and slot: one breakfast, lunch and dinner a day and two
 snacks. A meal with a date, or pinned, never moves. Meals with no date are spread evenly:
@@ -140,3 +141,162 @@ def day_label(d: dt.date) -> str:
     """'Sun 18 Oct'."""
     return f"{SHORT[d.weekday()]} {d.day} {d:%b}"
 
+
+# ─── Suggest cook days ───────────────────────────────────────
+
+@dataclass(frozen=True)
+class Horizon:
+    """How many days after a shop a meal can be cooked, and what limits it: the shortest
+    cited fridge time among its products (kind 'cited', with the rule), else the shopper's
+    buy-ahead setting for a product with no cited time ('your_setting'), else no limit."""
+    days: int | None
+    kind: str | None = None
+    product: str | None = None
+    rule: dict | None = None
+
+
+def horizon(draft: MealPlanDraft, products: dict, chosen: dict[int, int]) -> Horizon:
+    from . import shelf
+
+    best = Horizon(days=None)
+    for pid in sorted(set(chosen.values()), key=lambda p: products[p].name):
+        ps = shelf.for_product(pid)
+        if ps.bought_frozen or (not ps.mapped and ps.storage_class in {"shelf_stable", "frozen"}):
+            continue
+        if ps.mapped and ps.fridge_days is not None:
+            h = Horizon(ps.fridge_days, "cited", products[pid].name,
+                        min(ps.fridge_rules(), key=lambda r: (r["days_min"] is None,
+                                                              r["days_min"] or 0)))
+        else:
+            h = Horizon(draft.prefs.buy_ahead_days, "your_setting", products[pid].name)
+        rank = {"cited": 0, "your_setting": 1}
+        if best.days is None or (h.days, rank[h.kind]) < (best.days, rank[best.kind]):
+            best = h
+    return best
+
+
+def _why(title: str, d: dt.date, h: Horizon, trip: dt.date | None, buy_ahead: int) -> str:
+    from . import shelf
+
+    shop = f"; bought on the {day_label(trip)} shop" if trip else ""
+    head = f"{title} moved to {day_label(d)}"
+    if h.kind == "cited":
+        return (f"{head}: {h.product} keeps {h.rule['verbatim']} in the fridge "
+                f"({shelf.short_source(h.rule['source'])}, {h.rule['id']}){shop}.")
+    if h.kind == "your_setting":
+        return (f"{head}: {h.product} has no cited storage time, and your setting buys it at "
+                f"most {buy_ahead} day(s) ahead{shop}.")
+    return (f"{head}: none of its products has a cited fridge time or falls under your "
+            f"buy-ahead setting, so it is spread across the period{shop}.")
+
+
+def freshness_layout(draft: MealPlanDraft, before) -> dict:
+    """POST /mealplan/suggest-cook-days: a proposal that places every unpinned meal by
+    freshness, never applied by the server.
+
+    Candidate trip days are the approved and fixed dates, then every day the shopper shops
+    (shop_weekdays, less dismissed dates). Each unpinned meal gets a horizon (Horizon above).
+    Meals with a horizon go first, shortest first (earliest deadline first), each to the free
+    cell of its slot nearest its evenly spread target among the days [trip, trip + horizon]
+    after some candidate trip (a breakfast from the day after). The rest are spread evenly
+    from the first candidate trip on, as before. Pinned meals never move.
+
+    `before` is the draft's current MealSchedule. Returns {rev, ops, meals,
+    warnings_before, warnings_after}: each op moves one meal and carries a reason built by
+    code from the limiting product's cited row or the shopper's setting."""
+    from .. import db
+    from . import schedule as sched
+    from . import warnings as warn
+    from .needs import USABLE, line_products
+    from .resolve import recipe_doc
+
+    products = {p.id: p for p in db.load_all_products()}
+    meals = expand(draft)
+    movable = {m.id for m in meals if not m.pinned}
+    board = fixed_board(draft, meals, movable)
+    dismissed = {draft.index(d) for d in draft.dismissed_dates}
+    fixed = {draft.index(d) for d in draft.fixed_dates} | {draft.index(t.date)
+                                                           for t in draft.trips}
+    trip_days = sorted(fixed | {i for i in range(draft.days)
+                                if draft.day(i).weekday() in draft.prefs.shop_weekdays
+                                and i not in dismissed})
+    first = trip_days[0] if trip_days else 0
+
+    horizons: dict[str, Horizon] = {}
+    for key, dr in sorted(draft.recipes.items()):
+        resolved = draft.resolved.get(key)
+        chosen = {}
+        if resolved is not None and resolved.status in USABLE:
+            chosen = line_products(draft, key, recipe_doc(dr.ref, dr.servings), products)
+        horizons[key] = horizon(draft, products, chosen)
+
+    groups: dict[str, list[Meal]] = {}
+    for m in meals:
+        if m.id in movable:
+            groups.setdefault(m.recipe_key, []).append(m)
+    targets: dict[str, int] = {}
+    for _key, group in groups.items():
+        for i, m in enumerate(sorted(group, key=lambda m: natural(m.id))):
+            targets[m.id] = target_day(i, len(group), first, draft.days)
+
+    placed: dict[str, int | None] = {}
+    shop_for: dict[str, int] = {}
+    timed = sorted((m for m in meals if m.id in movable
+                    and horizons[m.recipe_key].days is not None),
+                   key=lambda m: (horizons[m.recipe_key].days, -len(groups[m.recipe_key]),
+                                  m.recipe_key, natural(m.id)))
+    rest: set[str] = {m.id for m in meals if m.id in movable} - {m.id for m in timed}
+    for m in timed:
+        slot, h = slot_of(draft, m), horizons[m.recipe_key].days
+        start = 1 if slot == "breakfast" else 0
+        days = sorted({d for t in trip_days for d in range(t + start, t + h + 1)
+                       if d < draft.days and board.free(d, slot)})
+        if not days:
+            rest.add(m.id)
+            continue
+        d = min(days, key=lambda d: (abs(d - targets[m.id]), d))
+        board.take(d, slot)
+        placed[m.id] = d
+        shop_for[m.id] = max(t for t in trip_days if t + start <= d)
+    placed.update(spread(draft, meals, rest, board, first=first))
+
+    ops, after_meals = [], []
+    for m in sorted(meals, key=lambda m: natural(m.id)):
+        if m.id not in movable:
+            after_meals.append(m)
+            continue
+        day = placed.get(m.id)
+        new_date = None if day is None else draft.day(day)
+        slot = slot_of(draft, m)
+        after_meals.append(m.model_copy(update={"date": new_date, "slot": slot}))
+        if new_date == m.date and (m.slot or slot) == slot:
+            continue
+        title = sched_title(draft, m.recipe_key)
+        if new_date is None:
+            reason = f"{title} has no free {slot} slot left after the layout."
+        else:
+            trip = shop_for.get(m.id)
+            if trip is None:
+                trip = max((t for t in trip_days if t <= day), default=None)
+            reason = _why(title, new_date, horizons[m.recipe_key]
+                          if m.id in shop_for else Horizon(days=None),
+                          None if trip is None else draft.day(trip),
+                          draft.prefs.buy_ahead_days)
+        ops.append({"op": "move_meal", "meal_id": m.id,
+                    "from": {"date": None if m.date is None else m.date.isoformat(),
+                             "slot": m.slot or slot},
+                    "to": {"date": None if new_date is None else new_date.isoformat(),
+                           "slot": slot},
+                    "reason": reason})
+    after = sched.compute(draft.model_copy(update={"meals": after_meals}))
+    strategy = draft.prefs.strategy
+    return {"rev": draft.rev, "ops": ops,
+            "meals": [m.model_dump(mode="json") for m in after_meals],
+            "warnings_before": warn.counts(before.warnings, strategy),
+            "warnings_after": warn.counts(after.warnings, strategy)}
+
+
+def sched_title(draft: MealPlanDraft, key: str) -> str:
+    from .resolve import recipe_doc
+
+    return recipe_doc(draft.recipes[key].ref, draft.recipes[key].servings).title

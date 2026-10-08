@@ -666,7 +666,9 @@ def plan_recipe(slug: str,
 
 
 # ─── Meal plan ───────────────────────────────────────────────
-# The plan lives in the browser (a MealPlanDraft); these endpoints are stateless.
+# The plan lives in the browser (a MealPlanDraft); these endpoints are stateless. resolve is
+# the slow step, once per distinct recipe; schedule, selection parse and suggest-cook-days
+# are pure code with no LLM call, so they keep working above the daily LLM ceiling.
 
 class MealPlanResolveRequest(BaseModel):
     """Recipes to resolve to products, each once: a library slug, a demo starter or a
@@ -773,6 +775,24 @@ def mealplan_selection_parse(req: SelectionParseRequest) -> dict:
         [(r.slug, r.name) for r in db.load_all_recipes()], starters_file()["starters"],
         [r.model_dump() for r in req.recipes])
     return selection.parse(req.text, cands, req.household_servings)
+
+
+@app.post("/mealplan/suggest-cook-days",
+          dependencies=[Depends(_draft_size),
+                        Depends(limits.rate_limit("/mealplan/suggest-cook-days"))])
+def mealplan_suggest_cook_days(draft: MealPlanDraft) -> dict:
+    """A freshness-aware layout of every unpinned meal, as a proposal: {rev, ops[{op:
+    move_meal, meal_id, from, to, reason}], meals, warnings_before, warnings_after}. Each
+    reason is built by code from the limiting product's cited row or the shopper's setting.
+    Nothing is applied; pinned meals never move."""
+    from .mealplan.models import MealPlanError
+    from .mealplan.place import freshness_layout
+    from .mealplan.schedule import compute
+
+    try:
+        return freshness_layout(draft, compute(draft))
+    except MealPlanError as e:
+        raise _meal_plan_error(e) from e
 
 
 @app.get("/mealplan/starters")
