@@ -50,6 +50,28 @@ def _run(parsed):
 
 # ─── units / pre-processing ──────────────────────────────────
 
+def test_brand_statistics_are_json_floats_whatever_the_database_returns():
+    """Postgres returns AVG(rating) over an integer column as Decimal; the selector's payload is
+    JSON, which cannot carry one (the Postgres CI job failed on it, SQLite returns a float)."""
+    import json
+    from decimal import Decimal
+
+    from pantry_planner.models import Product
+    from pantry_planner.nlsearch.planner import _brand_regroup
+
+    pool = [Product(id=1, name="Penne Rigate 500g", description="", price=1.97,
+                    brand="Fraser Farms"),
+            Product(id=2, name="Penne 900g", description="", price=2.49, brand="Fraser Farms")]
+    rows = [{"product_id": 1, "avg_price": Decimal("2.10"), "min_price": Decimal("1.97"),
+             "avg_rating": Decimal("4.3333"), "review_count": Decimal(3)},
+            {"product_id": 2, "avg_price": 2.6, "min_price": 2.49, "avg_rating": None,
+             "review_count": None}]
+    [stats] = _brand_regroup({0: pool}, [type("I", (), {"name": "penne"})()], rows)["penne"]
+    assert stats == {"brand": "Fraser Farms", "options": 2, "avg_price": 2.35, "min_price": 1.97,
+                     "avg_rating": 4.3, "review_count": 3}
+    json.dumps(stats)
+
+
 def test_unit_normalization():
     from pantry_planner.nlsearch.units import normalize_quantity
 
