@@ -32,6 +32,8 @@ from .models import (
     MAX_LINE_QUANTITY,
     MAX_SERVINGS,
     AlternativeRanking,
+    NutritionRecipes,
+    NutritionTargets,
     OriginRanking,
     Pin,
     PlanBasis,
@@ -39,6 +41,7 @@ from .models import (
     ProductOrigin,
     Recipe,
     RecipeDoc,
+    RecipeNutrition,
     ShoppingPlan,
     WeekPlan,
 )
@@ -303,6 +306,44 @@ def get_recipe_doc(slug: str) -> RecipeDoc:
         raise HTTPException(status_code=404, detail=str(e)) from e
     amounts = db.load_line_amounts([slug])
     return library_doc(recipe, None if amounts is None else amounts.get(slug, {}))
+
+
+@app.get("/recipes/{slug}/nutrition", response_model=RecipeNutrition)
+def get_recipe_nutrition(
+        slug: str, portions: Annotated[float, Query(gt=0, le=MAX_SERVINGS)] = 1,
+) -> RecipeNutrition:
+    """Nutrition of `portions` servings of a library recipe, with every line's receipt: its
+    grams and how they were reached, its reference food (CNF description verbatim) and the
+    values it adds. Computed by code from the recipe's demo house amounts (labelled
+    demo_amounts) and published reference values for generic foods, never a product's label.
+    Unknown is never 0. nutrition is null, with a note, before pantry-db 0008."""
+    from . import nutrition
+
+    try:
+        recipe = db.load_recipe(slug)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    amounts = db.load_line_amounts([slug])
+    return nutrition.recipe_nutrition(
+        recipe, None if amounts is None else amounts.get(slug, {}),
+        nutrition.library_reference([recipe]), portions=portions, with_sources=True)
+
+
+@app.get("/nutrition/recipes", response_model=NutritionRecipes)
+def nutrition_recipes() -> NutritionRecipes:
+    """Every library recipe's nutrition per serving, and the sources behind the numbers. Its
+    own prefix, so the /recipes/{slug} routes can never shadow it."""
+    from . import nutrition
+
+    recipes = db.load_all_recipes()
+    ref = nutrition.library_reference(recipes)
+    amounts = db.load_line_amounts([r.slug for r in recipes])
+    items = [nutrition.recipe_nutrition(r, None if amounts is None else amounts.get(r.slug, {}),
+                                        ref) for r in recipes]
+    cited = {i for r in items if r.nutrition for i in r.nutrition.source_ids}
+    return NutritionRecipes(
+        sources=[] if ref is None else nutrition.sources(ref, cited), recipes=items,
+        note=nutrition.NOT_DEPLOYED if ref is None else nutrition.DISCLAIMER)
 
 
 class ParseLinesRequest(BaseModel):
@@ -597,6 +638,9 @@ class WeekPlanRequest(BaseModel):
     max_distance_km: float | None = None
     exclude_origin: list[str] = Field(default_factory=list, max_length=50)
     preference: list[str] = Field(default_factory=list, max_length=50)
+    # The shopper's own daily targets, kept in their browser: each day gets a verdict only
+    # where the data proves one (a dinner-only day never says 'within' or 'short').
+    targets: NutritionTargets = Field(default_factory=dict)
 
 
 @app.post("/plan/week", response_model=WeekPlan,
@@ -614,7 +658,8 @@ def plan_week(req: WeekPlanRequest) -> WeekPlan:
             days=req.days, max_total_budget=req.max_total_budget,
             exclude_tags=req.exclude_tags, lat=req.lat, lon=req.lon,
             max_distance_km=req.max_distance_km,
-            exclude_origin=req.exclude_origin, preference=req.preference)
+            exclude_origin=req.exclude_origin, preference=req.preference,
+            targets=req.targets or None)
     except PlanAborted as e:
         raise HTTPException(status_code=409, detail=e.execution.model_dump(mode="json"))
 

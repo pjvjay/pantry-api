@@ -46,8 +46,10 @@ from .models import (
     NutritionTarget,
     PeriodNutrition,
     PeriodTotal,
+    Recipe,
     RecipeDoc,
     RecipeLine,
+    RecipeNutrition,
     TargetCheck,
 )
 from .nlsearch.units import generic_tokens, head_noun, is_non_purchase, normalize_quantity, tokens
@@ -58,6 +60,7 @@ UNITS = {"energy_kcal": "kcal", "protein_g": "g", "fat_g": "g", "satfat_g": "g",
 HEADLINE = ("energy_kcal", "protein_g")
 
 NOT_DEPLOYED = "nutrition not shown: nutrition tables not deployed (pantry-db 0008)"
+DINNER_ONLY = "dinner only: other meals are not planned"
 DEMO_AMOUNTS = "demo_house_amounts"
 DEMO_BADGE_TITLE = "Recipe amounts are demo house amounts, not from a published recipe"
 DISCLAIMER = ("Reference values for generic foods, not product labels; raw ingredients summed, "
@@ -389,3 +392,27 @@ def sources(ref: Reference, ids: Iterable[str] | None = None) -> list[NutritionS
     wanted = None if ids is None else set(ids)
     return [NutritionSource(**s) for k, s in sorted(ref.sources.items())
             if wanted is None or k in wanted]
+
+
+# ─── Library recipes ─────────────────────────────────────────
+
+def library_reference(recipes: list[Recipe]) -> Reference | None:
+    """The reference rows these library recipes need; None when the tables are missing."""
+    from . import db
+
+    return db.load_reference(keys_for(ing.name for r in recipes for ing in r.ingredients))
+
+
+def recipe_nutrition(recipe: Recipe, amounts: dict | None, ref: Reference | None, *,
+                     portions: float = 1, with_sources: bool = False) -> RecipeNutrition:
+    """A library recipe's nutrition from its demo house amounts (`amounts` is its line_no ->
+    LineAmount map, None when 0007 is missing). nutrition None with a note when the reference
+    tables are missing."""
+    from .recipe_doc import library_doc
+
+    base = {"slug": recipe.slug, "name": recipe.name, "servings": recipe.servings}
+    if ref is None:
+        return RecipeNutrition(**base, nutrition=None, note=NOT_DEPLOYED)
+    mn = meal_nutrition(library_doc(recipe, amounts), ref, portions=portions)
+    return RecipeNutrition(**base, nutrition=mn, note=DISCLAIMER,
+                           sources=sources(ref, mn.source_ids) if with_sources else [])

@@ -845,6 +845,13 @@ class RecipeNutrition(BaseModel):
     sources: list[NutritionSource] = Field(default_factory=list)
 
 
+class NutritionRecipes(BaseModel):
+    """GET /nutrition/recipes: every library recipe per serving, and the sources once."""
+    sources: list[NutritionSource]
+    recipes: list[RecipeNutrition]
+    note: str
+
+
 Verdict = Literal["over", "within", "met", "short", "unknown"]
 
 
