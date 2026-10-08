@@ -75,7 +75,10 @@ def test_over_the_limit_is_a_429_with_retry_after(clock):
     resp = c.post("/recipes/parse-lines", json=PASTE)
     assert resp.status_code == 429
     assert resp.headers["Retry-After"] == "1"            # 60/min: one token a second
-    assert resp.json()["detail"]["error"] == "rate_limited"
+    # shaped like an LLM failure: a code, and a sentence in `detail` that a client which
+    # shows `detail` as it is (the console) shows as written
+    assert resp.json() == {"error": "rate_limited",
+                           "detail": "Too many requests to /recipes/parse-lines; retry in 1 s."}
     clock[0] += 1.0
     assert c.post("/recipes/parse-lines", json=PASTE).status_code == 200
     assert c.post("/recipes/parse-lines", json=PASTE).status_code == 429
@@ -207,7 +210,7 @@ def test_above_the_ceiling_llm_endpoints_pause_and_the_rest_work(env):
                            ("/plan/tomato_penne", None), ("/plan/week", {"days": 1})):
             resp = c.post(path, json=body)
             assert resp.status_code == 503, path
-            assert resp.json()["detail"]["detail"] == limits.PAUSED
+            assert resp.json() == {"error": "llm_budget_exhausted", "detail": limits.PAUSED}
         # no LLM call, no pause
         assert c.post("/recipes/parse-lines", json=PASTE).status_code == 200
         assert c.get("/recipes/tomato_penne/doc").status_code == 200

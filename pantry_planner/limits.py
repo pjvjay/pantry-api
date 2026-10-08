@@ -20,6 +20,11 @@ per replica, which is enough for one or two replicas and needs no store:
   endpoints that call none (parse-lines, and the meal-plan schedule when it
   lands) keep working, and so does demo mode, which makes no LLM call.
 
+Both refusals are LimitError, which the API renders as {error, detail} with
+`detail` a sentence, the body an LLM failure already has (api._llm_error).
+Clients written before the limits show a string `detail` as it is, and an
+object one as "[object Object]".
+
 Endpoints join the bucket table as they land (PLAN.md 3.12 lists the ones to
 come). The MCP endpoint's own bearer tokens are unchanged, and buckets apply
 to REST only.
@@ -33,13 +38,24 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from fastapi import HTTPException, Request
+from fastapi import Request
 
 from .config import settings
 
 PAUSED = "Live planning is paused for today; the demo planner still works."
 
 log = logging.getLogger(__name__)
+
+
+class LimitError(Exception):
+    """A request a limit refused: `status` 429 or 503, `error` a code for programs, `detail`
+    the sentence a person reads, and the response headers (Retry-After)."""
+
+    def __init__(self, status: int, error: str, detail: str,
+                 headers: dict[str, str] | None = None) -> None:
+        super().__init__(detail)
+        self.status, self.error, self.detail = status, error, detail
+        self.headers = headers or {}
 
 
 @dataclass(frozen=True)
@@ -148,11 +164,10 @@ def rate_limit(endpoint: str):
     def check(request: Request) -> None:
         wait = take(endpoint, client_ip(request))
         if wait is not None:
-            raise HTTPException(
-                status_code=429, headers={"Retry-After": str(max(1, math.ceil(wait)))},
-                detail={"error": "rate_limited",
-                        "detail": f"Too many requests to {endpoint}; retry in "
-                                  f"{max(1, math.ceil(wait))} s."})
+            seconds = max(1, math.ceil(wait))
+            raise LimitError(429, "rate_limited",
+                                f"Too many requests to {endpoint}; retry in {seconds} s.",
+                                headers={"Retry-After": str(seconds)})
 
     return check
 
@@ -190,5 +205,4 @@ def llm_paused() -> bool:
 def require_llm_budget() -> None:
     """A FastAPI dependency for endpoints that call an LLM: 503 above the daily ceiling."""
     if llm_paused():
-        raise HTTPException(status_code=503, detail={"error": "llm_budget_exhausted",
-                                                     "detail": PAUSED})
+        raise LimitError(503, "llm_budget_exhausted", PAUSED)

@@ -90,6 +90,15 @@ async def _llm_error(request: Request, exc: LLMError) -> JSONResponse:
         "detail": str(exc)})
 
 
+@app.exception_handler(limits.LimitError)
+async def _limit_refused(request: Request, exc: limits.LimitError) -> JSONResponse:
+    """A rate limit or the daily LLM ceiling, shaped like an LLM failure: `detail` is the
+    sentence to show. The console shows a string `detail` as it is and anything else as
+    "[object Object]", and these refusals now reach endpoints it already calls."""
+    return JSONResponse(status_code=exc.status, headers=exc.headers,
+                        content={"error": exc.error, "detail": exc.detail})
+
+
 def _json_safe(value: Any) -> Any:
     """`value` with every float JSON cannot carry (inf, -inf, nan) written as its name."""
     if isinstance(value, float) and not math.isfinite(value):

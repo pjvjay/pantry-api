@@ -117,13 +117,17 @@ Every public endpoint is bounded (`pantry_planner/limits.py`), per replica and i
 
 - **A token bucket per client IP and endpoint**: `/plan/nl` and `/plan/spec` 10 a minute,
   `/recipes/parse-lines` 60 a minute (more endpoints join as they land). Over the limit is a
-  429 with `Retry-After`. The client is the TCP peer unless `TRUSTED_PROXY_HOPS` says how many
+  429 `{"error": "rate_limited", "detail": "Too many requests to ...; retry in N s."}` with
+  `Retry-After`. The client is the TCP peer unless `TRUSTED_PROXY_HOPS` says how many
   proxies append to `X-Forwarded-For`; a client-written header is never trusted.
 - **A daily LLM cost ceiling**: every LLM call adds its estimated cost (`forced_tool_call`),
   reset at UTC midnight. Above `LLM_DAILY_COST_CAP_USD`, `/plan/nl`, `/plan/spec`,
   `/plan/{slug}`, `/plan/week` and the MCP plan tools answer 503 / a tool error, "Live planning
-  is paused for today; the demo planner still works". Endpoints that call no LLM, and demo
+  is paused for today; the demo planner still works" (REST: `{"error":
+  "llm_budget_exhausted", "detail": "<that sentence>"}`). Endpoints that call no LLM, and demo
   mode, keep working. `/health` reports `llm_budget {spent, cap}`.
+- Both refusals have the body an LLM failure already has: `error` is a code and `detail` the
+  sentence to show, so the console, which shows a string `detail` as it is, needs no change.
 
 The MCP endpoint's bearer tokens are unchanged; the buckets apply to REST only.
 
