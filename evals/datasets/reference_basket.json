@@ -1,0 +1,65 @@
+{
+  "about": "What real stores sell for the recipe library's ingredients, captured by hand. A store's website shows packs and prices but rarely origin (the Real Canadian Superstore's shows none for fresh produce, and its 'Shop Canadian' filter marks only processed goods), and the sites refuse automated reads; origin comes from the label or shelf sign, with the date, because it changes with the season and the shipment. Leave origin null until someone has read it off a label. Prices are the shelf price on the day (regular_price when it was on sale). Read by evals/reality_eval.py.",
+  "observations": [
+    {
+      "ingredient": "Yellow Onion",
+      "store": "Real Canadian Superstore",
+      "branch": "Eaton Center and Kingsway (store 1518, the website's default for a Vancouver visitor)",
+      "product": "Farmer's Market Yellow Onions, 3 lb Bag",
+      "size": "1.36 kg",
+      "qty": 1360,
+      "uom": "g",
+      "price": 3.47,
+      "regular_price": null,
+      "origin": null,
+      "origin_source": null,
+      "observed_at": "2026-10-07",
+      "link": "https://www.realcanadiansuperstore.ca/en/yellow-onions-3-lb-bag/p/20811994001_EA"
+    },
+    {
+      "ingredient": "Yellow Onion",
+      "store": "Real Canadian Superstore",
+      "branch": "Eaton Center and Kingsway (store 1518, the website's default for a Vancouver visitor)",
+      "product": "Farmer's Market Yellow Onions, 10 lb bag",
+      "size": "4.54 kg",
+      "qty": 4540,
+      "uom": "g",
+      "price": 4.24,
+      "regular_price": 4.99,
+      "origin": null,
+      "origin_source": null,
+      "observed_at": "2026-10-07",
+      "link": "https://www.realcanadiansuperstore.ca/en/yellow-onions-10-lb-bag/p/20600991001_EA"
+    },
+    {
+      "ingredient": "Yellow Onion",
+      "store": "Real Canadian Superstore",
+      "branch": "Eaton Center and Kingsway (store 1518, the website's default for a Vancouver visitor)",
+      "product": "PC Organics Yellow Onions, 2 lb Bag",
+      "size": "907 g",
+      "qty": 907,
+      "uom": "g",
+      "price": 3.00,
+      "regular_price": 3.79,
+      "origin": null,
+      "origin_source": null,
+      "observed_at": "2026-10-07",
+      "link": "https://www.realcanadiansuperstore.ca/en/organics-yellow-onions-2-lb-bag/p/20107532_EA"
+    },
+    {
+      "ingredient": "Yellow Onion",
+      "store": "Real Canadian Superstore",
+      "branch": "Eaton Center and Kingsway (store 1518, the website's default for a Vancouver visitor)",
+      "product": "Yellow Onion, 25 Lbs",
+      "size": "11.34 kg",
+      "qty": 11340,
+      "uom": "g",
+      "price": 15.00,
+      "regular_price": null,
+      "origin": null,
+      "origin_source": null,
+      "observed_at": "2026-10-07",
+      "link": "https://www.realcanadiansuperstore.ca/en/search?search-bar=yellow%20onions"
+    }
+  ]
+}
