@@ -495,3 +495,51 @@ def test_a_twenty_line_recipe_ranks_one_line_in_under_300_ms():
         rank_alternatives(plan.basis, 1)
         runs.append(time.perf_counter() - t0)
     assert statistics.median(runs) < 0.300, runs
+
+
+# ─── The MCP tools ───────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_the_mcp_tools_rank_and_reprice_from_a_plans_basis():
+    from pantry_planner.mcp_server import server
+
+    res = await server.call_tool("plan_from_text", {"recipe_text": MIXED, "basis": True})
+    plan = res.structured_content["summary"]
+    basis = plan["basis"]
+    ranked = (await server.call_tool("rank_alternatives",
+                                     {"basis": basis, "line_no": 1, "limit": 3})
+              ).structured_content
+    assert ranked["line_no"] == 1 and len([i for i in ranked["items"] if not i["current"]]) <= 3
+    assert sum(1 for i in ranked["items"] if i["current"]) == 1
+    same = (await server.call_tool("reprice_plan", {"basis": basis})).structured_content
+    timing = ("llm_cost_usd", "latency_ms", "llm_calls", "burr_run", "pipeline")
+    assert {k: v for k, v in same["summary"].items() if k not in timing} == \
+        {k: v for k, v in plan.items() if k not in timing}
+    other = next(i for i in ranked["items"] if not i["current"])
+    swapped = (await server.call_tool("reprice_plan", {
+        "basis": basis, "pins": [{"line_no": 1, "product_id": other["product_id"]}]})
+               ).structured_content["summary"]
+    assert swapped["basis"]["pins"] == [{"line_no": 1, "product_id": other["product_id"]}]
+    assert any(n.startswith("line 1 (penne): chosen by the shopper") for n in swapped["notes"])
+    assert swapped["trip"]["total_cost"] == other["trip"]["total"]
+
+
+@pytest.mark.asyncio
+async def test_the_mcp_tools_refuse_with_the_reason():
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from pantry_planner.mcp_server import server
+
+    basis = (await server.call_tool("plan_from_text", {"recipe_text": MIXED, "basis": True})
+             ).structured_content["summary"]["basis"]
+    with pytest.raises(ToolError, match="line 9 is not a planned line"):
+        await server.call_tool("rank_alternatives", {"basis": basis, "line_no": 9})
+    with pytest.raises(ToolError, match="unknown product id 999999 in pins"):
+        await server.call_tool("reprice_plan", {
+            "basis": basis, "pins": [{"line_no": 1, "product_id": 999999}]})
+    with pytest.raises(ToolError, match="Unrecognised country"):
+        await server.call_tool("reprice_plan", {
+            "basis": {**basis, "exclude_origin": ["Atlantis"]}})
+    with pytest.raises(ToolError):
+        await server.call_tool("reprice_plan", {
+            "basis": basis, "pins": [{"line_no": 1, "product_id": 1}] * 41})

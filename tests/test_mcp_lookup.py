@@ -356,6 +356,8 @@ READ_TOOLS = {
     "list_origin_submissions",
 }
 PLAN_TOOLS = {"plan_recipe", "plan_from_text", "plan_from_lines", "plan_week"}
+# No LLM behind them: the same basis against the same catalog gives the same answer.
+FOLLOW_UP_TOOLS = {"rank_alternatives", "reprice_plan"}
 # Write tools add to a queue or copy into evidence; nothing is destroyed.
 WRITE_TOOLS = {"submit_origin_evidence", "review_origin_submission"}
 
@@ -363,7 +365,7 @@ WRITE_TOOLS = {"submit_origin_evidence", "review_origin_submission"}
 @pytest.mark.asyncio
 async def test_every_tool_is_annotated_and_titled(server):
     tools = {t.name: t for t in await server.list_tools()}
-    assert set(tools) == READ_TOOLS | PLAN_TOOLS | WRITE_TOOLS
+    assert set(tools) == READ_TOOLS | PLAN_TOOLS | WRITE_TOOLS | FOLLOW_UP_TOOLS
     for name, t in tools.items():
         assert t.annotations is not None, name
         assert t.title, name
@@ -373,6 +375,9 @@ async def test_every_tool_is_annotated_and_titled(server):
     for name in PLAN_TOOLS:
         assert tools[name].annotations.read_only_hint is True, name
         assert tools[name].annotations.idempotent_hint is False, name
+    for name in FOLLOW_UP_TOOLS:
+        assert tools[name].annotations.read_only_hint is True, name
+        assert tools[name].annotations.idempotent_hint is True, name
     for name in WRITE_TOOLS:
         assert tools[name].annotations.read_only_hint is False, name
         assert tools[name].annotations.destructive_hint is False, name

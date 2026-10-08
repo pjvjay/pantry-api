@@ -436,6 +436,8 @@ nothing needs a token.
 | `plan_from_text` | 2–4 Claude calls | only when configured | `PlanResult` for pasted recipe text (NL2SQL path). `lat`/`lon`/`max_km` define "nearby"; `allow_partial=true` plans what is stocked and in range and lists the rest in `summary.not_stocked` / `summary.out_of_range` |
 | `plan_from_lines` | 1–3 LLM calls (no parse) | only when configured | `PlanResult` for reviewed lines, planned exactly as given (no parse). The model names `doc_key`; the hub fills the reviewed `lines`, `title` and `servings`, and any other client may pass up to 60 `lines` itself |
 | `plan_week` | ~1 selector call per day | only when configured | `WeekResult {summary, full}` |
+| `rank_alternatives` | free (no LLM) | only when configured | `AlternativeRanking` for one planned line of a plan's `basis` (`basis=true` on a plan tool): every other product that could fill it in the planner's order, the cart's pick flagged `current`, facts from the catalog or stated as unknown, each row's trip effect and why it sits where it does; `held_back` for what the origin exclusion drops. The demo hub calls it for the cart and hides it from its model |
+| `reprice_plan` | free (no LLM) | only when configured | `PlanResult` for a plan's `basis` priced again with the shopper's `pins` (`{line_no, product_id}`, at most 40): with no pins the summary is the plan's own; each pin is checked (a candidate, not held back by origin, an offer in range) and named in `notes`. Hidden from the hub's model too |
 | `submit_origin_evidence` | free | **always over HTTP** | `Submission` — a PENDING label reading, deduplicated |
 | `list_origin_submissions` | free | only when configured | `SubmissionPage` — the review queue, oldest first |
 | `review_origin_submission` | free | **always over HTTP** | `Submission` — approved (now evidence) or rejected with a note |
@@ -443,7 +445,8 @@ nothing needs a token.
 
 Every tool carries `ToolAnnotations`: reads are `read_only_hint=true`,
 plan tools additionally `idempotent_hint=false` (the selector may choose
-differently), the two write tools are `read_only_hint=false,
+differently) and `rank_alternatives` / `reprice_plan` `idempotent_hint=true`
+(no LLM: the same basis gives the same answer), the two write tools are `read_only_hint=false,
 destructive_hint=false` (nothing is ever deleted; `submit` is idempotent
 because the queue dedupes). `open_world_hint` is false everywhere —
 nothing reaches outside the seeded catalog.

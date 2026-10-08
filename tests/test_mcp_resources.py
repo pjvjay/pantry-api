@@ -269,7 +269,7 @@ async def test_review_submissions_prompt_names_the_three_tools(server):
 @pytest.mark.asyncio
 async def test_every_tool_has_a_title_and_annotations(server):
     tools = await server.list_tools()
-    assert len(tools) == 16
+    assert len(tools) == 18
     for t in tools:
         assert t.title, t.name
         assert t.annotations is not None, t.name
@@ -285,3 +285,5 @@ async def test_every_tool_has_a_title_and_annotations(server):
     assert by_name["review_origin_submission"].idempotent_hint is False
     for name in ("plan_recipe", "plan_from_text", "plan_from_lines", "plan_week"):
         assert by_name[name].idempotent_hint is False, name
+    for name in ("rank_alternatives", "reprice_plan"):
+        assert by_name[name].idempotent_hint is True, name

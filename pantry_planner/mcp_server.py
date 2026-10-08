@@ -33,12 +33,14 @@ from .models import (
     MAX_DOC_LINES,
     MAX_LINE_QUANTITY,
     MAX_SERVINGS,
+    AlternativeRanking,
     AmountBasis,
     DroppedIngredient,
     LlmCallTrace,
     MatchLevel,
     OriginCoverage,
     OriginRanking,
+    Pin,
     PlanBasis,
     PlanLineItem,
     Product,
@@ -58,6 +60,11 @@ from .models import (
 _READ = ToolAnnotations(read_only_hint=True, open_world_hint=False)
 _PLAN = ToolAnnotations(read_only_hint=True, open_world_hint=False,
                         idempotent_hint=False)
+# Re-pricing and ranking a finished plan: read-only, and idempotent too, since
+# no LLM is involved and the same basis against the same catalog gives the same
+# answer.
+_READ_IDEM = ToolAnnotations(read_only_hint=True, idempotent_hint=True,
+                             open_world_hint=False)
 # Write tools: they add to a review queue or copy a reviewed claim into
 # evidence; nothing is ever deleted. Submitting is idempotent (the queue
 # dedupes the same reading), reviewing is not (a second review errors).
@@ -1222,6 +1229,66 @@ def plan_week(days: Annotated[int, Field(ge=1, le=14)] = 5,
 # Origin here is evidence, never inference. Records are ingested from the
 # companion claude-chrome-container tooling (Open Food Facts lookups and
 # package-label photo reads); nothing in this server guesses a country.
+
+# ─── Plan follow-ups (fast — no LLM) ─────────────────────────
+# What a cart does after a plan: rank the other products for one of its lines
+# and price it again with the shopper's choices. Both work from the plan's
+# basis (plan tools with basis=true), so nothing is re-parsed or re-selected.
+# An app calls them; the demo hub hides them from its model.
+
+def _basis_error(e: Exception) -> ToolError:
+    return ToolError(f"{str(e).rstrip('.')}.")
+
+
+@server.tool(title="Rank alternatives for a plan line", annotations=_READ_IDEM)
+def rank_alternatives(basis: PlanBasis,
+                      line_no: Annotated[int, Field(ge=1, le=MAX_DOC_LINES)],
+                      limit: Annotated[int, Field(ge=1, le=25)] = 12) -> AlternativeRanking:
+    """The other products that could fill one planned line, best first, with the
+    cart's own pick always listed (`current`). `basis` is `summary.basis` from a plan
+    tool called with basis=true; `line_no` is a planned line. No LLM and no write.
+
+    Order: the same ingredient first, then how many of the recipe's words match, whether
+    the cart's packs cover the recipe's amount, the origin preference (only when the plan
+    had one), the trip total after the swap, the cost of the recipe's amount, rating
+    (only to break exact ties) and catalog id; `ranking_text` says it in words and each
+    row's `rank_reason` says why it is below the row above. Every fact is from the
+    catalog or stated as unknown. `held_back` lists products the plan's origin exclusion
+    drops, with their evidence; they cannot be chosen. `lines` are every line the
+    purchase covers: choose a row by pinning each of them (reprice_plan)."""
+    from . import alternatives as alts
+
+    _check_countries(basis.exclude_origin, basis.preference)
+    try:
+        return alts.rank_alternatives(basis, line_no, limit)
+    except (alts.BasisError, alts.PinError) as e:
+        raise _basis_error(e) from e
+
+
+@server.tool(title="Re-price a plan", annotations=_READ_IDEM)
+def reprice_plan(basis: PlanBasis,
+                 pins: Annotated[list[Pin], Field(max_length=40)] | None = None) -> PlanResult:
+    """Price a finished plan again with the shopper's choices: `pins` are
+    {line_no, product_id}, one per line to change (a pin equal to the plan's pick is
+    dropped, which undoes a swap). Every other line keeps the plan's pick; merges, packs,
+    each line's cheapest offer in range and the trip are recomputed exactly as the plan
+    computed them, so with no pins the summary is the plan's own. No LLM and no write.
+
+    A pin must be a candidate for its line (rank_alternatives lists them), not held back
+    by the plan's origin exclusion and sold within the plan's distance and price cap;
+    otherwise the error says why (naming the country and field, or the nearest offer).
+    The result's `summary.basis` carries the merged pins, and `summary.notes` names each
+    line the shopper chose."""
+    from . import alternatives as alts
+    from . import flow
+
+    _check_countries(basis.exclude_origin, basis.preference)
+    try:
+        plan = flow.reprice(basis, pins or [])
+    except (alts.BasisError, alts.PinError, flow.RepriceError) as e:
+        raise _basis_error(e) from e
+    return PlanResult(summary=_summarize_plan(plan, basis=True))
+
 
 @server.tool(title="Get product origins", annotations=_READ)
 def get_product_origins(product_ids: Annotated[list[int] | None, Field(max_length=MAX_IDS)] = None,
