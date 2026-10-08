@@ -149,6 +149,29 @@ def test_a_name_longer_than_a_recipe_line_holds_is_cut_and_named():
     assert out["warnings"][2] == f"line 1 ({'x' * 200}) states no amount"
 
 
+def test_warnings_are_one_per_kind_naming_the_lines():
+    out = _post({"yield_text": "Serves 2", "lines": ["salt", "2 eggs", "pepper"]}).json()
+    assert out["warnings"] == ["lines 1 (salt), 3 (pepper) state no amount"]
+    out = _post({"yield_text": "Serves 2", "lines": ["x" * 300, "y" * 300]}).json()
+    assert out["warnings"][0] == "the names of lines 1, 2 were cut to 200 characters"
+
+
+def test_the_worst_paste_still_fits_a_recipe_doc():
+    """60 lines, each a problem of every kind a line can have, plus a blank and a catering
+    yield: the warnings stay inside RecipeDoc's bound, so the doc a client builds from the
+    whole output, warnings included, validates."""
+    from pantry_planner.models import MAX_DOC_WARNINGS, RecipeDoc
+
+    out = _post({"yield_text": "Makes 150 servings",
+                 "lines": ["-"] + ["x" * 290 + f" {n}" for n in range(59)]}).json()
+    assert len(out["lines"]) == 59
+    assert 0 < len(out["warnings"]) <= MAX_DOC_WARNINGS
+    RecipeDoc.model_validate({
+        "key": "imp:1", "title": "Pasted", "servings": out["servings"],
+        "servings_stated": out["servings_stated"], "lines": out["lines"],
+        "warnings": out["warnings"], "source": {"kind": "pasted", "method": "paste"}})
+
+
 def test_parse_lines_bounds():
     assert _post({"lines": ["2 eggs"] * 60}).status_code == 200
     assert _post({"lines": ["2 eggs"] * 61}).status_code == 422

@@ -324,8 +324,9 @@ def parse_lines(req: ParseLinesRequest) -> ParsedLines:
     with no amount is kept and named in `warnings`, as is an unstated servings count.
 
     The result stays inside RecipeDoc's bounds, so a client can post it to /plan/spec as it
-    stands: a name longer than a RecipeLine holds is cut, and a servings count over
-    MAX_SERVINGS comes back as not stated. Both say so in `warnings`."""
+    stands, warnings included: a name longer than a RecipeLine holds is cut, and a servings
+    count over MAX_SERVINGS comes back as not stated. Both say so in `warnings`, which has
+    one entry per kind of problem, naming its lines."""
     from .nlsearch import lineparse
 
     basis = "stated_by_source" if req.origin == "page" else "parsed_from_your_paste"
@@ -334,7 +335,11 @@ def parse_lines(req: ParseLinesRequest) -> ParsedLines:
     # which no RecipeLine accepts.
     kept = [t for t in texts if lineparse.without_bullet(t)]
     out: list[ParsedLineOut] = []
-    warnings: list[str] = []
+    # The lines with each problem, gathered into one warning per kind below. One warning per
+    # line would let a long paste with no amounts outgrow the MAX_DOC_WARNINGS a RecipeDoc
+    # holds, and the doc a client builds from this output would be a 422.
+    cut: list[str] = []
+    unstated: list[str] = []
     for t in kept:
         p = lineparse.parse_line(t)
         n, name = len(out) + 1, p.doc_name
@@ -343,24 +348,33 @@ def parse_lines(req: ParseLinesRequest) -> ParsedLines:
             # is a sentence rather than an ingredient; the shopper sees the cut name and the
             # full text side by side.
             name = name[:MAX_LINE_NAME].rstrip()
-            warnings.append(f"line {n}'s name was cut to {MAX_LINE_NAME} characters")
+            cut.append(str(n))
         out.append(ParsedLineOut(line_no=n, text=t, name=name,
                                  quantity=p.quantity, unit=p.unit or "", note=p.prep or "",
                                  amount_basis=basis))
         if p.quantity is None:
-            warnings.append(f"line {n} ({name}) states no amount")
-    if blank := len(texts) - len(kept):
-        warnings.insert(0, f"{blank} blank line(s) dropped")
+            unstated.append(f"{n} ({name})")
+    warnings: list[str] = []
     stated = (lineparse.servings_from_yield(req.yield_text or "")
               or lineparse.servings_from_yield(req.title or ""))
     # Over the cap is a catering yield. Clamping it would plan a number nobody wrote, so it
     # is not stated, and the shopper says how many they are cooking for.
     servings = stated if stated is not None and stated <= MAX_SERVINGS else None
     if stated is not None and servings is None:
-        warnings.insert(0, f"servings stated as {stated}, more than the {MAX_SERVINGS} a plan "
-                           "takes: say how many you are cooking for")
+        warnings.append(f"servings stated as {stated}, more than the {MAX_SERVINGS} a plan "
+                        "takes: say how many you are cooking for")
     elif servings is None:
-        warnings.insert(0, "servings not stated")
+        warnings.append("servings not stated")
+    if blank := len(texts) - len(kept):
+        warnings.append(f"{blank} blank line(s) dropped")
+    if cut:
+        warnings.append(f"line {cut[0]}'s name was cut to {MAX_LINE_NAME} characters"
+                        if len(cut) == 1 else
+                        f"the names of lines {', '.join(cut)} were cut to {MAX_LINE_NAME} "
+                        "characters")
+    if unstated:
+        warnings.append(f"line {unstated[0]} states no amount" if len(unstated) == 1
+                        else f"lines {', '.join(unstated)} state no amount")
     return ParsedLines(servings=servings, servings_stated=servings is not None,
                        lines=out, warnings=warnings)
 

@@ -188,17 +188,19 @@ def test_planned_basis_lines_are_the_reviewed_lines_byte_for_byte(doc):
 
 
 def test_parse_lines_output_plans_as_it_stands():
-    """A client builds the doc straight from POST /recipes/parse-lines and posts it: stray
-    bullets, a catering yield and a sentence on one line must not make that a 422 the
-    shopper cannot fix. The planned basis is the parsed lines, byte for byte."""
+    """A client builds the doc straight from POST /recipes/parse-lines, warnings and all, and
+    posts it: stray bullets, a catering yield, a sentence on one line and a run of lines
+    with no amount must not make that a 422 the shopper cannot fix. The planned basis is
+    the parsed lines, byte for byte."""
     c = _client()
     parsed = c.post("/recipes/parse-lines", json={
         "yield_text": "Makes 150 servings",
         "lines": ["-", "500g penne", "•", "- 2 cloves garlic, minced",
-                  "1 can crushed tomatoes", "stir " * 60]}).json()
+                  "1 can crushed tomatoes", "stir " * 60] + ["salt"] * 25}).json()
     doc = {"key": "imp:1", "title": "Pasted", "servings": parsed["servings"],
            "servings_stated": parsed["servings_stated"],
-           "source": {"kind": "pasted", "method": "paste"}, "lines": parsed["lines"]}
+           "source": {"kind": "pasted", "method": "paste"}, "lines": parsed["lines"],
+           "warnings": parsed["warnings"]}
     resp = c.post("/plan/spec", json={"doc": doc, "allow_partial": True})
     assert resp.status_code == 200, resp.text
     plan = resp.json()
