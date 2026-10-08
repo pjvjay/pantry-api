@@ -79,6 +79,7 @@ LIMITS: dict[str, Limit] = {
     # The meal plan. resolve runs the planner once per recipe (up to 12, each an LLM call
     # when live), so it is the tightest.
     "/mealplan/resolve": Limit(per_minute=6, burst=3),
+    "/mealplan/selection/parse": Limit(per_minute=60, burst=60),
 }
 
 # Buckets idle this long are full again and can be forgotten.
