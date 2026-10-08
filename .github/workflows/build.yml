@@ -26,8 +26,10 @@
 #   dry_run          plan and test only; build, tag and deploy nothing.
 #                    Ticked by default; the only kind of run allowed off main
 #   promote_version  release and deploy an existing tag again, without a
-#                    rebuild: rollback, a failed deploy, the v0.1.0 bootstrap
+#                    rebuild: a failed deploy, or with rollback, an older one
 #   promote_major    N.0.0, the only way to 1.0.0
+#   rollback         let deploy move pantry-gitops to an older release than
+#                    the one it runs; without it, deploy refuses
 #
 # Auth:
 #   - GHCR push and retag, the git tag and the Release: this workflow's
@@ -69,6 +71,10 @@ on:
         description: "N.0.0 to start a new major; 1.0.0 ends the 0.x policy"
         required: false
         default: ""
+      rollback:
+        description: "Allow deploying a release older than the one pantry-gitops runs (a rollback)"
+        type: boolean
+        default: false
 
 # One release at a time and never cancelled halfway. GitHub keeps at most
 # one pending run per group and cancels the older pending run when a newer
@@ -368,6 +374,7 @@ jobs:
           GITOPS_PAT: ${{ secrets.GITOPS_PAT }}
           VERSION: ${{ needs.plan.outputs.version }}
           REF: ${{ needs.plan.outputs.ref }}
+          ROLLBACK: ${{ github.event_name == 'workflow_dispatch' && inputs.rollback }}
         run: |
           set -euo pipefail
           git clone --quiet "https://x-access-token:${GITOPS_PAT}@github.com/${GITOPS_REPO}.git" gitops
@@ -384,6 +391,22 @@ jobs:
           for attempt in 1 2 3 4 5; do
             git fetch --quiet origin main
             git reset --quiet --hard origin/main
+            # Never move to an older release by accident: promoting an earlier
+            # version is a rollback, and only the rollback input allows it.
+            # A dev-<sha> pin from before versioning is not a version, so any
+            # release may replace it. The pin is newTag X.Y.Z, or a digest
+            # with the version as its comment.
+            running=$(awk -v image="$IMAGE" '
+              $1 == "-" && $2 == "name:" { ours = ($3 == image); next }
+              ours && $1 == "newTag:" { print $2; exit }
+              ours && $1 == "digest:" && $3 == "#" { print $4; exit }
+            ' apps/kustomization.yaml)
+            if [[ "$running" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "$running" != "$VERSION" ] \
+               && [ "$(printf '%s\n%s\n' "$running" "$VERSION" | sort -V | tail -1)" = "$running" ] \
+               && [ "$ROLLBACK" != true ]; then
+              echo "::error::pantry-gitops runs $running, newer than $VERSION. To roll back, dispatch again with promote_version $VERSION and rollback ticked"
+              exit 1
+            fi
             python3 scripts/bump_image_tag.py "$IMAGE" "$VERSION"
             if git diff --quiet; then
               echo "pantry-gitops main already deploys $VERSION"
