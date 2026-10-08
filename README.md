@@ -166,12 +166,16 @@ pantry-planner/
 │   ├── origins.py         # provenance: evidence → resolve → rank
 │   ├── ingest.py          # loads claude-chrome-container output
 │   ├── metrics.py         # /metrics: LLM spend, gates, origin coverage
+│   ├── limits.py          # per-client token bucket + daily LLM cost ceiling
+│   ├── packs.py           # pack_count: packs a purchase takes (shared rule)
+│   ├── recipe_doc.py      # RecipeDoc -> RecipeSpec (no parse) / display text
 │   ├── demo.py            # CLI entrypoint
 │   ├── nlsearch/          # constrained NL2SQL: parse → query plan → gates
 │   │   ├── plan.py        # QueryPlan/StepResult/PlanAlert formalism
 │   │   ├── planner.py     # build_plan + execute_plan (t1..t4, abort gates)
 │   │   ├── sql_builder.py # named templates (single-pass retrieval, stats)
 │   │   ├── query_parser.py# multi-shot semantic parse (forced tool use)
+│   │   ├── lineparse.py   # deterministic ingredient-line reading (no LLM)
 │   │   ├── units.py       # unit normalization + tokenizer
 │   │   └── vocab.py       # live schema-linking vocabulary
 │   └── router/
