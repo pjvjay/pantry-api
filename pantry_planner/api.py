@@ -24,6 +24,8 @@ from .config import (
 from .llm import LLMError
 from .models import (
     MAX_DOC_LINES,
+    MAX_LINE_NAME,
+    MAX_SERVINGS,
     OriginRanking,
     Product,
     ProductOrigin,
@@ -294,26 +296,46 @@ class ParsedLines(BaseModel):
 def parse_lines(req: ParseLinesRequest) -> ParsedLines:
     """Read ingredient lines into the RecipeLine fields a shopper reviews before planning
     (nlsearch.lineparse, the demo parser's line reading). Pure: no URL, no LLM, no database.
-    Blank lines are dropped and renumbered; a line with no amount is kept and named in
-    `warnings`, as is an unstated servings count."""
+    Blank lines, and bullets with nothing after them, are dropped and renumbered; a line
+    with no amount is kept and named in `warnings`, as is an unstated servings count.
+
+    The result stays inside RecipeDoc's bounds, so a client can post it to /plan/spec as it
+    stands: a name longer than a RecipeLine holds is cut, and a servings count over
+    MAX_SERVINGS comes back as not stated. Both say so in `warnings`."""
     from .nlsearch import lineparse
 
     basis = "stated_by_source" if req.origin == "page" else "parsed_from_your_paste"
     texts = [t.strip() for t in req.lines]
+    # A bullet on its own has nothing to buy: it would come back with an empty name,
+    # which no RecipeLine accepts.
+    kept = [t for t in texts if lineparse.without_bullet(t)]
     out: list[ParsedLineOut] = []
     warnings: list[str] = []
-    for t in (t for t in texts if t):
+    for t in kept:
         p = lineparse.parse_line(t)
-        out.append(ParsedLineOut(line_no=len(out) + 1, text=t, name=p.doc_name,
+        n, name = len(out) + 1, p.doc_name
+        if len(name) > MAX_LINE_NAME:
+            # Only a line whose text before its first comma runs past this gets here, which
+            # is a sentence rather than an ingredient; the shopper sees the cut name and the
+            # full text side by side.
+            name = name[:MAX_LINE_NAME].rstrip()
+            warnings.append(f"line {n}'s name was cut to {MAX_LINE_NAME} characters")
+        out.append(ParsedLineOut(line_no=n, text=t, name=name,
                                  quantity=p.quantity, unit=p.unit or "", note=p.prep or "",
                                  amount_basis=basis))
         if p.quantity is None:
-            warnings.append(f"line {len(out)} ({p.doc_name}) states no amount")
-    if blank := sum(1 for t in texts if not t):
+            warnings.append(f"line {n} ({name}) states no amount")
+    if blank := len(texts) - len(kept):
         warnings.insert(0, f"{blank} blank line(s) dropped")
-    servings = (lineparse.servings_from_yield(req.yield_text or "")
-                or lineparse.servings_from_yield(req.title or ""))
-    if servings is None:
+    stated = (lineparse.servings_from_yield(req.yield_text or "")
+              or lineparse.servings_from_yield(req.title or ""))
+    # Over the cap is a catering yield. Clamping it would plan a number nobody wrote, so it
+    # is not stated, and the shopper says how many they are cooking for.
+    servings = stated if stated is not None and stated <= MAX_SERVINGS else None
+    if stated is not None and servings is None:
+        warnings.insert(0, f"servings stated as {stated}, more than the {MAX_SERVINGS} a plan "
+                           "takes: say how many you are cooking for")
+    elif servings is None:
         warnings.insert(0, "servings not stated")
     return ParsedLines(servings=servings, servings_stated=servings is not None,
                        lines=out, warnings=warnings)

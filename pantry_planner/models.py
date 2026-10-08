@@ -465,6 +465,10 @@ class ShoppingPlan(BaseModel):
 # types.ts.
 
 MAX_DOC_LINES = 60
+# The bounds a RecipeDoc is validated against. POST /recipes/parse-lines keeps
+# its output inside them, so what it returns can be planned as it stands.
+MAX_LINE_NAME = 200
+MAX_SERVINGS = 100
 
 AmountBasis = Literal["stated_by_source", "demo_house_amounts", "parsed_from_your_paste",
                       "transcribed_confirmed_by_you", "written_by_assistant"]
@@ -483,7 +487,7 @@ class RecipeLine(BaseModel):
     a line transcribed from a video until the shopper ticks it."""
     line_no: int = Field(ge=1)
     text: str = Field(max_length=300)
-    name: str = Field(min_length=1, max_length=200)
+    name: str = Field(min_length=1, max_length=MAX_LINE_NAME)
     quantity: float | None = Field(default=None, ge=0)
     unit: str = Field(default="", max_length=40)
     note: str = Field(default="", max_length=300)
@@ -518,7 +522,7 @@ class RecipeDoc(BaseModel):
     v: Literal[1] = 1
     key: str = Field(min_length=1, max_length=100)
     title: str = Field(min_length=1, max_length=200)
-    servings: int | None = Field(default=None, ge=1, le=100)
+    servings: int | None = Field(default=None, ge=1, le=MAX_SERVINGS)
     servings_stated: bool = False
     servings_basis: Literal["source", "your_setting"] | None = None
     yield_text: str = Field(default="", max_length=200)

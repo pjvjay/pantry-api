@@ -89,6 +89,13 @@ def _strip_notes(item: str) -> tuple[str, str]:
     return " ".join(head.split()), " ".join(rest.split())
 
 
+def without_bullet(line: str) -> str:
+    """The line with its list bullet and surrounding space removed: "- 2 eggs" -> "2 eggs".
+    A bullet on its own ("-", "•") comes back empty, so a caller that drops blank lines
+    drops it too: there is nothing on it to buy."""
+    return line.strip().lstrip(_BULLETS).strip()
+
+
 def parse_line(line: str) -> ParsedLine:
     """Read one ingredient line, with or without its list bullet.
 
@@ -96,7 +103,7 @@ def parse_line(line: str) -> ParsedLine:
     the text after a comma are dropped from the name, prep words go to
     `prep`, a leading purchase form goes to `form`, and purchase descriptors
     stay in the name. A line with no amount has quantity and unit None."""
-    raw = line.strip().lstrip(_BULLETS).strip()
+    raw = without_bullet(line)
     item, after_comma = _strip_notes(raw)
     qty = unit = None
     if qm := _QTY.match(item):

@@ -66,6 +66,12 @@ def test_doc_name_puts_the_purchase_form_back():
     assert lineparse.parse_line("olive oil").doc_name == "olive oil"
 
 
+def test_without_bullet_leaves_nothing_of_a_bullet_alone():
+    assert lineparse.without_bullet("  - 2 eggs ") == "2 eggs"
+    assert lineparse.without_bullet("• salt") == "salt"
+    assert [lineparse.without_bullet(b) for b in ("-", "•", " * ", "- -")] == [""] * 4
+
+
 @pytest.mark.parametrize("text, servings", [
     ("Serves 4", 4), ("serves 12 hungry people", 12), ("4 servings", 4),
     ("Makes 6 portions", 6), ("for 3 people", 3), ("4", 4), (" 2 ", 2),
@@ -115,6 +121,32 @@ def test_parse_lines_never_guesses_servings_and_labels_a_pages_amounts():
     assert out["lines"][0]["amount_basis"] == "stated_by_source"
     # the title is read when the yield says nothing
     assert _post({"title": "Soup (serves 3)", "lines": ["1 onion"]}).json()["servings"] == 3
+
+
+def test_a_bullet_alone_is_a_blank_line():
+    out = _post({"yield_text": "Serves 2",
+                 "lines": ["-", "500g penne", "•", " * ", "- 2 eggs"]}).json()
+    assert [(ln["line_no"], ln["name"]) for ln in out["lines"]] == [(1, "penne"), (2, "eggs")]
+    assert out["warnings"] == ["3 blank line(s) dropped"]
+
+
+def test_a_catering_yield_is_not_stated_and_says_why():
+    out = _post({"yield_text": "Makes 150 servings", "title": "Soup (serves 3)",
+                 "lines": ["2 eggs"]}).json()
+    # 150 is over what a RecipeDoc holds; the title's 3 is not read in its place, because
+    # the yield did state a number
+    assert (out["servings"], out["servings_stated"]) == (None, False)
+    assert out["warnings"] == [
+        "servings stated as 150, more than the 100 a plan takes: say how many you are "
+        "cooking for"]
+    assert _post({"yield_text": "Serves 100", "lines": ["2 eggs"]}).json()["servings"] == 100
+
+
+def test_a_name_longer_than_a_recipe_line_holds_is_cut_and_named():
+    out = _post({"lines": ["x" * 300, "2 eggs"]}).json()
+    assert len(out["lines"][0]["name"]) == 200 and out["lines"][0]["text"] == "x" * 300
+    assert out["warnings"][1] == "line 1's name was cut to 200 characters"
+    assert out["warnings"][2] == f"line 1 ({'x' * 200}) states no amount"
 
 
 def test_parse_lines_bounds():

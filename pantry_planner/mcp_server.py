@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field, model_serializer
 from .llm import LLMError
 from .models import (
     MAX_DOC_LINES,
+    MAX_SERVINGS,
     AmountBasis,
     DroppedIngredient,
     LlmCallTrace,
@@ -1095,7 +1096,7 @@ def plan_from_lines(doc_key: Annotated[str, Field(min_length=1, max_length=100)]
                     lines: Annotated[list[LineIn] | None,
                                      Field(max_length=MAX_DOC_LINES)] = None,
                     title: Annotated[str | None, Field(max_length=200)] = None,
-                    servings: Annotated[int | None, Field(ge=1, le=100)] = None,
+                    servings: Annotated[int | None, Field(ge=1, le=MAX_SERVINGS)] = None,
                     lat: Annotated[float | None, Field(ge=-90, le=90)] = None,
                     lon: Annotated[float | None, Field(ge=-180, le=180)] = None,
                     max_km: Annotated[float | None, Field(ge=0.5, le=100)] = None,

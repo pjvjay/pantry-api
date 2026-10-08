@@ -187,6 +187,25 @@ def test_planned_basis_lines_are_the_reviewed_lines_byte_for_byte(doc):
     assert plan["servings"] == doc.get("servings")
 
 
+def test_parse_lines_output_plans_as_it_stands():
+    """A client builds the doc straight from POST /recipes/parse-lines and posts it: stray
+    bullets, a catering yield and a sentence on one line must not make that a 422 the
+    shopper cannot fix. The planned basis is the parsed lines, byte for byte."""
+    c = _client()
+    parsed = c.post("/recipes/parse-lines", json={
+        "yield_text": "Makes 150 servings",
+        "lines": ["-", "500g penne", "•", "- 2 cloves garlic, minced",
+                  "1 can crushed tomatoes", "stir " * 60]}).json()
+    doc = {"key": "imp:1", "title": "Pasted", "servings": parsed["servings"],
+           "servings_stated": parsed["servings_stated"],
+           "source": {"kind": "pasted", "method": "paste"}, "lines": parsed["lines"]}
+    resp = c.post("/plan/spec", json={"doc": doc, "allow_partial": True})
+    assert resp.status_code == 200, resp.text
+    plan = resp.json()
+    assert _three(plan["basis"]["lines"]) == _three(parsed["lines"])
+    assert plan["servings"] is None
+
+
 def test_planning_reviewed_lines_never_calls_a_parser(monkeypatch):
     """Both parsers are patched to raise; planning must still succeed, in demo mode and on
     the live path (fake providers: the only LLM call is the product selection)."""
