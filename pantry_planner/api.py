@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import os
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -23,6 +23,7 @@ from .config import (
 )
 from .llm import LLMError
 from .models import (
+    MAX_DOC_LINES,
     OriginRanking,
     Product,
     ProductOrigin,
@@ -257,6 +258,62 @@ def get_recipe_doc(slug: str) -> RecipeDoc:
         raise HTTPException(status_code=404, detail=str(e)) from e
     amounts = db.load_line_amounts([slug])
     return library_doc(recipe, None if amounts is None else amounts.get(slug, {}))
+
+
+class ParseLinesRequest(BaseModel):
+    """Ingredient lines to read, with no LLM: a paste, or a page's ingredient list the hub
+    extracted (origin "page", whose amounts the source stated)."""
+
+    title: str | None = Field(default=None, max_length=200)
+    yield_text: str | None = Field(default=None, max_length=200)
+    lines: list[Annotated[str, Field(max_length=300)]] = Field(max_length=MAX_DOC_LINES)
+    origin: Literal["paste", "page"] = "paste"
+
+
+class ParsedLineOut(BaseModel):
+    line_no: int
+    text: str                   # the line as given, trimmed
+    name: str                   # what to buy, purchase form included ("ground beef")
+    quantity: float | None      # None: the line states no amount
+    unit: str                   # "" when there is no unit
+    note: str                   # prep and the text after the first comma
+    amount_basis: Literal["parsed_from_your_paste", "stated_by_source"]
+
+
+class ParsedLines(BaseModel):
+    servings: int | None        # None: nothing says how many it serves (never a guessed 1)
+    servings_stated: bool
+    lines: list[ParsedLineOut]
+    warnings: list[str]
+
+
+@app.post("/recipes/parse-lines", response_model=ParsedLines)
+def parse_lines(req: ParseLinesRequest) -> ParsedLines:
+    """Read ingredient lines into the RecipeLine fields a shopper reviews before planning
+    (nlsearch.lineparse, the demo parser's line reading). Pure: no URL, no LLM, no database.
+    Blank lines are dropped and renumbered; a line with no amount is kept and named in
+    `warnings`, as is an unstated servings count."""
+    from .nlsearch import lineparse
+
+    basis = "stated_by_source" if req.origin == "page" else "parsed_from_your_paste"
+    texts = [t.strip() for t in req.lines]
+    out: list[ParsedLineOut] = []
+    warnings: list[str] = []
+    for t in (t for t in texts if t):
+        p = lineparse.parse_line(t)
+        out.append(ParsedLineOut(line_no=len(out) + 1, text=t, name=p.doc_name,
+                                 quantity=p.quantity, unit=p.unit or "", note=p.prep or "",
+                                 amount_basis=basis))
+        if p.quantity is None:
+            warnings.append(f"line {len(out)} ({p.doc_name}) states no amount")
+    if blank := sum(1 for t in texts if not t):
+        warnings.insert(0, f"{blank} blank line(s) dropped")
+    servings = (lineparse.servings_from_yield(req.yield_text or "")
+                or lineparse.servings_from_yield(req.title or ""))
+    if servings is None:
+        warnings.insert(0, "servings not stated")
+    return ParsedLines(servings=servings, servings_stated=servings is not None,
+                       lines=out, warnings=warnings)
 
 
 @app.get("/products", response_model=list[Product])

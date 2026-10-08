@@ -78,3 +78,50 @@ def test_servings_from_yield_never_guesses(text, servings):
 def test_parse_servings_is_the_demo_rule():
     assert lineparse.parse_servings("Soup (serves 3)") == 3
     assert lineparse.parse_servings("4 servings") is None
+
+
+# ─── POST /recipes/parse-lines ───────────────────────────────
+
+def _post(body: dict):
+    from fastapi.testclient import TestClient
+
+    from pantry_planner.api import app
+
+    return TestClient(app).post("/recipes/parse-lines", json=body)
+
+
+def test_parse_lines_reads_each_line_like_the_demo_parser():
+    resp = _post({"title": "Pasta", "yield_text": "Serves 2",
+                  "lines": ["500g penne", "", "- 2 cloves garlic, minced", "500g ground beef",
+                            "1 can crushed tomatoes", "salt"]})
+    assert resp.status_code == 200, resp.text
+    out = resp.json()
+    assert (out["servings"], out["servings_stated"]) == (2, True)
+    assert [(ln["line_no"], ln["text"], ln["name"], ln["quantity"], ln["unit"], ln["note"])
+            for ln in out["lines"]] == [
+        (1, "500g penne", "penne", 500.0, "g", ""),
+        (2, "- 2 cloves garlic, minced", "garlic", 2.0, "cloves", "minced"),
+        (3, "500g ground beef", "ground beef", 500.0, "g", ""),
+        (4, "1 can crushed tomatoes", "crushed tomatoes", 1.0, "can", ""),
+        (5, "salt", "salt", None, "", "")]
+    assert {ln["amount_basis"] for ln in out["lines"]} == {"parsed_from_your_paste"}
+    assert out["warnings"] == ["1 blank line(s) dropped", "line 5 (salt) states no amount"]
+
+
+def test_parse_lines_never_guesses_servings_and_labels_a_pages_amounts():
+    out = _post({"lines": ["2 eggs"], "origin": "page"}).json()
+    assert (out["servings"], out["servings_stated"]) == (None, False)
+    assert out["warnings"] == ["servings not stated"]
+    assert out["lines"][0]["amount_basis"] == "stated_by_source"
+    # the title is read when the yield says nothing
+    assert _post({"title": "Soup (serves 3)", "lines": ["1 onion"]}).json()["servings"] == 3
+
+
+def test_parse_lines_bounds():
+    assert _post({"lines": ["2 eggs"] * 60}).status_code == 200
+    assert _post({"lines": ["2 eggs"] * 61}).status_code == 422
+    assert _post({"lines": ["x" * 300]}).status_code == 200
+    assert _post({"lines": ["x" * 301]}).status_code == 422
+    assert _post({"lines": ["2 eggs"], "title": "t" * 201}).status_code == 422
+    assert _post({"lines": ["2 eggs"], "origin": "url"}).status_code == 422
+    assert _post({"lines": []}).json()["lines"] == []

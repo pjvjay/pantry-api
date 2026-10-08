@@ -304,6 +304,10 @@ selector.
   `skipped`, never dropped silently.
 - `recipe_doc.to_recipe_text` renders a doc in the pasted format for traces and transcripts;
   it is never a planning input.
+- `POST /recipes/parse-lines` reads up to 60 ingredient lines (`{title?, yield_text?, lines,
+  origin?}`) into the fields a shopper reviews (`line_no, text, name, quantity, unit, note,
+  amount_basis`), with `servings` null unless the title or yield states it. It uses the demo
+  parser's line reading (`nlsearch/lineparse.py`): no URL, no LLM, no database.
 - `GET /recipes/{slug}/doc` is a library recipe as a RecipeDoc, with its demo house amounts
   (see the catalog notes above), ready to post to `/plan/spec`.
 
