@@ -118,6 +118,28 @@ def test_tripopt_infeasible_store_skipped_and_duplicates_priced_per_line():
     assert one_stop.stores == ["Full"] and one_stop.basket_cost == 12.00
 
 
+def test_travel_loops_are_remembered_and_answer_the_same():
+    """The alternatives ranking re-optimises a basket per candidate; the loop for a store
+    subset is computed once and every later call gets the same frontier."""
+    from pantry_planner import tripopt
+
+    rows = _matrix([
+        (1, "A", 49.29, -123.12, 1.0, 1, 3.00), (1, "A", 49.29, -123.12, 1.0, 2, 5.00),
+        (2, "B", 49.27, -123.10, 4.0, 1, 4.00), (2, "B", 49.27, -123.10, 4.0, 2, 2.00),
+    ])
+    tripopt._trip_km.cache_clear()
+
+    def frontier():
+        return [o.model_dump() for o in tripopt.optimize_trips(
+            rows, [(1, "X"), (2, "Y")], home_lat=49.28, home_lon=-123.12, cost_per_km=0.5)]
+
+    first = frontier()
+    misses = tripopt._trip_km.cache_info().misses
+    assert frontier() == first
+    info = tripopt._trip_km.cache_info()
+    assert info.misses == misses and info.hits >= misses
+
+
 def test_price_matrix_sql_binding():
     from pantry_planner.nlsearch.sql_builder import build_price_matrix_sql
 
