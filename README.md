@@ -362,7 +362,11 @@ selector.
   over the bounds comes back unstated, and the warnings come one per kind of problem,
   naming its lines.
 - `GET /recipes/{slug}/doc` is a library recipe as a RecipeDoc, with its demo house amounts
-  (see the catalog notes above), ready to post to `/plan/spec`.
+  (see the catalog notes above), to show line by line. Plan a library recipe by slug
+  (`POST /plan/{slug}`): that path gives the selector each line's category, while
+  `/plan/spec` first checks by name alone that each line is stocked, as `/plan/nl` does.
+  Six of the seven library docs plan through `/plan/spec` as well; `pbj_sandwich` is a 409
+  there, because "Peanut Butter and Jelly Jam" and "White Chocolate" find nothing by name.
 
 Every plan carries `basis` (what it was made from: the planned lines, the product chosen for
 each, the constraints and location), `servings` (None when the recipe does not say) and, per

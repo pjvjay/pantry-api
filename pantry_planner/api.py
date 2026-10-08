@@ -286,7 +286,10 @@ def get_recipe(slug: str) -> Recipe:
 @app.get("/recipes/{slug}/doc", response_model=RecipeDoc)
 def get_recipe_doc(slug: str) -> RecipeDoc:
     """A library recipe as a RecipeDoc with its demo house amounts (synthetic, labelled on
-    every line), ready for the meal plan or POST /plan/spec. Before pantry-db migration 0007
+    every line), to show line by line. Plan it by slug, POST /plan/{slug} (PLAN.md C4): that
+    path gives the selector each line's category, while POST /plan/spec first checks by name
+    alone that each line is stocked, as /plan/nl does, and a library name such as "Peanut
+    Butter and Jelly Jam" finds nothing that way (a 409). Before pantry-db migration 0007
     the lines have no amounts and `warnings` says so."""
     from .recipe_doc import library_doc
 

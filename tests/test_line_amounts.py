@@ -114,6 +114,23 @@ def test_a_library_doc_plans_through_plan_spec_as_reviewed():
     assert (penne["need_qty"], penne["need_uom"]) == (250.0, "g")
 
 
+def test_library_recipes_plan_by_slug_and_their_docs_by_name_where_stocked():
+    """/plan/{slug} gives the selector each line's category; /plan/spec first checks by name
+    alone that each line is stocked, as /plan/nl does. So every library recipe plans by
+    slug, which is how the README says to plan one, and its doc plans through /plan/spec
+    except where a name alone finds nothing. If that set changes, so should the README."""
+    c = _client()
+    refused = {}
+    for r in RECIPES:
+        assert c.post(f"/plan/{r['slug']}").status_code == 200, r["slug"]
+        resp = c.post("/plan/spec", json={"doc": c.get(f"/recipes/{r['slug']}/doc").json()})
+        if resp.status_code != 200:
+            assert resp.status_code == 409, resp.text
+            refused[r["slug"]] = sorted(
+                d["name"] for d in resp.json()["detail"]["aborted"]["details"])
+    assert refused == {"pbj_sandwich": ["Peanut Butter and Jelly Jam", "White Chocolate"]}
+
+
 def test_an_old_database_has_no_amounts_and_says_so():
     """Before pantry-db 0007 the table is missing: None (unknown), never {} (no amounts)."""
     from pantry_planner import db
