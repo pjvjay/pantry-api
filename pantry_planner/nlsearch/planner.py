@@ -190,7 +190,9 @@ def _abort(execution: PlanExecution, alert: PlanAlert) -> None:
 
 def _brand_regroup(pools: dict[int, list[Product]],
                    ingredients, stat_rows: list) -> dict[str, list[dict]]:
-    """t3 rows (per product) -> per ingredient, per brand aggregates."""
+    """t3 rows (per product) -> per ingredient, per brand aggregates. Numbers leave as floats:
+    Postgres returns AVG over an integer column as Decimal, which the selector's JSON payload
+    cannot carry (SQLite returns a float)."""
     by_id = {r["product_id"]: r for r in stat_rows}
     out: dict[str, list[dict]] = {}
     for n, pool in pools.items():
@@ -201,15 +203,14 @@ def _brand_regroup(pools: dict[int, list[Product]],
                 groups.setdefault(p.brand or "unbranded", []).append(r)
         brand_rows = []
         for brand, rows in sorted(groups.items()):
-            rated = [r for r in rows if r["avg_rating"] is not None]
+            rated = [float(r["avg_rating"]) for r in rows if r["avg_rating"] is not None]
             brand_rows.append({
                 "brand": brand,
                 "options": len(rows),
-                "avg_price": round(sum(r["avg_price"] for r in rows) / len(rows), 2),
-                "min_price": round(min(r["min_price"] for r in rows), 2),
-                "avg_rating": (round(sum(r["avg_rating"] for r in rated) / len(rated), 1)
-                               if rated else None),
-                "review_count": sum(r["review_count"] or 0 for r in rows),
+                "avg_price": round(sum(float(r["avg_price"]) for r in rows) / len(rows), 2),
+                "min_price": round(min(float(r["min_price"]) for r in rows), 2),
+                "avg_rating": round(sum(rated) / len(rated), 1) if rated else None,
+                "review_count": sum(int(r["review_count"] or 0) for r in rows),
             })
         out[ingredients[n].name] = brand_rows
     return out
