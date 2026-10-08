@@ -23,7 +23,8 @@
 # Dispatch inputs (Actions → build-and-deploy → Run workflow):
 #   level            release at this level instead of the labels'
 #                    (recorded in the notes with who ran it)
-#   dry_run          plan and test only; build, tag and deploy nothing
+#   dry_run          plan and test only; build, tag and deploy nothing.
+#                    Ticked by default; the only kind of run allowed off main
 #   promote_version  release and deploy an existing tag again, without a
 #                    rebuild: rollback, a failed deploy, the v0.1.0 bootstrap
 #   promote_major    N.0.0, the only way to 1.0.0
@@ -99,6 +100,16 @@ jobs:
       dry_run: ${{ steps.facts.outputs.dry_run }}
       plan: ${{ steps.facts.outputs.plan }}
     steps:
+      # Releases are cut from main only. A dispatch from another branch would
+      # tag and deploy that branch's HEAD, and main's next plan, which reads
+      # only the tags merged into main, would pick the same version again and
+      # fail at the tag. A dry run tags nothing, so it may plan any branch.
+      - name: Main only
+        if: github.ref != 'refs/heads/main' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+        run: |
+          echo "::error::releases run from main, not $GITHUB_REF: dispatch from main, or tick dry_run to only plan"
+          exit 1
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0          # plan reads every tag and the first-parent history
