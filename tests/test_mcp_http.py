@@ -203,6 +203,8 @@ def test_initialize_reports_the_release_not_a_literal(client, anonymous):
     # serverInfo.version is version.app_version(), read when the server is
     # built: the baked release in an image, else git describe or "unknown".
     # It used to be a hard-coded 0.1.0 that no release would ever have moved.
+    # Equality is the whole check: 0.1.0 is itself a real release (a checkout
+    # at tag v0.1.0, or PANTRY_API_VERSION=0.1.0), so it cannot be refused.
     from pantry_planner.version import app_version
 
     r = _rpc(client, "initialize", {
@@ -212,7 +214,6 @@ def test_initialize_reports_the_release_not_a_literal(client, anonymous):
     info = r.json()["result"]["serverInfo"]
     assert info["name"] == "pantry-planner"
     assert info["version"] == app_version()
-    assert info["version"] != "0.1.0"
     assert r.headers["x-pantry-version"] == app_version()
 
 
