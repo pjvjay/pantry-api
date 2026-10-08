@@ -386,17 +386,19 @@ cart and keeps them away from its model.
 - `POST /plan/alternatives` takes `{basis, line_no, limit? 1..25 = 12}` and returns an
   `AlternativeRanking` (`alternatives.py`). Candidates are the line at the exact, equivalent
   form, form and generic levels plus its head word (one options query), and same-aisle
-  substitutes when the pool is thin. Order (`ORDER`): same ingredient first, then
+  substitutes from stores in range when the pool is thin (the planner's t4 lookup; price ties
+  go to the lower id). Order (`ORDER`): same ingredient first, then
   `alternatives.closeness` (the demo selector's `units.semantic_key`, with its head test read
   from the line's ingredient word, so "cumin powder" is about cumin, not powder; for a line
   that ends in its ingredient word it only breaks semantic_key's ties), pack fit for the
   recipe's amount, origin preference only when the plan had one, the trip total after the
   swap, the cost of the recipe's amount, rating only on exact cent ties, catalog id. Each
   row's `trip` is computed by the same code as a re-price, so choosing it costs exactly that;
-  `rank_reason` says why it is below the row above. Products the origin exclusion drops are in `held_back` with their
-  evidence and never ranked; matches with no offer in range are counted in `unavailable`.
-  Unknowns stay unknown ("Origin not checked", no rating, pack fit `unknown`), and
-  `data_note` labels the demo offers and reviews while `OFFERS_SYNTHETIC` is true.
+  `rank_reason` says why it is below the row above. Products the origin exclusion drops are
+  in `held_back` with their evidence and never ranked; products matching the line's words
+  with no offer in range are counted in `unavailable`. Unknowns stay unknown ("Origin not
+  checked", no rating, pack fit `unknown`), and `data_note` labels the demo offers and reviews
+  while `OFFERS_SYNTHETIC` is true.
 - `POST /plan/reprice` takes `{basis, pins? ≤ 40}` (`pins`: `{line_no, product_id}`) and
   returns a `ShoppingPlan` like `/plan/nl`'s. With no pins it is the plan's own lines, trip,
   total and coverage. Each pin is checked first: a planned line, a candidate for it, not held

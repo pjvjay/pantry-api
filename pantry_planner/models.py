@@ -600,8 +600,10 @@ class AlternativeRanking(BaseModel):
     given. `order` names the ranking keys in order and `ranking_text` says
     them in plain words. `items` holds the first `limit` rows plus the
     cart's pick wherever it ranks; `total` counts every ranked row;
-    `unavailable` the matching products with no offer in range (or under the
-    price cap). `data_note` labels synthetic offers and reviews."""
+    `unavailable` the products matching the line's words (any level, or its
+    head word) with no offer in range (or under the price cap); same-aisle
+    substitutes are looked up in range only, as the planner's are, so none
+    is counted there. `data_note` labels synthetic offers and reviews."""
     line_no: int
     lines: list[int]
     ingredient: str

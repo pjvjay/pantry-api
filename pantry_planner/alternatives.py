@@ -254,9 +254,11 @@ class _Pool:
 def _fetch_pools(s: Session, basis: PlanBasis, lines: list[BasisLine],
                  catalog: dict[int, Product], current: dict[int, int]) -> dict[int, _Pool]:
     """One options query for every line in `lines` (five specs each), then a substitute
-    query for each line whose same-ingredient pool is thin. Offers are taken from every
-    store here (max_km None) so a product sold only out of range is still found, and
-    counted as unavailable later instead of vanishing."""
+    query for each line whose same-ingredient pool is thin. Matches are taken from every
+    store (max_km None) so a product sold only out of range is still found, and counted as
+    unavailable later instead of vanishing. Substitutes match none of the line's words; they
+    are a few same-aisle products, the cheapest the shopper can buy, so like the planner's
+    t4 they come only from stores in range, and none is counted as unavailable."""
     from .nlsearch.sql_builder import build_options_sql, build_substitute_sql
 
     specs: list[IngredientSpec] = []
