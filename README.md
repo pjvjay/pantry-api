@@ -117,7 +117,9 @@ public deployment: it lets any caller turn real LLM spend on.
 Every public endpoint is bounded (`pantry_planner/limits.py`), per replica and in process:
 
 - **A token bucket per client IP and endpoint**: `/plan/nl` and `/plan/spec` 10 a minute,
-  `/recipes/parse-lines`, `/plan/alternatives` and `/plan/reprice` 60 a minute (more endpoints
+  `/recipes/parse-lines`, `/plan/alternatives` and `/plan/reprice` 60 a minute,
+  `/mealplan/resolve` 6 a minute (burst 3), `/mealplan/schedule` 120 a minute,
+  `/mealplan/selection/parse` and `/mealplan/suggest-cook-days` 60 a minute (more endpoints
   join as they land). Over the limit is a
   429 `{"error": "rate_limited", "detail": "Too many requests to ...; retry in N s."}` with
   `Retry-After`. The client is the TCP peer unless `TRUSTED_PROXY_HOPS` says how many
@@ -130,7 +132,9 @@ Every public endpoint is bounded (`pantry_planner/limits.py`), per replica and i
   `/plan/{slug}`, `/plan/week` and the MCP plan tools answer 503 / a tool error, "Live planning
   is paused for today; the demo planner still works" (REST: `{"error":
   "llm_budget_exhausted", "detail": "<that sentence>"}`). Endpoints that call no LLM, and demo
-  mode, keep working. `/health` reports `llm_budget {spent, cap}`.
+  mode, keep working; so do the meal plan's schedule, selection parse and suggest-cook-days,
+  while `/mealplan/resolve` answers 503 like the plan endpoints. `/health` reports
+  `llm_budget {spent, cap}`.
 - Both refusals have the body an LLM failure already has: `error` is a code and `detail` the
   sentence to show, so the console, which shows a string `detail` as it is, needs no change.
 
@@ -191,6 +195,17 @@ pantry-planner/
 │   ├── packs.py           # pack_count: packs a purchase takes (shared rule)
 │   ├── recipe_doc.py      # RecipeDoc -> RecipeSpec (no parse) / display text
 │   ├── alternatives.py    # rank a plan line's alternatives; pin checks for reprice
+│   ├── mealplan/          # meal plans: counts, cited storage times, trips (docs/meal-planning.md)
+│   │   ├── selection.py   # Quick add: counted dishes matched exact/plural/alias/fuzzy
+│   │   ├── resolve.py     # products per recipe, once (flow.run / flow.run_spec), demo starters
+│   │   ├── place.py       # the board, the even spread, Suggest cook days
+│   │   ├── needs.py       # line amounts x meal servings / recipe servings
+│   │   ├── shelf.py       # seeds/shelf_life.json: cited storage and thaw rows
+│   │   ├── trips.py       # windows, minimum interval stabbing, purchases and packs
+│   │   ├── approved.py    # fingerprints, needs_review diffs, price deltas
+│   │   ├── warnings.py    # ranked warnings and their remedies
+│   │   ├── lists.py       # the per-trip shopping list text
+│   │   └── schedule.py    # POST /mealplan/schedule: pure, byte-identical
 │   ├── demo.py            # CLI entrypoint
 │   ├── nlsearch/          # constrained NL2SQL: parse → query plan → gates
 │   │   ├── plan.py        # QueryPlan/StepResult/PlanAlert formalism
@@ -207,7 +222,9 @@ pantry-planner/
 │       ├── decision.py        # Phase C: weighted-sum thresholding
 │       ├── three_phase.py     # ThreePhaseRouter
 │       └── cascade.py         # CascadeRouter
-├── seeds/                 # recipes + products JSON (copies of pantry-db's)
+├── seeds/                 # recipes + products JSON (copies of pantry-db's); the meal plan's
+│                          # shelf_life, mealplan_starters, recipe_aliases, demo_products
+├── docs/meal-planning.md  # the meal plan: counts, matching, storage times, trips, approval
 ├── skills/recipe-shopper/ # Agent Skill: recipe link → cheapest basket nearby
 ├── tests/                 # pytest, LLM mocked
 ├── evals/                 # golden set + comparison harness
@@ -418,6 +435,21 @@ cart and keeps them away from its model.
 `tests/test_reprice.py` and `tests/test_alternatives.py` cover the round trip, the trip
 invariant to the cent, the order, the match levels, the honesty cases, exclusion parity, the
 query count and a 300 ms guard.
+## Meal plans (`/mealplan/*`)
+
+A 1-2 week plan from counted dishes ("3 Pepperoni Pizza + 2 Chicken Fried Rice + 3 chicken
+briyani + 7 mango milkshakes in 2 weeks"): Quick add matches the names
+(`POST /mealplan/selection/parse`, no LLM; fuzzy and alias matches are always confirmed by the
+shopper), `POST /mealplan/resolve` picks products once per recipe, and
+`POST /mealplan/schedule` (pure, no LLM, byte-identical for the same draft) places the meals
+and proposes the fewest shopping trips that keep each perishable inside its cited storage
+time, for a "fresh" and a "fewest trips" (freeze on arrival) strategy, with a shopping list
+per trip grouped by store and aisle. `POST /mealplan/suggest-cook-days` proposes a
+freshness-aware layout with a cited reason per move. Storage and thaw times come only from
+`seeds/shelf_life.json` (FoodSafety.gov's Cold Food Storage Chart and USDA FSIS's "The Big
+Thaw", quoted verbatim); a product with no cited row is planned with the shopper's own
+buy-ahead setting and labelled so. The 4 demo starters (`GET /mealplan/starters`) are
+labelled "demo recipe". Details, sources and the JSON contracts: `docs/meal-planning.md`.
 
 ## Weekly menu optimizer (`POST /plan/week`)
 
