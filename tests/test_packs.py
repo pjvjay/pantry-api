@@ -52,9 +52,27 @@ def test_a_known_need_takes_at_least_one_pack():
     (None, "g", [(900, "g")]),                  # no pack size
     (0, "g", [(900, "g")]),                     # a zero pack size is no pack size
     (450, "g", []),                             # nothing to buy for
+    (450, "g", [(math.inf, "g")]),              # not a number of grams anyone can buy
+    (450, "g", [(math.nan, "g")]),
+    (450, "g", [(1e308, "g"), (1e308, "g")]),   # each finite, the sum past a float
 ])
 def test_unknown_stays_unknown(unit_qty, unit_uom, needs):
     assert pack_count(unit_qty, unit_uom, needs, min_lines=1) is None
+
+
+def test_a_need_sum_past_a_float_is_unknown():
+    """flow._need, the need_qty on a purchase, follows pack_count: two needs that
+    are each finite can still sum to inf, which is no amount."""
+    from pantry_planner.flow import _need
+    from pantry_planner.models import Selection
+
+    sels = [Selection(line_no=n, product_id=1, confidence=1.0) for n in (1, 2)]
+    assert _need({1: (1e308, "g"), 2: (1e308, "g")}, sels) == \
+        {"need_qty": None, "need_uom": None}
+    assert _need({1: (math.nan, "g"), 2: (1.0, "g")}, sels) == \
+        {"need_qty": None, "need_uom": None}
+    assert _need({1: (200.0, "g"), 2: (250.0, "g")}, sels) == \
+        {"need_qty": 450.0, "need_uom": "g"}
 
 
 def test_min_lines_is_the_callers_choice():

@@ -659,11 +659,16 @@ def build_plan(state: State) -> tuple[dict, State]:
 
 def _need(needs: dict[int, tuple[float, str] | None], sels: list[Selection]) -> dict:
     """need_qty/need_uom for a purchase: the summed need of its lines when every one is known
-    in the same canonical unit, else both None."""
+    in the same canonical unit, else both None. A sum that is not a finite number (an inf
+    need, or two near 1e308) is no amount anyone can buy, so it is unknown too, as in
+    packs.pack_count."""
     ns = [needs.get(sel.line_no) for sel in sels]
     if not ns or any(n is None for n in ns) or len({n[1] for n in ns if n}) != 1:
         return {"need_qty": None, "need_uom": None}
-    return {"need_qty": round(sum(n[0] for n in ns if n), 4), "need_uom": ns[0][1]}
+    total = sum(n[0] for n in ns if n)
+    if not math.isfinite(total):
+        return {"need_qty": None, "need_uom": None}
+    return {"need_qty": round(total, 4), "need_uom": ns[0][1]}
 
 
 def _basis(state: State, plan: ShoppingPlan, purchases: list[Purchase]) -> PlanBasis:
