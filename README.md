@@ -605,6 +605,14 @@ and `meets_floor` before calling a basket clean: below the floor
 (`ORIGIN_MIN_COVERAGE`, default 0.6) the basket is labelled UNVERIFIED,
 because unchecked lines are not verified-clean lines.
 
+When an exclusion removes every candidate for an ingredient, the plan stops
+with `excluded_by_origin` naming it, the products it removed and the
+same-aisle alternatives still available (Red Onion, Mexico, for an American
+yellow onion): the trade is stated, never made silently. With
+`allow_partial` (`POST /plan/{slug}?allow_partial=true`, or the MCP tools'
+argument) the rest of the recipe is planned and the ingredient goes to
+`out_of_range` with the same options; the MCP error says to retry that way.
+
 ### Loading evidence
 
 The container is a supervised, hard rate-limited browser agent — it was blocked

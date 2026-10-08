@@ -451,17 +451,41 @@ def _require_write(ctx: Context | None) -> str:
     return label
 
 
-def _gate_message(e) -> str:
+def _affected(alert) -> str:
+    """Each ingredient a gate names, with what the planner found to buy instead (the removed
+    products, the alternatives still available), so an agent can offer the shopper the trade
+    rather than only report the failure."""
+    if not alert or not alert.details:
+        return ""
+    parts = []
+    for d in alert.details:
+        options = [str(o) for o in d.get("suggestions") or []]
+        parts.append(str(d.get("name", "?"))
+                     + (f" (options: {'; '.join(options)})" if options else ""))
+    return f" Affected: {', '.join(parts)}."
+
+
+# Gates a partial plan gets past: allow_partial plans the rest and reports these ingredients.
+PARTIAL_CODES = ("missing_ingredients", "unavailable_within_constraints", "excluded_by_origin")
+
+
+def _partial_hint(alert, allow_partial: bool) -> str:
+    """Only when a partial plan would price something: with every ingredient missing (or out
+    of range, or excluded) the retry is a second paid parse certain to fail the same way."""
+    if (not allow_partial and alert is not None and alert.code.value in PARTIAL_CODES
+            and (alert.partial_would_plan or 0) > 0):
+        return " Retry with allow_partial=true to plan the rest."
+    return ""
+
+
+def _gate_message(e, allow_partial: bool = False) -> str:
     """One shape for every gate abort an agent can hit."""
     alert = e.execution.aborted
     steps = ", ".join(f"{s.step_id}:{s.outcome}" for s in e.execution.steps)
-    detail = ""
-    if alert and alert.details:
-        names = ", ".join(str(d.get("name", "?")) for d in alert.details)
-        detail = f" Affected: {names}."
     code = alert.code.value if alert else "unknown"
     msg = alert.message if alert else "plan aborted"
-    return (f"Plan aborted before product selection — {code}: {msg}{detail}"
+    return (f"Plan aborted before product selection — {code}: {msg}{_affected(alert)}"
+            f"{_partial_hint(alert, allow_partial)}"
             + (f" Steps: {steps}." if steps else ""))
 
 
@@ -902,7 +926,8 @@ def plan_recipe(slug: str,
                 verbose: bool = False,
                 lat: Annotated[float | None, Field(ge=-90, le=90)] = None,
                 lon: Annotated[float | None, Field(ge=-180, le=180)] = None,
-                max_km: Annotated[float | None, Field(ge=0.5, le=100)] = None) -> PlanResult:
+                max_km: Annotated[float | None, Field(ge=0.5, le=100)] = None,
+                allow_partial: bool = False) -> PlanResult:
     """Run the full shopping-plan pipeline for a seeded recipe: an LLM
     matches every ingredient to the best-value product, with a model
     router escalating hard cases. SLOW (10-60s) and costs LLM API credits
@@ -919,7 +944,11 @@ def plan_recipe(slug: str,
 
     `exclude_origin` drops candidates positively evidenced as coming from
     those countries (e.g. ["United States"]) before the model ever sees
-    them — never candidates that merely lack evidence. `preference` is soft
+    them — never candidates that merely lack evidence. When that leaves an
+    ingredient with no candidate the call fails naming it, with the removed
+    products and the alternatives still available; with allow_partial=true
+    the rest is planned and the ingredient goes to `summary.out_of_range`
+    with those options. `preference` is soft
     guidance. Read `summary.origin_status` and `summary.coverage`
     (`spend_fraction`, `meets_floor`) before describing a basket as clean,
     because unverified lines are not verified-clean lines; `summary.notes`
@@ -932,12 +961,12 @@ def plan_recipe(slug: str,
     _check_countries(exclude_origin, preference)
     try:
         plan = flow.run(slug, exclude=exclude_origin, preference=preference,
-                        lat=lat, lon=lon, max_km=max_km)
+                        lat=lat, lon=lon, max_km=max_km, allow_partial=allow_partial)
         return PlanResult(summary=_summarize_plan(plan), full=plan if verbose else None)
     except ValueError as e:
         raise ToolError(f"{e}. Call list_recipes for valid slugs.") from e
     except PlanAborted as e:
-        raise ToolError(_gate_message(e)) from e
+        raise ToolError(_gate_message(e, allow_partial)) from e
     except LLMError as e:
         raise ToolError(_llm_message(e)) from e
 
@@ -1004,23 +1033,11 @@ def plan_from_text(recipe_text: Annotated[str, Field(max_length=MAX_TEXT)],
         alert = e.execution.aborted
         steps = ", ".join(
             f"{s.step_id}:{s.outcome}" for s in e.execution.steps)
-        detail = ""
-        if alert and alert.details:
-            names = ", ".join(str(d.get("name", "?")) for d in alert.details)
-            detail = f" Affected: {names}."
-        hint = ""
-        # Only when a partial plan would price something: with every
-        # ingredient missing (or out of range) the retry is a second paid
-        # parse that is certain to fail the same way.
-        if (not allow_partial and alert is not None and alert.code.value in
-                ("missing_ingredients", "unavailable_within_constraints")
-                and (alert.partial_would_plan or 0) > 0):
-            hint = " Retry with allow_partial=true to plan the rest."
         raise ToolError(
             f"Plan aborted before product selection — "
             f"{alert.code.value if alert else 'gate'}: "
             f"{(alert.message if alert else 'constraint infeasible').rstrip('.')}."
-            f"{detail}{hint} (steps: {steps})") from e
+            f"{_affected(alert)}{_partial_hint(alert, allow_partial)} (steps: {steps})") from e
     except LLMError as e:
         raise ToolError(_llm_message(e)) from e
 
@@ -1059,7 +1076,7 @@ def plan_week(days: Annotated[int, Field(ge=1, le=14)] = 5,
         raise ToolError(
             f"Week plan aborted — "
             f"{alert.code.value if alert else 'gate'}: "
-            f"{alert.message if alert else 'constraint infeasible'}") from e
+            f"{alert.message if alert else 'constraint infeasible'}{_affected(alert)}") from e
     except LLMError as e:
         raise ToolError(_llm_message(e)) from e
 

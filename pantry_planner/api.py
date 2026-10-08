@@ -340,13 +340,17 @@ def plan_recipe(slug: str,
                 preference: Annotated[list[str] | None, Query()] = None,
                 lat: Annotated[float | None, Query(ge=-90, le=90)] = None,
                 lon: Annotated[float | None, Query(ge=-180, le=180)] = None,
-                max_km: Annotated[float | None, Query(ge=0.5, le=100)] = None) -> ShoppingPlan:
+                max_km: Annotated[float | None, Query(ge=0.5, le=100)] = None,
+                allow_partial: bool = False) -> ShoppingPlan:
     """Run the pipeline for one recipe. Returns the shopping plan.
 
     `exclude_origin` removes candidates positively evidenced as coming from
     those countries — never candidates that merely lack evidence. The
     returned plan carries per-line provenance and a spend-weighted coverage
-    figure saying how much of the basket was actually checked.
+    figure saying how much of the basket was actually checked. An ingredient
+    the exclusion leaves with no candidate is a 409 naming it and what to buy
+    instead; with `allow_partial` the rest is planned and it goes to
+    `out_of_range` with those options.
 
     Any of `lat`/`lon`/`max_km` makes the plan store-aware: each line is
     priced at its cheapest store within `max_km` of the point (the server's
@@ -359,7 +363,7 @@ def plan_recipe(slug: str,
     _check_countries(exclude_origin, preference)
     try:
         plan = flow.run(slug, exclude=exclude_origin, preference=preference,
-                        lat=lat, lon=lon, max_km=max_km)
+                        lat=lat, lon=lon, max_km=max_km, allow_partial=allow_partial)
     except ValueError as e:
         m.record_plan("recipe", "not_found")
         raise HTTPException(status_code=404, detail=str(e)) from e

@@ -165,22 +165,33 @@ def load_recipe(state: State, recipe_slug: str,
     return result, state.update(recipe=recipe, location=location)
 
 
-@action(reads=["recipe"], writes=["products", "origins", "origin_dropped", "preference",
-                                 "origin_requested"])
+@action(reads=["recipe"], writes=["recipe", "products", "origins", "origin_dropped", "preference",
+                                 "origin_requested", "out_of_range", "ingredient_count"])
 def load_products(state: State, exclude: list | None = None,
-                  preference: list | None = None) -> tuple[dict, State]:
+                  preference: list | None = None,
+                  allow_partial: bool = False) -> tuple[dict, State]:
+    """With `allow_partial`, an ingredient the origin exclusion emptied leaves the recipe and
+    goes to out_of_range with what to buy instead; the rest is planned."""
     products = db.load_all_products()
     recipe = state.get("recipe")
     cfg = settings()
     pools = _ingredient_pools(recipe, cfg.default_lat, cfg.default_lon) if recipe else {}
     names = {i: ing.name for i, ing in enumerate(recipe.ingredients)} if recipe else {}
-    kept, dropped, origins, _pools = apply_origin_constraint(
-        products, pools, names, exclude=exclude, preference=preference)
-    result = {"product_count": len(kept), "origin_dropped": len(dropped)}
-    return result, state.update(products=kept, origins=origins,
+    kept, dropped, origins, _pools, excluded = apply_origin_constraint(
+        products, pools, names, exclude=exclude, preference=preference,
+        allow_partial=allow_partial)
+    count = len(recipe.ingredients) if recipe else 0
+    if excluded:
+        recipe = recipe.model_copy(update={"ingredients": [
+            ing for i, ing in enumerate(recipe.ingredients) if i not in excluded]})
+    result = {"product_count": len(kept), "origin_dropped": len(dropped),
+              "excluded_by_origin": len(excluded)}
+    return result, state.update(recipe=recipe, products=kept, origins=origins,
                                 origin_dropped=dropped,
                                 preference=list(preference or []),
-                                origin_requested=bool(exclude or preference))
+                                origin_requested=bool(exclude or preference),
+                                out_of_range=list(excluded.values()),
+                                ingredient_count=count)
 
 
 @action(reads=[], writes=["recipe", "products", "parsed_input", "location",
@@ -214,14 +225,20 @@ def parse_and_retrieve(state: State, recipe_text: str,
                                 per_ingredient_limit=limit, max_km=max_km,
                                 allow_partial=allow_partial)
     names = {i: ing.name for i, ing in enumerate(r.recipe.ingredients)}
-    kept, dropped, origins, kept_pools = apply_origin_constraint(
-        r.products, r.pools, names, exclude=exclude, preference=preference)
+    kept, dropped, origins, kept_pools, excluded = apply_origin_constraint(
+        r.products, r.pools, names, exclude=exclude, preference=preference,
+        allow_partial=allow_partial)
+    # A partial plan leaves out what the exclusion emptied, as it does what is not stocked.
+    recipe = r.recipe if not excluded else r.recipe.model_copy(update={"ingredients": [
+        ing for i, ing in enumerate(r.recipe.ingredients) if i not in excluded]})
     if exclude and kept_pools:
         def price(p):
             return p.store_price if p.store_price is not None else p.price
         seen: set[int] = set()
         kept = []
-        for direct, alts in kept_pools.values():
+        for key, (direct, alts) in kept_pools.items():
+            if key in excluded:
+                continue
             for p in sorted(direct, key=price)[:PER_INGREDIENT_LIMIT] + alts:
                 if p.id not in seen:
                     seen.add(p.id)
@@ -230,6 +247,7 @@ def parse_and_retrieve(state: State, recipe_text: str,
         "ingredient_count": len(r.recipe.ingredients),
         "product_count": len(kept),
         "origin_dropped": len(dropped),
+        "excluded_by_origin": len(excluded),
         "plan_steps": [s.step_id for s in r.execution.steps],
         "parse_cost_usd": r.parsed.cost_usd,
     }
@@ -239,16 +257,17 @@ def parse_and_retrieve(state: State, recipe_text: str,
     pool_hints = {
         ing.line_no: [f"{p.name} (${p.store_price if p.store_price is not None else p.price:.2f})"
                       for p in r.pools.get(i, []) if p.id in kept_ids and not p.substitute][:3]
-        for i, ing in enumerate(r.recipe.ingredients)}
+        for i, ing in enumerate(r.recipe.ingredients) if i not in excluded}
     return result, state.update(
-        recipe=r.recipe, products=kept, origins=origins,
+        recipe=recipe, products=kept, origins=origins,
         origin_dropped=dropped, preference=list(preference or []),
         origin_requested=bool(exclude or preference),
         parsed_input=r.parsed,
         location={"lat": r.lat, "lon": r.lon, "max_km": r.max_km},
         plan_trace=[*_parse_step(r.parsed), *r.execution.steps], brand_stats=r.brand_stats,
         retrieval_stats=r.stats, not_stocked=r.not_stocked,
-        out_of_range=r.out_of_range, skipped=r.skipped, pool_hints=pool_hints,
+        out_of_range=[*r.out_of_range, *excluded.values()], skipped=r.skipped,
+        pool_hints=pool_hints,
         match_levels=r.match_levels, ingredient_count=r.ingredient_count)
 
 
@@ -674,18 +693,23 @@ def _ingredient_pools(recipe, lat, lon):
             for g in range(len(specs)) if direct.get(g) or relaxed_by_g.get(g)}
 
 
-def apply_origin_constraint(products, pools, names, *, exclude, preference):
+def apply_origin_constraint(products, pools, names, *, exclude, preference,
+                            allow_partial: bool = False):
     """Filter `products` on origin and gate per ingredient.
 
     products : what the selector will be shown (filtered copy returned)
     pools    : ingredient key -> candidate list, used ONLY for gating
     names    : ingredient key -> display name
 
-    Returns (kept_products, dropped, origins). `dropped` is deduplicated by
-    product. Raises PlanAborted(excluded_by_origin) naming EVERY ingredient
-    whose pool had candidates and lost all of them, each with the removed
-    products as suggestions — that is the trade the user is being asked to
-    make, stated rather than silently made for them.
+    Returns (kept_products, dropped, origins, kept_pools, excluded). `dropped`
+    is deduplicated by product. An ingredient whose pool had candidates and
+    lost all of them is the trade the shopper is being asked to make, stated
+    rather than silently made for them, with the removed products and the
+    same-aisle alternatives still available as suggestions. By default that
+    raises PlanAborted(excluded_by_origin) naming EVERY such ingredient. With
+    `allow_partial`, and anything else left to plan, they come back instead in
+    `excluded` (ingredient key -> DroppedIngredient) for the plan's
+    out_of_range, and the caller plans the rest.
 
     Products with no evidence are kept: absence is not a verdict. The
     coverage figure on the finished plan is what stops that leniency from
@@ -706,7 +730,7 @@ def apply_origin_constraint(products, pools, names, *, exclude, preference):
     # even with no filter — a basket you can audit afterwards is the point.
     origins = origins_mod.resolve_all(all_ids)
     if not exclude:
-        return list(products), [], origins, {}
+        return list(products), [], origins, {}, {}
 
     kept_products, dropped = origins_mod.filter_pool(
         products, exclude=exclude, origins=origins)
@@ -719,7 +743,7 @@ def apply_origin_constraint(products, pools, names, *, exclude, preference):
             return list(pool.get("direct", [])), list(pool.get("relaxed", []))
         return [p for p in pool if not p.substitute], [p for p in pool if p.substitute]
 
-    emptied: list[tuple[str, list, list]] = []
+    emptied: list[tuple[Any, str, list, list]] = []
     kept_pools: dict = {}
     for key, pool in pools.items():
         direct, alternatives = split(pool)
@@ -734,31 +758,48 @@ def apply_origin_constraint(products, pools, names, *, exclude, preference):
             # Every candidate for THIS ingredient is gone. Whatever remains
             # in the pool is a same-aisle alternative, not the ingredient —
             # offered below as a stated trade, never silently substituted.
-            emptied.append((names.get(key, str(key)), dropped_direct, kept_alt))
+            emptied.append((key, names.get(key, str(key)), dropped_direct, kept_alt))
+    if not emptied:
+        return kept_products, list(dropped_by_id.values()), origins, kept_pools, {}
 
-    if emptied:
-        def price(p):
-            return p.store_price if p.store_price is not None else p.price
-        details = [{
-            "name": name,
-            "reason": (f"all {len(removed)} candidate(s) are evidenced as "
-                       f"coming from an excluded country"),
-            "suggestions": [
-                f"{p.name} (${price(p):.2f}) — {country} via {field}"
-                for p, country, field in removed[:5]
-            ] + [
-                f"still available, not a direct match: {p.name} (${price(p):.2f})"
-                for p in sorted(alts, key=price)[:3]
-            ],
-        } for name, removed, alts in emptied]
-        affected = ", ".join(n for n, _, _ in emptied)
-        raise PlanAborted(PlanExecution(steps=[], aborted=PlanAlert(
-            stage="origin_filter", code=GateCode.excluded_by_origin,
-            message=(f"Excluding {', '.join(exclude)} left no candidate for: "
-                     f"{affected}. Relax the exclusion, or accept one of the "
-                     f"removed products listed per ingredient."),
-            details=details)))
-    return kept_products, list(dropped_by_id.values()), origins, kept_pools
+    def price(p):
+        return p.store_price if p.store_price is not None else p.price
+
+    def known_origin(p):
+        o = origins.get(p.id)
+        return f", {o.country}" if o is not None and o.status == "resolved" and o.country else ""
+
+    def reason(removed):
+        countries = sorted({country for _, country, _ in removed})
+        return (f"all {len(removed)} candidate(s) are evidenced as coming from "
+                f"{', '.join(countries)}, which this plan excludes")
+
+    def suggestions(removed, alts):
+        return [
+            f"{p.name} (${price(p):.2f}) — {country} via {field}"
+            for p, country, field in removed[:5]
+        ] + [
+            f"still available, not a direct match: {p.name} (${price(p):.2f}{known_origin(p)})"
+            for p in sorted(alts, key=price)[:3]
+        ]
+
+    plannable = len(names or pools) - len(emptied)
+    if allow_partial and plannable > 0:
+        excluded = {key: DroppedIngredient(ingredient=name, reason=reason(removed),
+                                           suggestions=suggestions(removed, alts))
+                    for key, name, removed, alts in emptied}
+        return (kept_products, list(dropped_by_id.values()), origins, kept_pools,
+                excluded)
+    affected = ", ".join(name for _, name, _, _ in emptied)
+    raise PlanAborted(PlanExecution(steps=[], aborted=PlanAlert(
+        stage="origin_filter", code=GateCode.excluded_by_origin,
+        message=(f"Excluding {', '.join(exclude)} left no candidate for: "
+                 f"{affected}. Relax the exclusion, or accept one of the "
+                 f"removed products listed per ingredient."),
+        details=[{"name": name, "reason": reason(removed),
+                  "suggestions": suggestions(removed, alts)}
+                 for _, name, removed, alts in emptied],
+        partial_would_plan=max(plannable, 0))))
 
 
 def build_application(recipe_slug: str | None = None,
@@ -833,7 +874,8 @@ def build_application(recipe_slug: str | None = None,
             ApplicationBuilder()
             .with_actions(load_recipe.bind(recipe_slug=recipe_slug, location=location),
                           load_products.bind(exclude=exclude,
-                                             preference=preference),
+                                             preference=preference,
+                                             allow_partial=allow_partial),
                           *common_actions)
             .with_transitions(("load_recipe", "load_products"),
                               ("load_products", "preselect_model"),
@@ -854,18 +896,22 @@ def _run_id(name: str) -> str:
 
 def run(recipe_slug: str, *, exclude: list | None = None,
         preference: list | None = None, lat: float | None = None,
-        lon: float | None = None, max_km: float | None = None) -> ShoppingPlan:
+        lon: float | None = None, max_km: float | None = None,
+        allow_partial: bool = False) -> ShoppingPlan:
     """Run the classic pipeline end-to-end. Returns the final ShoppingPlan.
 
     `exclude` removes candidates positively evidenced as coming from those
     countries; `preference` is passed to the selector as soft guidance.
     Any of `lat`/`lon`/`max_km` makes the plan store-aware (stores per line,
     trip options); without them it is priced from the catalog as before.
+    `allow_partial` plans the rest when the exclusion leaves an ingredient
+    with no candidate, reporting it on `out_of_range` with what to buy
+    instead (a gate still fires when nothing would remain).
     """
     timer = StepTimer()
     app = build_application(recipe_slug=recipe_slug, exclude=exclude,
                             preference=preference, lat=lat, lon=lon, max_km=max_km,
-                            hooks=[timer])
+                            allow_partial=allow_partial, hooks=[timer])
     _action, _result, state = app.run(halt_after=["build_plan"])
     return state["plan"].model_copy(update={"burr_run": app.uid, "pipeline": timer.steps})
 
