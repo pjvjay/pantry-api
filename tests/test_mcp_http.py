@@ -199,6 +199,23 @@ def test_tools_list_with_the_right_secret(client, with_tokens):
             "list_origin_submissions", "list_recipes"} <= names
 
 
+def test_initialize_reports_the_release_not_a_literal(client, anonymous):
+    # serverInfo.version is version.app_version(), read when the server is
+    # built: the baked release in an image, else git describe or "unknown".
+    # It used to be a hard-coded 0.1.0 that no release would ever have moved.
+    from pantry_planner.version import app_version
+
+    r = _rpc(client, "initialize", {
+        "protocolVersion": "2025-06-18", "capabilities": {},
+        "clientInfo": {"name": "pytest", "version": "0"}})
+    assert r.status_code == 200, r.text
+    info = r.json()["result"]["serverInfo"]
+    assert info["name"] == "pantry-planner"
+    assert info["version"] == app_version()
+    assert info["version"] != "0.1.0"
+    assert r.headers["x-pantry-version"] == app_version()
+
+
 def test_validation_failure_over_http_names_the_field(client, with_tokens):
     r = _call(client, "submit_origin_evidence",
               _submission_args(country="Amerca"), token=SECRET)
