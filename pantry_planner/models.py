@@ -483,8 +483,12 @@ class LineEvidence(BaseModel):
 class RecipeLine(BaseModel):
     """One ingredient line. `text` is the line as the source wrote it; `name`,
     `quantity` and `unit` are what gets planned. quantity None means the
-    source did not say; unit "" means no unit. `confirmed` is False only for
-    a line transcribed from a video until the shopper ticks it."""
+    source did not say. A count is unit "each" ("2 eggs"), as parse-lines
+    writes it; unit "" means no unit, and the planner cannot measure a
+    quantity without one, so that line's need and pack count are unknown
+    rather than guessed. `unit` is planned as written, never rewritten.
+    `confirmed` is False only for a line transcribed from a video until the
+    shopper ticks it."""
     line_no: int = Field(ge=1)
     text: str = Field(max_length=300)
     name: str = Field(min_length=1, max_length=MAX_LINE_NAME)

@@ -206,6 +206,21 @@ def test_parse_lines_output_plans_as_it_stands():
     assert plan["servings"] is None
 
 
+def test_a_reviewed_count_has_a_need_when_its_unit_is_each():
+    """RecipeLine's contract: a count is unit "each", which is what parse-lines writes. A
+    quantity with unit "" is planned as written, so its need is unknown rather than guessed."""
+    c = _client()
+    (parsed,) = c.post("/recipes/parse-lines", json={"lines": ["2 yellow onions"]}
+                       ).json()["lines"]
+    assert (parsed["quantity"], parsed["unit"]) == (2.0, "each")
+    for unit, need in (("each", (2.0, "each")), ("", (None, None))):
+        doc = _doc([{"name": "yellow onion", "quantity": 2, "unit": unit}])
+        resp = c.post("/plan/spec", json={"doc": doc})
+        assert resp.status_code == 200, resp.text
+        (li,) = resp.json()["line_items"]
+        assert (li["need_qty"], li["need_uom"]) == need, unit
+
+
 def test_planning_reviewed_lines_never_calls_a_parser(monkeypatch):
     """Both parsers are patched to raise; planning must still succeed, in demo mode and on
     the live path (fake providers: the only LLM call is the product selection)."""
