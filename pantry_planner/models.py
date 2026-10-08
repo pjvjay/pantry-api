@@ -9,6 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .nlsearch.plan import StepPhase, StepResult  # import-safe: plan.py is pydantic-only
+from .nlsearch.schemas import Constraints  # import-safe: schemas.py is pydantic-only
 
 # ─── Domain models ────────────────────────────────────────────
 
@@ -340,6 +341,66 @@ class PlanLineItem(BaseModel):
     match: MatchLevel = "exact"        # the loosest level among the lines it covers
     also_lines: list[int] = Field(default_factory=list)
     packs: int = 1
+    # The summed need of every line this purchase covers, in canonical units,
+    # when every one of them is known in the same unit; None otherwise (an
+    # unstated amount, or a teaspoon and a gram on one purchase).
+    need_qty: float | None = None
+    need_uom: Literal["g", "ml", "each"] | None = None
+
+
+# ─── Plan basis: what a plan was made from ───────────────────
+# Everything needed to re-price or rank a finished plan without re-running the
+# parse or the selector: its lines as planned, the products chosen, and the
+# constraints and location it was planned under. Read-only and recomputed
+# from the plan; whoever holds it (the hub, the browser's meal-plan draft)
+# sends it back, and pins are validated against it on the server.
+
+class BasisLine(BaseModel):
+    """One planned recipe line: the ingredient as planned (name, form, prep,
+    quantity and unit exactly as the parse or the reviewed recipe gave them),
+    how it matched the catalog, and the product chosen (None when the
+    selector chose nothing valid, or the product had no offer in range)."""
+    line_no: int
+    name: str
+    form: str | None = None
+    prep: str | None = None
+    quantity: float | None = None
+    unit: str | None = None
+    level: MatchLevel = "exact"
+    product_id: int | None = None
+    confidence: float | None = None
+
+
+class Pin(BaseModel):
+    """The shopper's own choice of product for one line."""
+    line_no: int
+    product_id: int
+
+
+class PlanBasis(BaseModel):
+    """`path`: library (a seeded recipe), nl (pasted text through the
+    parser) or spec (reviewed lines, planned with no parse). The left-out
+    lists and the interpretation are the plan's own. `origin_dropped` counts
+    the products the origin exclusion removed."""
+    v: Literal[1] = 1
+    path: Literal["library", "nl", "spec"]
+    recipe_slug: str
+    recipe_name: str
+    lines: list[BasisLine]
+    constraints: Constraints = Field(default_factory=Constraints)
+    lat: float | None = None
+    lon: float | None = None
+    max_km: float | None = None
+    exclude_origin: list[str] = Field(default_factory=list)
+    preference: list[str] = Field(default_factory=list)
+    origin_requested: bool = False
+    origin_dropped: int = 0
+    interpretation: list[str] = Field(default_factory=list)
+    not_stocked: list[DroppedIngredient] = Field(default_factory=list)
+    out_of_range: list[DroppedIngredient] = Field(default_factory=list)
+    skipped: list[DroppedIngredient] = Field(default_factory=list)
+    ingredient_count: int = 0
+    pins: list[Pin] = Field(default_factory=list)
 
 
 class ShoppingPlan(BaseModel):
@@ -388,6 +449,11 @@ class ShoppingPlan(BaseModel):
     out_of_range: list[DroppedIngredient] = Field(default_factory=list)
     skipped: list[DroppedIngredient] = Field(default_factory=list)
     ingredient_count: int = 0
+    # How many the recipe serves, when it says; None when it does not (the
+    # planner still plans one batch, but never claims it serves 1).
+    servings: int | None = None
+    # What the plan was made from (see PlanBasis); set on every plan.
+    basis: PlanBasis | None = None
 
 
 # ─── Weekly menu optimizer (5A) ───────────────────────────────

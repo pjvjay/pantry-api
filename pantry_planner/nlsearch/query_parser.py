@@ -85,7 +85,7 @@ B) "Shepherd's pie for 6: 2 lb ground lamb, mashed potatoes (about 1kg),
 
 C) "quick veggie stir fry — broccoli, bell peppers, soy sauce, rice.
    dairy free and keep it cheap"
-   -> servings 1 (unstated); ingredients broccoli/bell pepper/soy sauce/rice;
+   -> servings null (unstated); ingredients broccoli/bell pepper/soy sauce/rice;
       constraints {{exclude_tags ["dairy"], soft_text "keep it cheap"}}
 
 D) "Tomato soup: 700ml passata (ground tomatoes), 1 onion, cream 250ml.
@@ -139,7 +139,8 @@ PARSER_TOOL = {
                 "required": ["title", "servings", "ingredients"],
                 "properties": {
                     "title": {"type": "string"},
-                    "servings": {"type": "integer"},
+                    # null when the recipe does not say: never a guessed 1
+                    "servings": {"type": ["integer", "null"]},
                     "ingredients": {"type": "array", "items": _ING_SCHEMA},
                 },
             },
@@ -237,7 +238,9 @@ def validate_parsed(parsed: ParsedInput, vocab: dict[str, str]) -> ParsedInput:
                 ing.name, ing.form = f"{f} {ing.name}", None
         if ing.category_hint and ing.category_hint.strip().lower() not in vocab:
             ing.category_hint = None
-    parsed.recipe.servings = max(1, parsed.recipe.servings)
+    if parsed.recipe.servings is None:
+        parsed.recipe.servings_stated = False
+    parsed.recipe.servings = max(1, parsed.recipe.servings or 1)
     # Public-endpoint bound: cap the plan at 40 ingredients (keeps the
     # VALUES rowsets well under SQLite's parameter limit). Surfaced, not
     # silent — the dropped count lands in the interpretation chips and the

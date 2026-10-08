@@ -65,6 +65,7 @@ def parse_recipe(text_input: str, *, model: str | None = None) -> ParsedInput:
         if re.search(rf"no {tag}|{tag}[- ]free", scope, re.IGNORECASE):
             cons.exclude_tags.append(tag)
     return ParsedInput(recipe=RecipeSpec(title=title, servings=servings,
+                                         servings_stated=stated is not None,
                                          ingredients=ingredients),
                        constraints=cons, cost_usd=0.0, latency_ms=0)
 

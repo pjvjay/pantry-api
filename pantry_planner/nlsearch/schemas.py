@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from ..models import Product, Recipe
-
 
 class IngredientSpec(BaseModel):
     name: str                              # base or compound product name: "tomato sauce"
@@ -17,7 +15,12 @@ class IngredientSpec(BaseModel):
 
 class RecipeSpec(BaseModel):
     title: str = "Untitled recipe"
-    servings: int = 1
+    # None only between the parse and validate_parsed, which records it in
+    # servings_stated and clamps it to at least 1 (planning needs a number).
+    servings: int | None = 1
+    # False when the recipe did not say how many it serves, so the 1 above
+    # is a placeholder: a plan reports servings None rather than claim it.
+    servings_stated: bool = True
     ingredients: list[IngredientSpec] = Field(default_factory=list)
 
 

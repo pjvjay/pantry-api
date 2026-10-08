@@ -26,7 +26,7 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ResourceNotFoundError, ToolError
 from mcp.types import ToolAnnotations
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 
 from .llm import LLMError
 from .models import (
@@ -35,6 +35,7 @@ from .models import (
     MatchLevel,
     OriginCoverage,
     OriginRanking,
+    PlanBasis,
     PlanLineItem,
     Product,
     ProductOrigin,
@@ -362,6 +363,17 @@ class PlanSummary(BaseModel):
     # trace views: an agent can ignore them.
     burr_run: str = ""
     pipeline: dict[str, float] = Field(default_factory=dict)
+    # Only with basis=true: what the plan was made from, for re-pricing and
+    # ranking alternatives without re-planning. Absent from the result
+    # otherwise, so a summary without it is byte for byte what it was.
+    basis: PlanBasis | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_basis(self, handler):
+        data = handler(self)
+        if self.basis is None:
+            data.pop("basis", None)
+        return data
 
 
 class PlanResult(BaseModel):
@@ -637,7 +649,7 @@ def _floor_note(c: OriginCoverage | None) -> list[str]:
             "basket clean"]
 
 
-def _summarize_plan(plan: ShoppingPlan) -> PlanSummary:
+def _summarize_plan(plan: ShoppingPlan, basis: bool = False) -> PlanSummary:
     products = _products_by_id({li.product_id for li in plan.line_items})
     notes = (list(plan.interpretation)
              + _partial_note(plan)
@@ -662,7 +674,8 @@ def _summarize_plan(plan: ShoppingPlan) -> PlanSummary:
         skipped=list(plan.skipped),
         llm_cost_usd=plan.total_llm_cost_usd, latency_ms=plan.total_latency_ms,
         llm_calls=plan.llm_calls, burr_run=plan.burr_run,
-        pipeline={s["step"]: s["ms"] for s in plan.pipeline if s.get("ms") is not None})
+        pipeline={s["step"]: s["ms"] for s in plan.pipeline if s.get("ms") is not None},
+        basis=plan.basis if basis else None)
 
 
 def _summarize_week(plan: WeekPlan) -> WeekSummary:
@@ -927,7 +940,8 @@ def plan_recipe(slug: str,
                 lat: Annotated[float | None, Field(ge=-90, le=90)] = None,
                 lon: Annotated[float | None, Field(ge=-180, le=180)] = None,
                 max_km: Annotated[float | None, Field(ge=0.5, le=100)] = None,
-                allow_partial: bool = False) -> PlanResult:
+                allow_partial: bool = False,
+                basis: bool = False) -> PlanResult:
     """Run the full shopping-plan pipeline for a seeded recipe: an LLM
     matches every ingredient to the best-value product, with a model
     router escalating hard cases. SLOW (10-60s) and costs LLM API credits
@@ -954,7 +968,10 @@ def plan_recipe(slug: str,
     because unverified lines are not verified-clean lines; `summary.notes`
     carries substitutions and the coverage warning. `summary` is the
     token-lean result; `verbose=True` also attaches `full` (the complete
-    ShoppingPlan with per-line reasoning and every trip option)."""
+    ShoppingPlan with per-line reasoning and every trip option).
+    `basis=true` adds `summary.basis`, what the plan was made from, for a
+    client that re-prices or ranks alternatives later; an agent never needs
+    it."""
     from . import flow
     from .nlsearch import PlanAborted
 
@@ -962,7 +979,8 @@ def plan_recipe(slug: str,
     try:
         plan = flow.run(slug, exclude=exclude_origin, preference=preference,
                         lat=lat, lon=lon, max_km=max_km, allow_partial=allow_partial)
-        return PlanResult(summary=_summarize_plan(plan), full=plan if verbose else None)
+        return PlanResult(summary=_summarize_plan(plan, basis),
+                          full=plan if verbose else None)
     except ValueError as e:
         raise ToolError(f"{e}. Call list_recipes for valid slugs.") from e
     except PlanAborted as e:
@@ -978,7 +996,8 @@ def plan_from_text(recipe_text: Annotated[str, Field(max_length=MAX_TEXT)],
                    preference: Annotated[list[str] | None, Field(max_length=MAX_LIST)] = None,
                    verbose: bool = False,
                    max_km: Annotated[float | None, Field(ge=0.5, le=100)] = None,
-                   allow_partial: bool = False) -> PlanResult:
+                   allow_partial: bool = False,
+                   basis: bool = False) -> PlanResult:
     """Plan a shopping basket from PASTED RECIPE TEXT — include the full
     ingredient list (quantities optional) and any shopping notes
     (budget, dietary exclusions). Parses the text, runs a staged SQL
@@ -1012,7 +1031,8 @@ def plan_from_text(recipe_text: Annotated[str, Field(max_length=MAX_TEXT)],
     the same product are one purchase (`also_lines`, `packs`), priced once.
     `summary.notes` starts with how the text was interpreted; `trip` is the
     recommended store split. `verbose=True` attaches `full` with the
-    retrieval `plan_trace` and every trip option."""
+    retrieval `plan_trace` and every trip option. `basis=true` adds
+    `summary.basis` (see plan_recipe); an agent never needs it."""
     _check_countries(exclude_origin, preference)
     from . import flow
     from .nlsearch import PlanAborted, UnparseableRecipe
@@ -1021,7 +1041,8 @@ def plan_from_text(recipe_text: Annotated[str, Field(max_length=MAX_TEXT)],
         plan = flow.run_nl(recipe_text, lat=lat, lon=lon,
                            exclude=exclude_origin, preference=preference,
                            max_km=max_km, allow_partial=allow_partial)
-        return PlanResult(summary=_summarize_plan(plan), full=plan if verbose else None)
+        return PlanResult(summary=_summarize_plan(plan, basis),
+                          full=plan if verbose else None)
     except UnparseableRecipe as e:
         raise ToolError(
             "Couldn't find an ingredient list in that text. Paste a recipe "
