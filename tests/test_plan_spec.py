@@ -289,6 +289,19 @@ def test_spec_errors_match_plan_nl():
     assert resp.status_code == 422
 
 
+def test_a_422_renders_whatever_the_rejected_input():
+    """Python's JSON parser reads 1e309 as inf and accepts NaN, neither of which JSON can
+    carry. FastAPI's 422 echoes the rejected input back, so the error itself used to fail
+    to render and the client got a 500 for its own mistake."""
+    body = json.dumps({"doc": FIXTURES[0], "lat": "LAT"})
+    for raw, shown in (("NaN", "nan"), ("1e309", "inf"), ("-1e309", "-inf")):
+        resp = _client().post("/plan/spec", content=body.replace('"LAT"', raw),
+                              headers={"content-type": "application/json"})
+        assert resp.status_code == 422, raw
+        (err,) = resp.json()["detail"]
+        assert (err["loc"], err["input"]) == (["body", "lat"], shown), raw
+
+
 def test_lines_validate_parsed_drops_are_named_not_lost():
     """45 reviewed lines: the planner's 40-line cap drops 5, which appear by name on
     `skipped` and in `ignored`; water is never bought and is named too."""

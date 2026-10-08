@@ -7,10 +7,13 @@ web layer. Every route delegates to pantry_planner.flow or pantry_planner.db.
 from __future__ import annotations
 
 import contextlib
+import math
 import os
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -84,6 +87,27 @@ async def _llm_error(request: Request, exc: LLMError) -> JSONResponse:
     return JSONResponse(status_code=exc.http_status, content={
         "error": "llm_call_failed", "provider": exc.provider or None,
         "detail": str(exc)})
+
+
+def _json_safe(value: Any) -> Any:
+    """`value` with every float JSON cannot carry (inf, -inf, nan) written as its name."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def _invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """FastAPI's own 422, with the same body, made renderable for any input. Python's JSON
+    parser reads 1e309 as inf and accepts NaN, neither of which JSON can carry; the 422
+    echoes the rejected input back, so rendering it raised and the client got a 500 for
+    what was its own mistake."""
+    return JSONResponse(status_code=422,
+                        content={"detail": _json_safe(jsonable_encoder(exc.errors()))})
 
 
 def _check_countries(*lists: list[str] | None) -> None:
