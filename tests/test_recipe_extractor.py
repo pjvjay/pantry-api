@@ -288,19 +288,21 @@ def test_fetch_sends_a_browser_user_agent_honours_the_timeout_and_decodes_gzip(m
 
     monkeypatch.setattr(ex, "_urlopen", fake_urlopen)
     source, page = ex.fetch("https://example.com/start")
-    assert seen == {"ua": ex.USER_AGENT, "timeout": 20, "url": "https://example.com/start"}
+    assert seen == {"ua": ex.USER_AGENT, "timeout": ex.TIMEOUT_S,
+                    "url": "https://example.com/start"}
     assert "Mozilla/5.0" in ex.USER_AGENT
     assert source == "https://example.com/final/"          # after redirects
     assert ex.extract(page)["name"] == "Crème brûlée"
 
 
-def test_fetch_caps_the_page_at_5_mb(monkeypatch, capsys):
-    big = b"<p>" + b"a" * (6 * 1024 * 1024)
+def test_fetch_caps_the_page_at_max_bytes(monkeypatch, capsys):
+    big = b"<p>" + b"a" * (ex.MAX_BYTES + 1024 * 1024)
     monkeypatch.setattr(ex, "_urlopen",
                         lambda req, timeout: _FakeResponse(big, req.full_url, {}))
     _, page = ex.fetch("https://example.com/big")
-    assert len(page) == 5 * 1024 * 1024
-    assert "only the first 5 MB" in capsys.readouterr().err
+    assert len(page) == ex.MAX_BYTES
+    mb = ex.MAX_BYTES // (1024 * 1024)
+    assert f"larger than {mb} MB; only the first {mb} MB were read" in capsys.readouterr().err
 
 
 def test_http_errors_exit_1(monkeypatch, capsys):
@@ -403,6 +405,58 @@ def test_the_extractor_never_executes_or_imports_anything_from_the_page():
     assert imported <= {"__future__", "html", "html.parser", "http.client", "json", "re",
                         "sys", "time", "urllib.error", "urllib.request", "zlib", "typing"}
     assert all(m.split(".")[0] in sys.stdlib_module_names for m in imported)
+
+
+# ─── what demo-hub imports ───────────────────────────────────
+
+def test_the_hub_loads_the_extractor_by_path_and_finds_what_it_imports():
+    """demo-hub's link import loads this file by path, under its own module
+    name, and takes __version__, MAX_BYTES, TIMEOUT_S and extract() from it.
+    What extract() says about a page must fit the RecipeDoc the hub builds:
+    `method` is a RecipeSource method, and the version fits source.extractor."""
+    from pantry_planner.models import RecipeSource
+
+    spec = importlib.util.spec_from_file_location("hub_recipe_extractor", SCRIPT)
+    assert spec and spec.loader
+    hub = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hub)
+    assert re.fullmatch(r"\d+\.\d+\.\d+", hub.__version__)
+    assert isinstance(hub.MAX_BYTES, int) and isinstance(hub.TIMEOUT_S, int)
+    ld = _ld({"@type": "Recipe", "name": "Toast", "recipeIngredient": ["2 slices bread"]})
+    micro = ('<div itemscope itemtype="https://schema.org/Recipe">'
+             '<span itemprop="recipeIngredient">2 eggs</span></div>')
+    for page, method in ((ld, "jsonld"), (micro, "microdata")):
+        found = hub.extract(page)
+        assert found["method"] == method
+        source = RecipeSource(kind="web", method=found["method"],
+                              extractor=f"extract_recipe.py {hub.__version__}")
+        assert source.method == method
+
+
+def test_the_limits_are_defined_once_and_every_description_of_them_agrees():
+    """MAX_BYTES and TIMEOUT_S are the page-size cap and the fetch deadline
+    for this script and for the hub, which imports them. The module
+    docstring, the over-size warning and SKILL.md describe them in words, so
+    each must name the same numbers; no other line in the script restates
+    them. A deliberate change edits the pinned pair below; the hub follows on
+    its own, but a doc that quotes the numbers needs the same edit."""
+    assert (ex.MAX_BYTES, ex.TIMEOUT_S) == (5 * 1024 * 1024, 20)
+    mb = ex.MAX_BYTES // (1024 * 1024)
+    doc = " ".join((ex.__doc__ or "").split())
+    assert f"at most {mb} MB" in doc
+    assert f"once {ex.TIMEOUT_S} seconds have passed" in doc
+    _, body = _frontmatter_and_body()
+    assert f"a {ex.TIMEOUT_S} s timeout" in " ".join(body.split())
+
+    src = SCRIPT.read_text(encoding="utf-8")
+    assert len(re.findall(r"^MAX_BYTES = ", src, re.MULTILINE)) == 1
+    assert len(re.findall(r"^TIMEOUT_S = ", src, re.MULTILINE)) == 1
+    code = src.split('"""', 2)[2]                 # after the module docstring
+    restated = [ln for ln in code.splitlines()
+                if not ln.startswith(("MAX_BYTES = ", "TIMEOUT_S = "))
+                and re.search(rf"\b{mb} ?MB\b|\b{ex.TIMEOUT_S} ?s(econds)?\b|{mb} \* 1024",
+                              ln)]
+    assert restated == []
 
 
 # ─── SKILL.md guard ──────────────────────────────────────────

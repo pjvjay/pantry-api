@@ -51,6 +51,15 @@ import zlib
 from html.parser import HTMLParser
 from typing import Any
 
+# demo-hub's link import loads this file by path and takes these three names
+# and extract() from it, so the hub and this script read pages the same way:
+# the hub's 413 and its fetch deadline are MAX_BYTES and TIMEOUT_S, defined
+# here and nowhere else. __version__ goes into an imported recipe's
+# source.extractor, so a recipe says which reading of its page produced its
+# lines. Bump the patch for a fix to what is read, the minor for a new key in
+# extract()'s result or a changed limit, and the major for a key removed or
+# renamed.
+__version__ = "1.0.0"
 MAX_BYTES = 5 * 1024 * 1024          # read at most 5 MB of page
 TIMEOUT_S = 20                       # the whole fetch, not one read
 CHUNK = 64 * 1024
@@ -504,8 +513,9 @@ def fetch(url: str) -> tuple[str, str]:
     except (OSError, http.client.HTTPException, ValueError) as e:
         raise FetchError(f"could not fetch {url}: {e}") from e
     if len(body) > MAX_BYTES:
-        print(f"warning: page is larger than {MAX_BYTES // (1024 * 1024)} MB; "
-              "only the first 5 MB were read", file=sys.stderr)
+        limit = f"{MAX_BYTES // (1024 * 1024)} MB"
+        print(f"warning: page is larger than {limit}; only the first {limit} were read",
+              file=sys.stderr)
         body = body[:MAX_BYTES]
     return final_url, _decode(_decompress(body, encoding), charset)
 
