@@ -663,13 +663,34 @@ def _floor_note(c: OriginCoverage | None) -> list[str]:
             "basket clean"]
 
 
+def _swap_notes(plan: ShoppingPlan, products: dict[int, Product]) -> list[str]:
+    """One note per line the shopper chose the product for (a re-price's pins), naming what
+    the planner had picked, so a summary never passes a shopper's choice off as the plan's."""
+    b = plan.basis
+    if b is None or not b.pins:
+        return []
+    lines = {ln.line_no: ln for ln in b.lines}
+
+    def name(pid: int | None) -> str:
+        p = products.get(pid) if pid is not None else None
+        return p.name if p is not None else f"product {pid}"
+
+    return [f"line {pin.line_no} ({lines[pin.line_no].name}): chosen by the shopper, "
+            f"{name(pin.product_id)} (was {name(lines[pin.line_no].product_id)})"
+            for pin in b.pins if pin.line_no in lines]
+
+
 def _summarize_plan(plan: ShoppingPlan, basis: bool = False) -> PlanSummary:
-    products = _products_by_id({li.product_id for li in plan.line_items})
+    pins = plan.basis.pins if plan.basis is not None else []
+    was = {ln.product_id for ln in plan.basis.lines} if pins else set()
+    products = _products_by_id({li.product_id for li in plan.line_items}
+                               | {p.product_id for p in pins} | (was - {None}))
     notes = (list(plan.interpretation)
              + _partial_note(plan)
              + _shared_notes(plan.line_items)
              + _generic_notes(plan.line_items)
              + _substitution_notes(plan.line_items)
+             + _swap_notes(plan, products)
              + _floor_note(plan.origin_coverage))
     trip = _trip(plan.trip_options)
     on_trip = {i.product_id: i for i in trip.items} if trip else {}

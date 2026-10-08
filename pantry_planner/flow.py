@@ -1071,3 +1071,151 @@ def run_spec(spec, *, lat: float | None = None, lon: float | None = None,
                             max_km=max_km, allow_partial=allow_partial, hooks=[timer])
     _action, _result, state = app.run(halt_after=["build_plan"])
     return state["plan"].model_copy(update={"burr_run": app.uid, "pipeline": timer.steps})
+
+
+# ─── Re-pricing a finished plan (no LLM) ─────────────────────
+# The shopper swaps a product in the cart, or the meal plan pins one: the plan
+# is priced again from its basis, with the selector's picks kept on every
+# other line. Grouping, packs, the in-range offers and the trip optimiser run
+# exactly as they did for the plan, so a re-price with no pins reproduces the
+# plan's lines, trip, total and coverage, and the alternatives ranking (which
+# calls price_picks too) quotes the trip total a swap really gives.
+
+class RepriceError(ValueError):
+    """The basis cannot be priced as it stands (a product left the catalog or its range)."""
+
+
+def basis_needs(basis: PlanBasis) -> dict[int, tuple[float, str] | None]:
+    """line_no -> canonical need, read from the basis lines as _needs reads the parse. A
+    library plan's lines carry no amounts, as its plan had none."""
+    from .nlsearch.units import normalize_quantity
+
+    return {ln.line_no: normalize_quantity(ln.quantity, ln.unit) for ln in basis.lines}
+
+
+def price_picks(basis: PlanBasis, selections: list[Selection], catalog: dict[int, Product],
+                rows: list) -> tuple[list[Purchase], list]:
+    """(purchases, trip options) for these selections under the basis: each product priced
+    at its cheapest in-range offer as the plan's path picks it (or its catalog price on a
+    plan with no location), lines that chose one product grouped into one purchase with
+    their packs, and the trip optimiser run over the basket. `rows` are price-matrix rows
+    covering at least the selected products; rows for other products are ignored, so the
+    optimiser sees the stores the plan's own query would have returned. A selection whose
+    product has no offer in `rows` is left out of the purchases."""
+    from . import tripopt
+
+    ids = {sel.product_id for sel in selections}
+    located = basis.lat is not None and basis.lon is not None
+    if located:
+        rows = [r for r in rows if r["product_id"] in ids]
+        offers = _cheapest_offers(rows, basis.path)
+        products = {pid: catalog[pid].model_copy(update={"store_name": offers[pid]["store"],
+                                                         "store_price": offers[pid]["price"]})
+                    for pid in ids if pid in offers}
+    else:
+        products = {pid: catalog[pid] for pid in ids}
+    ingredients = {ln.line_no: RecipeIngredient(line_no=ln.line_no, name=ln.name)
+                   for ln in basis.lines}
+    purchases, _ = group_purchases(selections, products, ingredients, basis_needs(basis))
+    options = []
+    if located and purchases:
+        options = tripopt.optimize_trips(
+            rows, [(pu.product.id, pu.product.name) for pu in purchases],
+            home_lat=basis.lat, home_lon=basis.lon,
+            cost_per_km=settings().travel_cost_per_km,
+            packs={pu.product.id: pu.packs for pu in purchases})
+    return purchases, options
+
+
+def reprice(basis: PlanBasis, pins: list | None = None) -> ShoppingPlan:
+    """The plan priced again from its basis with the shopper's pins (alternatives.
+    validate_pins checks each: planned line, a candidate for it, not held back by the
+    origin exclusion, an offer in range). No LLM call and no write. Unpinned lines keep
+    the plan's pick, confidence and match level; a pinned line is chosen by the shopper
+    (confidence 1.0, "chosen by the shopper in the cart (was X)", plus "; substitution"
+    when the product is not the same ingredient, which the summary's notes then name).
+    The left-out lists and the interpretation are the basis's own; coverage is computed
+    only when the plan asked an origin question. The returned plan's basis carries the
+    merged pins (a pin equal to the plan's pick is dropped: that is how a swap is undone).
+    Raises alternatives.BasisError / PinError, or RepriceError when a product no longer
+    has an offer in range."""
+    import time as _time
+
+    from sqlalchemy import text as _text
+    from sqlalchemy.orm import Session as _Session
+
+    from . import alternatives
+    from . import origins as origins_mod
+    from .models import Pin
+    from .nlsearch.plan import StepKind, StepResult
+    from .nlsearch.sql_builder import build_price_matrix_sql, inline_for_display
+
+    t0 = _time.perf_counter()
+    alternatives.check_basis(basis)
+    catalog = {p.id: p for p in db.load_all_products()}
+    valid = alternatives.validate_pins(basis, pins, catalog=catalog)
+    planned = alternatives.planned_lines(basis)
+    missing = sorted({ln.product_id for ln in planned.values()} - catalog.keys())
+    if missing:
+        raise RepriceError(f"product id(s) {missing} in the basis are no longer in the "
+                           "catalog; plan the recipe again")
+    selections = []
+    for n, ln in sorted(planned.items()):
+        pin = valid.get(n)
+        if pin is None:
+            selections.append(Selection(
+                line_no=n, product_id=ln.product_id,
+                confidence=ln.confidence if ln.confidence is not None else 0.0,
+                reasoning="chosen by the planner" + ("; substitution" if ln.substitution else "")))
+        else:
+            was = catalog[ln.product_id].name
+            selections.append(Selection(
+                line_no=n, product_id=pin.product_id, confidence=1.0,
+                reasoning=f"chosen by the shopper in the cart (was {was})"
+                          + ("; substitution" if pin.tier != "same" else "")))
+    ids = sorted({sel.product_id for sel in selections})
+    rows: list = []
+    trace = []
+    if basis.lat is not None and basis.lon is not None and ids:
+        sql, params = build_price_matrix_sql(ids, basis.lat, basis.lon, basis.max_km)
+        q0 = _time.perf_counter()
+        with _Session(db.engine()) as s:
+            rows = list(s.execute(_text(sql), params).mappings())
+        trace.append(StepResult(
+            step_id="reprice_offers", kind=StepKind.lookup,
+            sql_display=inline_for_display(sql, params), row_count=len(rows),
+            duration_ms=int((_time.perf_counter() - q0) * 1000),
+            label=(f"re-priced {len(ids)} product(s) with {len(valid)} shopper choice(s); "
+                   "no LLM")))
+    purchases, options = price_picks(basis, selections, catalog, rows)
+    priced = {pu.product.id for pu in purchases}
+    gone = [sel for sel in selections if sel.product_id not in priced]
+    if gone:
+        within = (f"within {basis.max_km:g} km" if basis.max_km is not None else "at any store")
+        raise RepriceError("; ".join(
+            f"{catalog[sel.product_id].name} (line {sel.line_no}) has no offer {within} any more"
+            for sel in gone) + ". Plan the recipe again.")
+    origins_map = origins_mod.resolve_all(ids)
+    line_items = _line_items(
+        purchases, origins_map=origins_map,
+        match_levels={n: ln.level for n, ln in planned.items()}, needs=basis_needs(basis),
+        model_used=lambda sel: "shopper" if sel.line_no in valid else "planner")
+    coverage = None
+    origin_status = "not_requested"
+    if basis.origin_requested:
+        coverage = origins_mod.basket_coverage(
+            [(li.product_id, li.price) for li in line_items], origins=origins_map or None,
+            excluded_lines=basis.origin_dropped)
+        origin_status = "verified" if coverage.meets_floor else "unverified"
+    merged = [Pin(line_no=n, product_id=v.product_id) for n, v in sorted(valid.items())]
+    return ShoppingPlan(
+        recipe_slug=basis.recipe_slug, recipe_name=basis.recipe_name,
+        line_items=line_items, total_cost=round(sum(li.price for li in line_items), 2),
+        routing_strategy="reprice", preselected_model="", escalated=False,
+        origin_coverage=coverage, origin_status=origin_status, total_llm_cost_usd=0.0,
+        total_latency_ms=int((_time.perf_counter() - t0) * 1000),
+        interpretation=list(basis.interpretation), plan_trace=trace,
+        trip_options=options, not_stocked=list(basis.not_stocked),
+        out_of_range=list(basis.out_of_range), skipped=list(basis.skipped),
+        ingredient_count=basis.ingredient_count, servings=basis.servings,
+        basis=basis.model_copy(update={"pins": merged}))
