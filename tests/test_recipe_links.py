@@ -315,8 +315,10 @@ def test_a_bare_descriptor_is_never_a_generic_match():
     # "extra" (Extra Virgin Olive Oil) and "light" (flaked light tuna) are
     # both real product terms, so "extra light" is a miss at every level —
     # with an empty remainder the generic level must not match everything
-    r = _run([_ing("spaghetti"), _ing("organic"), _ing("extra light")], allow_partial=True)
-    assert [d.ingredient for d in r.not_stocked] == ["organic", "extra light"]
+    # ("organic" was the bare descriptor here until the catalog gained an organic onion bag;
+    # "smoked" is a descriptor no product name or description carries)
+    r = _run([_ing("spaghetti"), _ing("smoked"), _ing("extra light")], allow_partial=True)
+    assert [d.ingredient for d in r.not_stocked] == ["smoked", "extra light"]
     assert r.match_levels == {1: "exact"}
 
 

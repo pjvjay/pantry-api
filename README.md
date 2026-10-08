@@ -232,7 +232,7 @@ ingredients cost the same single round trip as 4. Deliberately deferred at
 this catalog size: materialized stats views, a pool/result cache keyed on
 grocery sets, `pg_trgm` fuzzy indexing.
 
-Catalog: 161 products (`seeds/products.json`) — staples plus the Sichuan,
+Catalog: 165 products (`seeds/products.json`) — staples plus the Sichuan,
 Indian, Mexican and baking pantry that real recipe links ask for. The file is
 a byte-identical copy of [pantry-db](https://github.com/pjvjay/pantry-db)'s
 `seeds/products.json`, which also generates the Postgres `seed.sql`; change it
