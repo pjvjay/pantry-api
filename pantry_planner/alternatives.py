@@ -27,6 +27,7 @@ trusted state.
 """
 from __future__ import annotations
 
+import math
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import NamedTuple
@@ -37,24 +38,59 @@ from sqlalchemy.orm import Session
 from . import db
 from .config import settings
 from .models import (
+    AltCounts,
+    AlternativeRanking,
+    AltMove,
+    AltOffer,
+    AltOrigin,
+    AltRating,
+    AltTrip,
     BasisLine,
+    HeldBack,
     Pin,
     PlanBasis,
     Product,
     ProductOrigin,
+    RankedAlternative,
+    Reason,
+    Selection,
 )
 from .nlsearch.schemas import IngredientSpec
-from .nlsearch.units import tokens
+from .nlsearch.units import normalize_quantity, semantic_key, tokens
 
 # Bounds. A basis arrives from a client (the hub, the browser's meal plan), so
 # it is checked like any other public input before a query is built from it.
 MAX_PINS = 40
+MAX_LIMIT = 25
+DEFAULT_LIMIT = 12
 MAX_BASIS_LINES = 60
 MAX_LEFT_OUT = 60
 MAX_TEXT = 200          # a name, a country, a store
 MAX_NOTE = 1000         # a left-out reason or an interpretation chip
+# Trip effects are worked out for at most this many candidates, the best by
+# the keys that come before the trip total. A re-optimisation is cheap with
+# the seeded stores, but MAX_ENUMERATED_STORES stores would not be.
+MAX_TRIP_EVAL = 40
 SUBSTITUTE_LIMIT = 5
 THIN_POOL = 3           # as the planner's t4: fewer same-ingredient hits adds substitutes
+
+# The ranking keys, in order. Same ingredient first; then how closely the
+# words match (units.semantic_key, the demo selector's own key, so the ranking
+# cannot disagree with the plan about which product is closer); then whether
+# the cart's packs cover the recipe's amount; then the shopper's origin
+# preference, only when one was given (demo mode and the week planner put it
+# before price too); then what the swap does to the trip total; then the cost
+# of the recipe's amount; then rating, which only breaks exact ties because
+# the reviews are synthetic; then the catalog id, so the order is total.
+ORDER = ["tier", "semantic_key", "pack_fit", "preference", "trip_total", "cost_for_need",
+         "rating", "id"]
+RANKING_TEXT = (
+    "Products that are the same ingredient come first. Then: how many of the recipe's words "
+    "the product matches; whether the packs the cart would buy cover the recipe's amount; "
+    "your origin preference, only when you gave one; the trip total after the swap (prices, "
+    "an extra stop and travel); the cost of the recipe's amount; the rating, only to break "
+    "an exact tie (reviews are demo data); and last the catalog number.")
+DATA_NOTE = "Store prices, stock at every store and reviews are demo data."
 
 # build_options_sql indexes per line: the line at each level, then its head noun.
 _LEVELS = ("exact", "form", "form", "generic", "related")
@@ -63,6 +99,8 @@ _MATCH_RANK = {"exact": 0, "form": 1, "generic": 2, "related": 3, "substitute": 
                "outside": 5}
 _TIER = {"exact": "same", "form": "same", "generic": "same", "related": "other",
          "substitute": "other", "outside": "outside"}
+_TIER_RANK = {"same": 0, "other": 1, "outside": 2}
+_FIT_RANK = {"covers": 0, "unknown": 1, "short": 2}
 
 
 class BasisError(ValueError):
@@ -419,3 +457,447 @@ def _available(basis: PlanBasis, offer: dict | None) -> bool:
         return True
     cap = basis.constraints.max_item_price
     return offer is not None and (cap is None or offer["price"] <= cap)
+
+
+# ─── Ranking ─────────────────────────────────────────────────
+
+def _needs(basis: PlanBasis, line_nos: list[int]) -> list[tuple[float, str] | None]:
+    by_no = {ln.line_no: ln for ln in basis.lines}
+    return [normalize_quantity(by_no[n].quantity, by_no[n].unit) for n in line_nos]
+
+
+def _fmt_qty(qty: float, uom: str) -> str:
+    if uom == "g" and qty >= 1000:
+        return f"{qty / 1000:g} kg"
+    if uom == "ml" and qty >= 1000:
+        return f"{qty / 1000:g} L"
+    return f"{qty:g} {uom}" if uom != "each" else f"{qty:g}"
+
+
+def _total_need(needs: list[tuple[float, str] | None]) -> tuple[float, str] | None:
+    if not needs or any(n is None for n in needs) or len({n[1] for n in needs if n}) != 1:
+        return None
+    return round(sum(n[0] for n in needs if n), 4), needs[0][1]
+
+
+def _pack_facts(product: Product, price: float, cart_packs: int,
+                needs: list[tuple[float, str] | None], lines: list[BasisLine]
+                ) -> tuple[str, float | None, Reason]:
+    """(pack_fit, cost_for_need, the pack reason) for one candidate."""
+    from .packs import pack_count
+
+    need = _total_need(needs)
+    if need is None:
+        unmeasured = [ln for ln, n in zip(lines, needs, strict=True) if n is None]
+        if not unmeasured:
+            why = "The recipe's lines give amounts in different units"
+        elif all(ln.quantity is None for ln in lines):
+            why = "Recipe gives no amount"
+        elif unmeasured[0].quantity is None:
+            why = f"Recipe gives no amount for line {unmeasured[0].line_no}"
+        else:
+            ln = unmeasured[0]
+            amount = f"{ln.quantity:g} {ln.unit or ''}".strip()
+            why = f"Recipe amount {amount!r} can't be compared with a pack"
+        return "unknown", None, Reason(code="pack", text=why, tone="unknown")
+    qty, uom = need
+    if not product.unit_qty or not product.unit_uom:
+        return "unknown", None, Reason(code="pack", text="Pack size not listed", tone="unknown")
+    if product.unit_uom != uom:
+        return "unknown", None, Reason(
+            code="pack", text=f"Pack in {product.unit_uom}, recipe in {uom}", tone="unknown")
+    needed = pack_count(product.unit_qty, product.unit_uom, needs, min_lines=1) or 1
+    cost = round(price * needed, 2)
+    size = product.unit_size or _fmt_qty(product.unit_qty, uom)
+    if cart_packs * product.unit_qty + 1e-9 >= qty:
+        text_ = (f"Covers the recipe's {_fmt_qty(qty, uom)} in {cart_packs} "
+                 f"pack{'s' if cart_packs > 1 else ''}")
+        return "covers", cost, Reason(code="pack", text=text_, tone="plus")
+    text_ = (f"Recipe needs {_fmt_qty(qty, uom)}; the cart counts {cart_packs} "
+             f"pack{'s' if cart_packs > 1 else ''} of {size}")
+    return "short", cost, Reason(code="pack", text=text_, tone="minus")
+
+
+def _unit_price(product: Product, price: float) -> tuple[float | None, str]:
+    if not product.unit_qty or product.unit_uom not in {"g", "ml", "each"}:
+        return None, ""
+    if product.unit_uom == "each":
+        return round(price / product.unit_qty, 2), "each"
+    return round(price / product.unit_qty * 100, 2), f"100 {product.unit_uom}"
+
+
+def _alt_origin(o: ProductOrigin | None, demo: bool) -> AltOrigin:
+    """The origin as evidence states it, in rank_products' wording; never a percentage, and
+    never a country unless the evidence resolved."""
+    from .origins import FULL_CLAIMS, PROCESSING_CLAIMS
+
+    if o is None or o.status == "unknown":
+        checked = o is not None and o.evidence_count > 0
+        return AltOrigin(status="unknown",
+                         label="Origin not published" if checked else "Origin not checked")
+    if o.status == "conflicting":
+        return AltOrigin(status=o.status, label="Sources disagree on origin", demo=demo)
+    if o.status != "resolved":
+        return AltOrigin(status=o.status, label="Origin not checked")
+    claim = ("full" if o.claim_type in FULL_CLAIMS
+             else "processing" if o.claim_type in PROCESSING_CLAIMS else "")
+    country = o.country
+    label = (f"{country}: origin" if claim == "full"
+             else f"{country}: processed there, ingredients may be imported"
+             if claim == "processing" else f"{country}: as the source states")
+    return AltOrigin(status="resolved", country=country, claim=claim, label=label,
+                     verbatim=o.verbatim, source=o.source, demo=demo)
+
+
+@dataclass
+class _Row:
+    product: Product
+    match: str
+    tier: str
+    current: bool
+    offer: AltOffer
+    packs: int
+    pack_fit: str
+    cost_for_need: float | None
+    pack_reason: Reason
+    unit_price: float | None
+    unit_basis: str
+    origin: AltOrigin
+    pref: int
+    rating: AltRating | None
+    organic: bool
+    semantic: tuple[int, int, int]
+    preferred: bool = False         # matches an entry of the shopper's preference
+    trip: AltTrip | None = None
+
+    def trip_cents(self, located: bool) -> float:
+        if self.trip is not None:
+            return round(self.trip.total * 100)
+        if not located:
+            cost = (self.cost_for_need if self.cost_for_need is not None
+                    else self.offer.price * self.packs)
+            return round(cost * 100)
+        return math.inf
+
+    def key(self, located: bool, use_pref: bool) -> tuple:
+        rating = (0, -self.rating.avg) if self.rating is not None else (1, 0.0)
+        cost = round(self.cost_for_need * 100) if self.cost_for_need is not None else math.inf
+        return (_TIER_RANK[self.tier], self.semantic, _FIT_RANK[self.pack_fit],
+                self.pref if use_pref else 0, self.trip_cents(located), cost, rating,
+                self.product.id)
+
+    def pre_key(self, use_pref: bool) -> tuple:
+        return (_TIER_RANK[self.tier], self.semantic, _FIT_RANK[self.pack_fit],
+                self.pref if use_pref else 0, self.product.id)
+
+
+def _trip_of(options) -> tuple[float, list[str], dict[int, str]] | None:
+    best = next((o for o in options if o.recommended), None)
+    if best is None:
+        return None
+    return best.total_cost, list(best.stores), {i.product_id: i.store_name for i in best.items}
+
+
+def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
+                      ) -> AlternativeRanking:
+    """The other products that could fill `line_no`, in ORDER, with the cart's pick always
+    included and flagged current. Deterministic for the same basis and database; no LLM,
+    no write. Raises BasisError or PinError (a bad basis, an unplanned line, a bad pin)."""
+    from . import flow
+    from .origins import preference_rank
+
+    check_basis(basis)
+    if not 1 <= limit <= MAX_LIMIT:
+        raise BasisError(f"limit must be 1..{MAX_LIMIT}, got {limit}")
+    planned = planned_lines(basis)
+    if line_no not in planned:
+        raise PinError(_not_planned(line_no, planned))
+    catalog = _catalog()
+    with Session(db.engine()) as s:
+        valid = validate_pins(basis, [], catalog=catalog, session=s)
+        picks = effective_picks(basis, {n: v.product_id for n, v in valid.items()})
+        current_id = picks[line_no]
+        group = sorted(n for n, pid in picks.items() if pid == current_id)
+        unknown = sorted({pid for pid in picks.values() if pid not in catalog})
+        if unknown:
+            raise BasisError(f"product id(s) {unknown} in the basis are no longer in the "
+                             "catalog; plan the recipe again")
+        g = _gather(s, basis, group, catalog, picks, {current_id})
+        # A shared purchase is swapped for every line it covers, so a candidate must fill
+        # each of them; it carries the loosest of its matches.
+        found: dict[int, str] = dict(g.pools[group[0]].found)
+        for n in group[1:]:
+            other = g.pools[n].found
+            found = {pid: max(m, other[pid], key=_MATCH_RANK.__getitem__)
+                     for pid, m in found.items() if pid in other}
+        held = sorted((pid for pid in g.pools[line_no].found if pid in g.held),
+                      key=lambda pid: (catalog[pid].name, pid))
+        selectable = {pid: m for pid, m in found.items() if pid not in g.held}
+        if current_id not in selectable:
+            selectable[current_id] = "outside"
+        stats = _stats(s, sorted(selectable))
+        located = has_location(basis)
+        basket = set(picks.values())
+        rows_all = _matrix(s, basis, basket | set(selectable), basis.max_km) if located else []
+
+    offers = flow._cheapest_offers(rows_all, basis.path) if located else {}
+    if located and current_id not in offers:
+        raise BasisError(f"{catalog[current_id].name}, the cart's pick for line {line_no}, has "
+                         "no offer in range any more; plan the recipe again")
+    unavailable = [pid for pid in selectable
+                   if pid != current_id and not _available(basis, offers.get(pid))]
+    for pid in unavailable:
+        del selectable[pid]
+
+    synthetic = settings().offers_synthetic
+    needs = _needs(basis, group)
+    lines = [planned[n] for n in group]
+    use_pref = bool(basis.preference)
+    worst = len(basis.preference) * 2
+    baseline = _price(basis, picks, catalog, rows_all)
+    base_trip = _trip_of(baseline[1]) if located else None
+    base_stores = set(base_trip[1]) if base_trip else set()
+
+    rows: list[_Row] = []
+    for pid, match in selectable.items():
+        p = catalog[pid]
+        if located:
+            o = offers[pid]
+            offer = AltOffer(store=o["store"], price=o["price"], distance_km=o["dist_km"],
+                             on_trip=o["store"] in base_stores)
+        else:
+            offer = AltOffer(store="", price=p.price)
+        cart_packs = flow._packs(p, needs)
+        fit, cost, pack_reason = _pack_facts(p, offer.price, cart_packs, needs, lines)
+        unit_price, unit_basis = _unit_price(p, offer.price)
+        st = stats.get(pid)
+        rating = (AltRating(avg=st[0], count=st[1], synthetic=synthetic)
+                  if st is not None and st[1] > 0 and st[0] is not None else None)
+        pref = preference_rank(g.origins.get(pid), basis.preference) if use_pref else worst
+        rows.append(_Row(
+            product=p, match=match, tier=_TIER[match], current=pid == current_id,
+            offer=offer, packs=cart_packs, pack_fit=fit, cost_for_need=cost,
+            pack_reason=pack_reason, unit_price=unit_price, unit_basis=unit_basis,
+            origin=_alt_origin(g.origins.get(pid), pid in g.demo),
+            pref=pref, preferred=pref < worst,
+            rating=rating, organic="organic" in tokens(f"{p.name} {p.description}"),
+            semantic=semantic_key(planned[line_no].name, p)))
+
+    if located and base_trip is not None:
+        rows.sort(key=lambda r: r.pre_key(use_pref))
+        to_eval = rows[:MAX_TRIP_EVAL] + [r for r in rows[MAX_TRIP_EVAL:] if r.current]
+        for r in to_eval:
+            r.trip, packs_after = _trip_effect(basis, picks, group, r.product.id, catalog,
+                                               rows_all, base_trip, baseline[0])
+            if packs_after is not None and packs_after != r.packs:
+                # The product already fills another line: one purchase, packs for both
+                # needs. The cart counts what the re-price buys.
+                r.packs = packs_after
+                r.pack_fit, r.cost_for_need, r.pack_reason = _pack_facts(
+                    r.product, r.offer.price, packs_after, needs, lines)
+
+    rows.sort(key=lambda r: r.key(located, use_pref))
+    items = [_item(i + 1, r, rows[i - 1] if i else None, planned[line_no], located, use_pref,
+                   synthetic)
+             for i, r in enumerate(rows)]
+    shown = items[:limit] + [it for it in items[limit:] if it.current]
+    need = _total_need(needs)
+    return AlternativeRanking(
+        line_no=line_no, lines=group, ingredient=" + ".join(ln.name for ln in lines),
+        need=_fmt_qty(*need) if need else "", need_qty=need[0] if need else None,
+        need_uom=need[1] if need else None, order=list(ORDER), ranking_text=RANKING_TEXT,
+        items=shown,
+        held_back=[_held(pid, catalog, g) for pid in held],
+        total=len(items), unavailable=len(unavailable),
+        counts=AltCounts(
+            exact=sum(1 for it in items if it.match == "exact"),
+            no_new_stop=sum(1 for it in items if it.trip is not None
+                            and it.trip.stops_delta <= 0),
+            preferred_origin=sum(1 for r in rows if r.preferred),
+            says_organic=sum(1 for it in items if it.says_organic),
+            rated=sum(1 for it in items if it.rating is not None)),
+        data_note=DATA_NOTE if synthetic else "")
+
+
+def _stats(s: Session, ids: list[int]) -> dict[int, tuple[float | None, int]]:
+    """product id -> (average rating, review count), from build_stats_sql (Postgres returns
+    the average as a Decimal; it leaves as a float)."""
+    from .nlsearch.sql_builder import build_stats_sql
+
+    sql, params = build_stats_sql(ids)
+    out = {}
+    for r in s.execute(text(sql), params).mappings():
+        avg = r["avg_rating"]
+        out[r["product_id"]] = (round(float(avg), 1) if avg is not None else None,
+                                int(r["review_count"] or 0))
+    return out
+
+
+def _price(basis: PlanBasis, picks: dict[int, int], catalog: dict[int, Product], rows):
+    """Purchases and trip options for these picks, through flow.price_picks: the same code
+    reprice runs, which is what makes a row's trip total equal a real re-price."""
+    from .flow import price_picks
+
+    sels = [Selection(line_no=n, product_id=pid, confidence=1.0)
+            for n, pid in sorted(picks.items())]
+    return price_picks(basis, sels, catalog, rows)
+
+
+def _trip_effect(basis: PlanBasis, picks: dict[int, int], group: list[int], pid: int,
+                 catalog: dict[int, Product], rows, base_trip, base_purchases
+                 ) -> tuple[AltTrip | None, int | None]:
+    """(the recommended trip with `pid` on every line of `group`, the packs the cart would
+    then buy of it). The other lines keep their picks; a line that already buys `pid`
+    merges with the group into one purchase, as group_purchases merges any two lines."""
+    trial = dict(picks)
+    for n in group:
+        trial[n] = pid
+    purchases, options = _price(basis, trial, catalog, rows)
+    packs = next((pu.packs for pu in purchases if pu.product.id == pid), None)
+    after = _trip_of(options)
+    if after is None:
+        return None, packs
+    total, stores, where = after
+    base_total, base_stores, base_where = base_trip
+    others = sorted(n for n, q in picks.items() if q == pid and n not in group)
+    names = {pu.product.id: pu.product.name for pu in base_purchases}
+    moved = [AltMove(product_id=q, product=names.get(q, catalog[q].name),
+                     from_store=base_where[q], to_store=where[q])
+             for q in base_where
+             if q in where and q != picks[group[0]] and base_where[q] != where[q]]
+    return AltTrip(total=total, delta=round(total - base_total, 2) + 0.0, stores=stores,
+                   stops_delta=len(stores) - len(base_stores),
+                   merges_with_line=others[0] if others else None,
+                   moved_items=moved), packs
+
+
+def _held(pid: int, catalog: dict[int, Product], g: _Gathered) -> HeldBack:
+    country, fld = g.held[pid]
+    o = g.origins.get(pid)
+    return HeldBack(product_id=pid, product=catalog[pid].name, country=country, field=fld,
+                    verbatim=o.verbatim if o is not None else "",
+                    source=o.source if o is not None else "", demo=pid in g.demo)
+
+
+def _item(rank: int, r: _Row, above: _Row | None, line: BasisLine, located: bool,
+          use_pref: bool, synthetic: bool) -> RankedAlternative:
+    p = r.product
+    return RankedAlternative(
+        rank=rank, current=r.current, product_id=p.id, product=p.name, brand=p.brand,
+        size=p.unit_size, tier=r.tier, match=r.match, offer=r.offer, packs=r.packs,
+        pack_fit=r.pack_fit, cost_for_need=r.cost_for_need, unit_price=r.unit_price,
+        unit_basis=r.unit_basis, trip=r.trip, origin=r.origin, rating=r.rating,
+        says_organic=r.organic, reasons=_reasons(r, line, located, synthetic),
+        rank_reason=_rank_reason(rank, r, above, line, located, use_pref, synthetic))
+
+
+def _money(cents: float) -> str:
+    return f"${abs(cents) / 100:.2f}"
+
+
+def _reasons(r: _Row, line: BasisLine, located: bool, synthetic: bool) -> list[Reason]:
+    """At most five reasons, each from a fact on the row: the match, the pack, the origin,
+    the trip and the rating. Unknowns are stated as unknown."""
+    p = r.product
+    head = _head_word(line.name)
+    match = {
+        "exact": Reason(code="match", text=f"Matches every word of {line.name!r}", tone="plus"),
+        "form": Reason(code="match", text=f"Matches {line.name!r} in another form",
+                       tone="info"),
+        "generic": Reason(code="match",
+                          text=f"Matches {line.name!r} without its descriptive words",
+                          tone="info"),
+        "related": Reason(code="match",
+                          text=(f"Shares the word {head!r}; not the same ingredient"
+                                if head else "Not the same ingredient"), tone="minus"),
+        "substitute": Reason(code="match",
+                             text=(f"Same aisle ({p.subcategory}); not the same ingredient"
+                                   if p.subcategory else "Same aisle; not the same ingredient"),
+                             tone="minus"),
+        "outside": Reason(code="match",
+                          text="The cart's pick; it matches none of the recipe's words",
+                          tone="info"),
+    }[r.match]
+    o = r.origin
+    origin_text = o.label + (f': "{o.verbatim}"' if o.verbatim else "") + (
+        " (demo label photo)" if o.demo else "")
+    origin_tone = "unknown" if o.status != "resolved" else "plus" if r.preferred else "info"
+    out = [match, r.pack_reason, Reason(code="origin", text=origin_text, tone=origin_tone)]
+    if r.trip is not None:
+        t = r.trip
+        if t.delta < 0:
+            text_, tone = f"${-t.delta:.2f} less on your trip", "plus"
+        elif t.delta > 0:
+            text_, tone = f"${t.delta:.2f} more on your trip", "minus"
+        else:
+            text_, tone = "No change to your trip total", "info"
+        if t.stops_delta > 0:
+            text_ += f" and {t.stops_delta} more stop{'s' if t.stops_delta > 1 else ''}"
+            tone = "minus"
+        elif t.stops_delta < 0:
+            text_ += f" and {-t.stops_delta} stop{'s' if t.stops_delta < -1 else ''} fewer"
+        if t.merges_with_line is not None:
+            text_ += f"; already bought for line {t.merges_with_line}"
+        out.append(Reason(code="trip", text=text_, tone=tone))
+    elif located:
+        out.append(Reason(code="trip", text="Trip effect not worked out", tone="unknown"))
+    else:
+        out.append(Reason(code="trip", text="Catalog price: the plan has no shopping location",
+                          tone="info"))
+    if r.rating is not None:
+        out.append(Reason(code="rating",
+                          text=f"{r.rating.avg:.1f} of 5 from {r.rating.count} reviews"
+                               + (" (demo)" if synthetic else ""), tone="info"))
+    else:
+        out.append(Reason(code="rating", text="No reviews", tone="unknown"))
+    return out[:5]
+
+
+def _rank_reason(rank: int, r: _Row, above: _Row | None, line: BasisLine, located: bool,
+                 use_pref: bool, synthetic: bool) -> str:
+    """Why `r` sits below the row above it: the first ranking key on which it is worse,
+    in plain words."""
+    if above is None:
+        return "Ranked first: nothing ranks above it."
+    return f"Below #{rank - 1}: {_first_difference(r, above, line, located, use_pref, synthetic)}."
+
+
+def _first_difference(r: _Row, above: _Row, line: BasisLine, located: bool, use_pref: bool,
+                      synthetic: bool) -> str:
+    if _TIER_RANK[r.tier] > _TIER_RANK[above.tier]:
+        return ("not the same ingredient" if r.tier == "other"
+                else "it matches none of the recipe's words")
+    if r.semantic != above.semantic:
+        if r.semantic[0] != above.semantic[0]:
+            return (f"it matches fewer of the recipe's words ({-r.semantic[0]} against "
+                    f"{-above.semantic[0]})")
+        if r.semantic[1] != above.semantic[1]:
+            return "it is not sold as fresh, which the recipe asks for"
+        toks = tokens(line.name)
+        return f"it is not mainly {toks[-1]}" if toks else "it is less about the ingredient"
+    if _FIT_RANK[r.pack_fit] > _FIT_RANK[above.pack_fit]:
+        return ("its packs fall short of the recipe's amount" if r.pack_fit == "short"
+                else "its pack can't be compared with the recipe's amount")
+    if use_pref and r.pref > above.pref:
+        return "its origin is further down your preference"
+    mine, theirs = r.trip_cents(located), above.trip_cents(located)
+    if mine != theirs:
+        if mine == math.inf:
+            return f"its trip effect was not worked out (only the first {MAX_TRIP_EVAL} are)"
+        if located:
+            return f"{_money(mine - theirs)} more on your trip"
+        return f"it costs {_money(mine - theirs)} more"
+    mine_c = round(r.cost_for_need * 100) if r.cost_for_need is not None else math.inf
+    theirs_c = round(above.cost_for_need * 100) if above.cost_for_need is not None else math.inf
+    if mine_c != theirs_c:
+        if mine_c == math.inf:
+            return "its cost for the recipe's amount is unknown"
+        return f"{_money(mine_c - theirs_c)} more for the recipe's amount"
+    if (r.rating is None) != (above.rating is None) or (
+            r.rating is not None and above.rating is not None
+            and r.rating.avg != above.rating.avg):
+        if r.rating is None:
+            return "same price to the cent, and it has no reviews"
+        return (f"same price to the cent, and it is rated lower ({r.rating.avg:.1f} against "
+                f"{above.rating.avg:.1f}{', demo reviews' if synthetic else ''})")
+    return "it ties on every count; listed by catalog number"

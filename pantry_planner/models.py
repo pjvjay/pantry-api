@@ -463,6 +463,161 @@ class ShoppingPlan(BaseModel):
     basis: PlanBasis | None = None
 
 
+# ─── Alternatives: the other products that could fill one planned line ──
+# alternatives.rank_alternatives builds these from a PlanBasis with no LLM call.
+# Every fact on a row comes from a database row or is stated as unknown: an
+# unchecked origin is "Origin not checked", never a country; no reviews is
+# rating None, never 0 stars; a pack in ml against a recipe in g is pack_fit
+# "unknown" with cost_for_need None, never a guessed conversion.
+
+AltTier = Literal["same", "other", "outside"]
+AltMatch = Literal["exact", "form", "generic", "related", "substitute", "outside"]
+
+
+class Reason(BaseModel):
+    """One short reason on a row, built only from the row's facts. `code` is
+    match | pack | origin | trip | rating; `tone` says how to show it."""
+    code: str
+    text: str
+    tone: Literal["plus", "minus", "info", "unknown"]
+
+
+class AltOffer(BaseModel):
+    """The product's cheapest offer in range, priced per pack. `store` is ""
+    and `distance_km` None when the plan has no shopping location (the
+    catalog price, as such a plan charges). `on_trip`: the store is one the
+    cart's current trip already visits."""
+    store: str
+    price: float
+    distance_km: float | None = None
+    on_trip: bool = False
+
+
+class AltMove(BaseModel):
+    """Another purchase whose store the trip changes after the swap."""
+    product_id: int
+    product: str
+    from_store: str
+    to_store: str
+
+
+class AltTrip(BaseModel):
+    """The cart's recommended trip re-optimised with this product on the line,
+    exactly as reprice_plan would: `total` is that trip's total (basket plus
+    travel), `delta` its difference from the cart's trip now (0.00 for the
+    cart's own pick). `merges_with_line` names another line this product
+    already fills (the two become one purchase); `moved_items` are the other
+    purchases the new trip buys at a different store."""
+    total: float
+    delta: float
+    stores: list[str]
+    stops_delta: int
+    merges_with_line: int | None = None
+    moved_items: list[AltMove] = Field(default_factory=list)
+
+
+class AltOrigin(BaseModel):
+    """Where the product comes from, as the evidence says. `country` is set
+    only when the evidence resolved; `claim` is full (product of, grown in)
+    or processing (made, prepared or packaged in); `verbatim` quotes the
+    source; `demo` marks evidence from a demo label photo."""
+    status: str
+    country: str = ""
+    claim: Literal["full", "processing", ""] = ""
+    label: str
+    verbatim: str = ""
+    source: str = ""
+    demo: bool = False
+
+
+class AltRating(BaseModel):
+    """Average review rating and how many reviews; `synthetic` when reviews
+    are the seeded demo data (OFFERS_SYNTHETIC)."""
+    avg: float
+    count: int
+    synthetic: bool
+
+
+class RankedAlternative(BaseModel):
+    """One candidate product for the line. `current` marks the cart's own
+    pick. `tier`: same (the ingredient, at the exact, form or generic level),
+    other (shares the head noun, or a same-aisle substitute) or outside (the
+    cart's pick when it matches none of the line's words). `packs` is what
+    the cart would buy; `pack_fit` whether that covers the recipe's need;
+    `cost_for_need` the price of enough packs for the need (None when the
+    need or the pack size is unknown or in another unit). `trip` is None
+    when the plan has no location or the trip effect was not worked out.
+    `rank_reason` says, in plain words, why the row sits below the one
+    above it."""
+    rank: int
+    current: bool = False
+    product_id: int
+    product: str
+    brand: str = ""
+    size: str = ""
+    tier: AltTier
+    match: AltMatch
+    offer: AltOffer
+    packs: int = 1
+    pack_fit: Literal["covers", "short", "unknown"]
+    cost_for_need: float | None = None
+    unit_price: float | None = None
+    unit_basis: str = ""                 # "100 g" | "100 ml" | "each" | ""
+    trip: AltTrip | None = None
+    origin: AltOrigin
+    rating: AltRating | None = None
+    says_organic: bool = False
+    reasons: list[Reason] = Field(default_factory=list)
+    rank_reason: str = ""
+
+
+class HeldBack(BaseModel):
+    """A product that would fill the line but is evidenced as coming from a
+    country the plan excludes: shown with its evidence, never choosable."""
+    product_id: int
+    product: str
+    country: str
+    # ingredient_origin | manufactured_in | conflicting_evidence
+    field: str
+    verbatim: str = ""
+    source: str = ""
+    demo: bool = False
+
+
+class AltCounts(BaseModel):
+    """How many ranked rows have each property, for filter chips."""
+    exact: int = 0
+    no_new_stop: int = 0
+    preferred_origin: int = 0
+    says_organic: int = 0
+    rated: int = 0
+
+
+class AlternativeRanking(BaseModel):
+    """The ranked options for one planned line. `lines` are every recipe line
+    the cart's purchase covers (a swap applies to all of them; pin each).
+    `need` is the recipe's amount for those lines ("500 g"), "" when not
+    given. `order` names the ranking keys in order and `ranking_text` says
+    them in plain words. `items` holds the first `limit` rows plus the
+    cart's pick wherever it ranks; `total` counts every ranked row;
+    `unavailable` the matching products with no offer in range (or under the
+    price cap). `data_note` labels synthetic offers and reviews."""
+    line_no: int
+    lines: list[int]
+    ingredient: str
+    need: str = ""
+    need_qty: float | None = None
+    need_uom: str | None = None
+    order: list[str]
+    ranking_text: str
+    items: list[RankedAlternative]
+    held_back: list[HeldBack] = Field(default_factory=list)
+    total: int
+    unavailable: int = 0
+    counts: AltCounts = Field(default_factory=AltCounts)
+    data_note: str = ""
+
+
 # ─── Recipe documents: one schema for every recipe the shopper reviews ──
 # A library recipe, a demo starter, a pasted or imported ingredient list and
 # a dish the assistant wrote all reach the planner as a RecipeDoc. Its lines
