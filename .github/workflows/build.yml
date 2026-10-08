@@ -71,10 +71,14 @@ on:
         default: ""
 
 # One release at a time and never cancelled halfway. GitHub keeps at most
-# one pending run and replaces older pending ones, which loses nothing: the
-# newer run's plan covers every commit since the last tag.
+# one pending run per group and cancels the older pending run when a newer
+# one joins. Between releases that loses nothing: the newer run's plan
+# covers every commit since the last tag. A dry run releases nothing, so it
+# queues in a group of its own and can never replace a pending release. A
+# promote can: the merges it replaces wait for the next release
+# (RELEASING.md in pantry-platform, "What happens on merge").
 concurrency:
-  group: release-pantry-api
+  group: release-pantry-api${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '-dry-run' || '' }}
   cancel-in-progress: false
 
 permissions:
