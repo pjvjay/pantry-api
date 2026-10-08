@@ -1,0 +1,2128 @@
+{
+  "v": 1,
+  "about": "Cited home storage times for the meal planner. Fridge times are for safety and freezer times for quality, as the chart says. A product missing from `products` has an unknown storage time and the planner uses the shopper's buy-ahead setting, labelled as theirs. `verbatim`, `item`, `type` and the sources' `notes_verbatim` are the pages' words (whitespace normalised); `applies_to`, `category` and `note` are this file's own labels.",
+  "rules_of_use": [
+    "Plans use days_min; the UI shows the verbatim text.",
+    "A stated time in months or years has days_min/days_max null: it only ever counts as longer than the plan horizon, never as a day count.",
+    "Where a product cites more than one rule for the same storage, the shorter time is planned and every rule is cited.",
+    "Thaw lead in the fridge: at least 24 hours for small amounts; at least 24 hours per 5 lb for a large item (fsis-thaw-fridge-large). The remainder of a thawed pack is never planned for later."
+  ],
+  "retrieved": "2026-10-08",
+  "sources": [
+    {
+      "id": "fsgov-cold-storage",
+      "title": "Cold Food Storage Chart",
+      "publisher": "FoodSafety.gov, U.S. Department of Health and Human Services",
+      "url": "https://www.foodsafety.gov/food-safety-charts/cold-food-storage-charts",
+      "page_date": "2023-09-19",
+      "page_date_text": "Date Last Reviewed September 19, 2023",
+      "retrieved": "2026-10-08",
+      "licence": "Work of the U.S. federal government, public domain in the United States (17 U.S.C. 105). The page and the HHS policy pages read did not state reuse terms; not verified beyond that.",
+      "credit": "Source: FoodSafety.gov (U.S. Department of Health and Human Services), Cold Food Storage Chart, reviewed 2023-09-19.",
+      "notes_verbatim": [
+        "Refrigerator [40°F (4°C) or below]",
+        "Freezer [0°F (-18°C) or below]",
+        "The short time limits for home-refrigerated foods will help keep them from spoiling or becoming dangerous to eat.",
+        "The guidelines for freezer storage are for quality only—frozen foods stored continuously at 0°F (-18°C) or below can be kept indefinitely."
+      ]
+    },
+    {
+      "id": "fsis-big-thaw",
+      "title": "The Big Thaw — Safe Defrosting Methods",
+      "publisher": "U.S. Department of Agriculture, Food Safety and Inspection Service",
+      "url": "https://www.fsis.usda.gov/food-safety/safe-food-handling-and-preparation/food-safety-basics/big-thaw-safe-defrosting-methods",
+      "page_date": "2013-06-15",
+      "page_date_text": "Last Updated: Jun 15, 2013",
+      "retrieved": "2026-10-08",
+      "licence": "Public domain information per USDA's Policies and Links page: \"Public domain information may be freely distributed or copied, but use of appropriate byline/photo/image credits is requested.\"",
+      "credit": "Source: U.S. Department of Agriculture, Food Safety and Inspection Service, The Big Thaw — Safe Defrosting Methods, updated 2013-06-15.",
+      "licence_url": "https://www.usda.gov/about-usda/policies-and-links"
+    }
+  ],
+  "rules": [
+    {
+      "id": "fs-ground-meat-fridge",
+      "source": "fsgov-cold-storage",
+      "category": "ground_meat",
+      "item": "Hamburger, ground meats and ground poultry",
+      "type": "Hamburger, ground beef, turkey, chicken, other poultry, veal, pork, lamb, and mixtures of them",
+      "storage": "fridge",
+      "verbatim": "1 to 2 days",
+      "basis": "safety",
+      "stated": {
+        "min": 1,
+        "max": 2,
+        "unit": "day"
+      },
+      "days_min": 1,
+      "days_max": 2
+    },
+    {
+      "id": "fs-ground-meat-freezer",
+      "source": "fsgov-cold-storage",
+      "category": "ground_meat",
+      "item": "Hamburger, ground meats and ground poultry",
+      "type": "Hamburger, ground beef, turkey, chicken, other poultry, veal, pork, lamb, and mixtures of them",
+      "storage": "freezer",
+      "verbatim": "3 to 4 months",
+      "basis": "quality",
+      "stated": {
+        "min": 3,
+        "max": 4,
+        "unit": "month"
+      },
+      "days_min": null,
+      "days_max": null
+    },
+    {
+      "id": "fs-red-meat-steaks-fridge",
+      "source": "fsgov-cold-storage",
+      "category": "red_meat",
+      "item": "Fresh beef, veal, lamb, and pork",
+      "type": "Steaks",
+      "storage": "fridge",
+      "verbatim": "3 to 5 days",
+      "basis": "safety",
+      "stated": {
+        "min": 3,
+        "max": 5,
+        "unit": "day"
+      },
+      "days_min": 3,
+      "days_max": 5
+    },
+    {
+      "id": "fs-red-meat-steaks-freezer",
+      "source": "fsgov-cold-storage",
+      "category": "red_meat",
+      "item": "Fresh beef, veal, lamb, and pork",
+      "type": "Steaks",
+      "storage": "freezer",
+      "verbatim": "4 to 12 months",
+      "basis": "quality",
+      "stated": {
+        "min": 4,
+        "max": 12,
+        "unit": "month"
+      },
+      "days_min": null,
+      "days_max": null
+    },
+    {
+      "id": "fs-red-meat-roasts-fridge",
+      "source": "fsgov-cold-storage",
+      "category": "red_meat",
+      "item": "Fresh beef, veal, lamb, and pork",
+      "type": "Roasts",
+      "storage": "fridge",
+      "verbatim": "3 to 5 days",
+      "basis": "safety",
+      "stated": {
+        "min": 3,
+        "max": 5,
+        "unit": "day"
+      },
+      "days_min": 3,
+      "days_max": 5
+    },
+    {
+      "id": "fs-red-meat-roasts-freezer",
+      "source": "fsgov-cold-storage",
+      "category": "red_meat",
+      "item": "Fresh beef, veal, lamb, and pork",
+      "type": "Roasts",
+      "storage": "freezer",
+      "verbatim": "4 to 12 months",
+      "basis": "quality",
+      "stated": {
+        "min": 4,
+        "max": 12,
+        "unit": "month"
+      },
+      "days_min": null,
+      "days_max": null
+    },
+    {
+      "id": "fs-poultry-whole-fridge",
+      "source": "fsgov-cold-storage",
+      "category": "poultry",
+      "item": "Fresh poultry",
+      "type": "Chicken or turkey, whole",
+      "storage": "fridge",
+      "verbatim": "1 to 2 days",
+      "basis": "safety",
+      "stated": {
+        "min": 1,
+        "max": 2,
+        "unit": "day"
+      },
+      "days_min": 1,
+      "days_max": 2
+    },
+    {
+      "id": "fs-poultry-whole-freezer",
+      "source": "fsgov-cold-storage",
+      "category": "poultry",
+      "item": "Fresh poultry",
+      "type": "Chicken or turkey, whole",
+      "storage": "freezer",
+      "verbatim": "1 year",
+      "basis": "quality",
+      "stated": {
+        "min": 1,
+        "max": 1,
+        "unit": "year"
+      },
+      "days_min": null,
+      "days_max": null
+    },
+    {
+      "id": "fs-poultry-pieces-fridge",
+      "source": "fsgov-cold-storage",
+      "category": "poultry",
+      "item": "Fresh poultry",
+      "type": "Chicken or turkey, pieces",
+      "storage": "fridge",
+      "verbatim": "1 to 2 days",
+      "basis": "safety",
+      "stated": {
+        "min": 1,
+        "max": 2,
+        "unit": "day"
+      },
+      "days_min": 1,
+      "days_max": 2
+    },
+    {
+      "id": "fs-poultry-pieces-freezer",
+      "source": "fsgov-cold-storage",
+      "category": "poultry",
+      "item": "Fresh poultry",
+      "type": "Chicken or turkey, pieces",
+      "storage": "freezer",
+      "verbatim": "9 months",
+      "basis": "quality",
+      "stated": {
+        "min": 9,
+        "max": 9,
+        "unit": "month"
+      },
+      "days_min": null,
+      "days_max": null
+    },
+    {
+      "id": "fs-fatty-fish-fridge",
+      "source": "fsgov-cold-storage",
+      "category": "fish",
+      "item": "Fin Fish",
+      "type": "Fatty Fish (bluefish, catfish, mackerel, mullet, salmon, tuna, etc.)",
+      "storage": "fridge",
+      "verbatim": "1 - 3 Days",
+      "basis": "safety",
+      "stated": {
+        "min": 1,
+        "max": 3,
+        "unit": "day"
+      },
+      "days_min": 1,
+      "days_max": 3
+    },
+    {
+      "id": "fs-fatty-fish-freezer",
+      "source": "fsgov-cold-storage",
+      "category": "fish",
+      "item": "Fin Fish",
+      "type": "Fatty Fish (bluefish, catfish, mackerel, mullet, salmon, tuna, etc.)",
+      "storage": "freezer",
+      "verbatim": "2 - 3 Months",
+      "basis": "quality",
+      "stated": {
+        "min": 2,
+        "max": 3,
+        "unit": "month"
+      },
+      "days_min": null,
+      "days_max": null
+    },
+    {
+      "id": "fs-lean-fish-fridge",
+      "source": "fsgov-cold-storage",
+      "category": "fish",
+      "item": "Fin Fish",
+      "type": "Lean Fish (cod, flounder, haddock, halibut, sole, etc.)",
+      "storage": "fridge",
+      "verbatim": "1 - 3 Days",
+      "basis": "safety",
+      "stated": {
+        "min": 1,
+        "max": 3,
+        "unit": "day"
+      },
+      "days_min": 1,
+      "days_max": 3,
+      "note": "The chart's refrigerator cell spans the fatty and both lean fin fish rows."
+    },
+    {
+      "id": "fs-lean-fish-freezer",
+      "source": "fsgov-cold-storage",
+      "category": "fish",
+      "item": "Fin Fish",
+      "type": "Lean Fish (cod, flounder, haddock, halibut, sole, etc.)",
+      "storage": "freezer",
+      "verbatim": "6 - 8 Months",
+      "basis": "quality",
+      "stated": {
+        "min": 6,
+        "max": 8,
+        "unit": "month"
+      },
+      "days_min": null,
+      "days_max": null
+    },
+    {
+      "id": "fs-shrimp-fridge",
+      "source": "fsgov-cold-storage",
+      "category": "shellfish",
+      "item": "Shellfish",
+      "type": "Shrimp, Crayfish",
+      "storage": "fridge",
+      "verbatim": "3 - 5 Days",
+      "basis": "safety",
+      "stated": {
+        "min": 3,
+        "max": 5,
+        "unit": "day"
+      },
+      "days_min": 3,
+      "days_max": 5
+    },
+    {
+      "id": "fs-shrimp-freezer",
+      "source": "fsgov-cold-storage",
+      "category": "shellfish",
+      "item": "Shellfish",
+      "type": "Shrimp, Crayfish",
+      "storage": "freezer",
+      "verbatim": "6 - 18 Months",
+      "basis": "quality",
+      "stated": {
+        "min": 6,
+        "max": 18,
+        "unit": "month"
+      },
+      "days_min": null,
+      "days_max": null
+    },
+    {
+      "id": "fs-eggs-fridge",
+      "source": "fsgov-cold-storage",
+      "category": "eggs",
+      "item": "Eggs",
+      "type": "Raw eggs in shell",
+      "storage": "fridge",
+      "verbatim": "3 to 5 weeks",
+      "basis": "safety",
+      "stated": {
+        "min": 3,
+        "max": 5,
+        "unit": "week"
+      },
+      "days_min": 21,
+      "days_max": 35
+    },
+    {
+      "id": "fs-eggs-freezer",
+      "source": "fsgov-cold-storage",
+      "category": "eggs",
+      "item": "Eggs",
+      "type": "Raw eggs in shell",
+      "storage": "freezer",
+      "verbatim": "Do not freeze in shell. Beat yolks and whites together, then freeze.",
+      "basis": "quality",
+      "stated": null,
+      "days_min": null,
+      "days_max": null,
+      "freezable": false
+    },
+    {
+      "id": "fs-leftover-meat-fridge",
+      "source": "fsgov-cold-storage",
+      "category": "leftovers",
+      "item": "Leftovers",
+      "type": "Cooked meat or poultry",
+      "storage": "fridge",
+      "verbatim": "3 to 4 days",
+      "basis": "safety",
+      "stated": {
+        "min": 3,
+        "max": 4,
+        "unit": "day"
+      },
+      "days_min": 3,
+      "days_max": 4
+    },
+    {
+      "id": "fs-leftover-meat-freezer",
+      "source": "fsgov-cold-storage",
+      "category": "leftovers",
+      "item": "Leftovers",
+      "type": "Cooked meat or poultry",
+      "storage": "freezer",
+      "verbatim": "2 to 6 months",
+      "basis": "quality",
+      "stated": {
+        "min": 2,
+        "max": 6,
+        "unit": "month"
+      },
+      "days_min": null,
+      "days_max": null
+    },
+    {
+      "id": "fs-leftover-pizza-fridge",
+      "source": "fsgov-cold-storage",
+      "category": "leftovers",
+      "item": "Leftovers",
+      "type": "Pizza",
+      "storage": "fridge",
+      "verbatim": "3 to 4 days",
+      "basis": "safety",
+      "stated": {
+        "min": 3,
+        "max": 4,
+        "unit": "day"
+      },
+      "days_min": 3,
+      "days_max": 4
+    },
+    {
+      "id": "fs-leftover-pizza-freezer",
+      "source": "fsgov-cold-storage",
+      "category": "leftovers",
+      "item": "Leftovers",
+      "type": "Pizza",
+      "storage": "freezer",
+      "verbatim": "1 to 2 months",
+      "basis": "quality",
+      "stated": {
+        "min": 1,
+        "max": 2,
+        "unit": "month"
+      },
+      "days_min": null,
+      "days_max": null
+    },
+    {
+      "id": "fs-soups-stews-fridge",
+      "source": "fsgov-cold-storage",
+      "category": "leftovers",
+      "item": "Soups and stews",
+      "type": "Vegetable or meat added",
+      "storage": "fridge",
+      "verbatim": "3 to 4 days",
+      "basis": "safety",
+      "stated": {
+        "min": 3,
+        "max": 4,
+        "unit": "day"
+      },
+      "days_min": 3,
+      "days_max": 4
+    },
+    {
+      "id": "fs-soups-stews-freezer",
+      "source": "fsgov-cold-storage",
+      "category": "leftovers",
+      "item": "Soups and stews",
+      "type": "Vegetable or meat added",
+      "storage": "freezer",
+      "verbatim": "2 to 3 months",
+      "basis": "quality",
+      "stated": {
+        "min": 2,
+        "max": 3,
+        "unit": "month"
+      },
+      "days_min": null,
+      "days_max": null
+    },
+    {
+      "id": "fsis-thawed-ground-poultry-seafood-fridge",
+      "source": "fsis-big-thaw",
+      "category": "thawed",
+      "item": "Refrigerator Thawing",
+      "type": "ground meat, stew meat, poultry, seafood",
+      "storage": "fridge",
+      "condition": "after_refrigerator_thawing",
+      "verbatim": "After thawing in the refrigerator, items such as ground meat, stew meat, poultry, seafood, should remain safe and good quality for an additional day or two before cooking",
+      "stated": {
+        "min": 1,
+        "max": 2,
+        "unit": "day"
+      },
+      "days_min": 1,
+      "days_max": 2,
+      "basis": "safety"
+    },
+    {
+      "id": "fsis-thawed-red-meat-fridge",
+      "source": "fsis-big-thaw",
+      "category": "thawed",
+      "item": "Refrigerator Thawing",
+      "type": "red meat cuts (such as beef, pork or lamb roasts, chops and steaks)",
+      "storage": "fridge",
+      "condition": "after_refrigerator_thawing",
+      "verbatim": "red meat cuts (such as beef, pork or lamb roasts, chops and steaks) 3 to 5 days.",
+      "stated": {
+        "min": 3,
+        "max": 5,
+        "unit": "day"
+      },
+      "days_min": 3,
+      "days_max": 5,
+      "basis": "safety"
+    }
+  ],
+  "thaw_rules": [
+    {
+      "id": "fsis-thaw-fridge-large",
+      "source": "fsis-big-thaw",
+      "method": "refrigerator",
+      "applies_to": "A large frozen item like a turkey",
+      "verbatim": "A large frozen item like a turkey requires at least a day (24 hours) for every 5 pounds of weight.",
+      "lead": {
+        "hours": 24,
+        "per_lb": 5,
+        "per_kg_derived": 2.268,
+        "minimum": true
+      },
+      "note": "per_kg_derived is 5 lb converted at 0.45359237 kg/lb; the page states pounds only."
+    },
+    {
+      "id": "fsis-thaw-fridge-small",
+      "source": "fsis-big-thaw",
+      "method": "refrigerator",
+      "applies_to": "small amounts of frozen food — such as a pound of ground meat or boneless chicken breasts",
+      "verbatim": "Even small amounts of frozen food — such as a pound of ground meat or boneless chicken breasts — require a full day to thaw.",
+      "lead": {
+        "hours": 24,
+        "per_lb": null,
+        "per_kg_derived": null,
+        "minimum": true
+      }
+    },
+    {
+      "id": "fsis-refreeze-after-fridge-thaw",
+      "source": "fsis-big-thaw",
+      "method": "refrigerator",
+      "applies_to": "Food thawed in the refrigerator",
+      "verbatim": "Food thawed in the refrigerator can be refrozen without cooking, although there may be some loss of quality.",
+      "lead": null
+    },
+    {
+      "id": "fsis-thaw-cold-water",
+      "source": "fsis-big-thaw",
+      "method": "cold_water",
+      "applies_to": "meat, poultry or seafood in a leak-proof package",
+      "verbatim": "Small packages of meat, poultry or seafood — about a pound — may thaw in an hour or less. A 3-to 4-pound package may take 2 to 3 hours. For whole turkeys, estimate about 30 minutes per pound. If thawed completely, the food must be cooked immediately.",
+      "lead": null,
+      "note": "Same-day method; the planner does not schedule it, it is listed so the UI can cite it."
+    },
+    {
+      "id": "fsis-thaw-microwave",
+      "source": "fsis-big-thaw",
+      "method": "microwave",
+      "applies_to": "Foods thawed in the microwave",
+      "verbatim": "After thawing in the microwave, always cook immediately after, whether microwave cooking, by conventional oven, or grilling.",
+      "lead": null
+    },
+    {
+      "id": "fsis-cook-from-frozen",
+      "source": "fsis-big-thaw",
+      "method": "none",
+      "applies_to": "meat and poultry cooked from the frozen state",
+      "verbatim": "it is safe to cook foods from the frozen state. The cooking will take approximately 50% longer than the recommended time for fully thawed or fresh meat and poultry.",
+      "lead": null
+    },
+    {
+      "id": "fsis-never-counter",
+      "source": "fsis-big-thaw",
+      "method": "counter",
+      "applies_to": "Perishable foods",
+      "verbatim": "Perishable foods should never be thawed on the counter, or in hot water and must not be left at room temperature for more than two hours.",
+      "lead": null,
+      "allowed": false
+    }
+  ],
+  "pantry_rules": [],
+  "pantry_rules_note": "Neither source states a room-temperature time for any product in the catalog. The chart's only one is for an unopened shelf-stable canned ham, which the catalog does not stock.",
+  "products": [
+    {
+      "product_id": 10,
+      "name": "Boneless Skinless Chicken Breast",
+      "storage_class": "chilled_or_fresh",
+      "bought_state": "raw",
+      "rules": {
+        "fridge": [
+          "fs-poultry-pieces-fridge"
+        ],
+        "freezer": [
+          "fs-poultry-pieces-freezer"
+        ],
+        "after_thaw_fridge": [
+          "fsis-thawed-ground-poultry-seafood-fridge"
+        ],
+        "thaw": [
+          "fsis-thaw-fridge-small",
+          "fsis-thaw-fridge-large"
+        ]
+      },
+      "note": "",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 11,
+      "name": "Chicken Thighs Bone-In",
+      "storage_class": "chilled_or_fresh",
+      "bought_state": "raw",
+      "rules": {
+        "fridge": [
+          "fs-poultry-pieces-fridge"
+        ],
+        "freezer": [
+          "fs-poultry-pieces-freezer"
+        ],
+        "after_thaw_fridge": [
+          "fsis-thawed-ground-poultry-seafood-fridge"
+        ],
+        "thaw": [
+          "fsis-thaw-fridge-small",
+          "fsis-thaw-fridge-large"
+        ]
+      },
+      "note": "",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 22,
+      "name": "Ground Beef Lean",
+      "storage_class": "chilled_or_fresh",
+      "bought_state": "raw",
+      "rules": {
+        "fridge": [
+          "fs-ground-meat-fridge"
+        ],
+        "freezer": [
+          "fs-ground-meat-freezer"
+        ],
+        "after_thaw_fridge": [
+          "fsis-thawed-ground-poultry-seafood-fridge"
+        ],
+        "thaw": [
+          "fsis-thaw-fridge-small",
+          "fsis-thaw-fridge-large"
+        ]
+      },
+      "note": "",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 35,
+      "name": "Ground Beef Medium 900g",
+      "storage_class": "chilled_or_fresh",
+      "bought_state": "raw",
+      "rules": {
+        "fridge": [
+          "fs-ground-meat-fridge"
+        ],
+        "freezer": [
+          "fs-ground-meat-freezer"
+        ],
+        "after_thaw_fridge": [
+          "fsis-thawed-ground-poultry-seafood-fridge"
+        ],
+        "thaw": [
+          "fsis-thaw-fridge-small",
+          "fsis-thaw-fridge-large"
+        ]
+      },
+      "note": "",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 36,
+      "name": "Ground Beef Extra Lean 300g",
+      "storage_class": "chilled_or_fresh",
+      "bought_state": "raw",
+      "rules": {
+        "fridge": [
+          "fs-ground-meat-fridge"
+        ],
+        "freezer": [
+          "fs-ground-meat-freezer"
+        ],
+        "after_thaw_fridge": [
+          "fsis-thawed-ground-poultry-seafood-fridge"
+        ],
+        "thaw": [
+          "fsis-thaw-fridge-small",
+          "fsis-thaw-fridge-large"
+        ]
+      },
+      "note": "",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 45,
+      "name": "Whole Chicken 1.6kg",
+      "storage_class": "chilled_or_fresh",
+      "bought_state": "raw",
+      "rules": {
+        "fridge": [
+          "fs-poultry-whole-fridge"
+        ],
+        "freezer": [
+          "fs-poultry-whole-freezer"
+        ],
+        "after_thaw_fridge": [
+          "fsis-thawed-ground-poultry-seafood-fridge"
+        ],
+        "thaw": [
+          "fsis-thaw-fridge-large",
+          "fsis-thaw-fridge-small"
+        ]
+      },
+      "note": "A 1.6 kg bird is under 5 lb; the large-item rule gives at least 24 hours, the same as the small-amount rule.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 46,
+      "name": "Chicken Thighs Boneless 450g",
+      "storage_class": "chilled_or_fresh",
+      "bought_state": "raw",
+      "rules": {
+        "fridge": [
+          "fs-poultry-pieces-fridge"
+        ],
+        "freezer": [
+          "fs-poultry-pieces-freezer"
+        ],
+        "after_thaw_fridge": [
+          "fsis-thawed-ground-poultry-seafood-fridge"
+        ],
+        "thaw": [
+          "fsis-thaw-fridge-small",
+          "fsis-thaw-fridge-large"
+        ]
+      },
+      "note": "",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 47,
+      "name": "Atlantic Salmon Fillet 400g",
+      "storage_class": "chilled_or_fresh",
+      "bought_state": "raw",
+      "rules": {
+        "fridge": [
+          "fs-fatty-fish-fridge"
+        ],
+        "freezer": [
+          "fs-fatty-fish-freezer"
+        ],
+        "after_thaw_fridge": [
+          "fsis-thawed-ground-poultry-seafood-fridge"
+        ],
+        "thaw": [
+          "fsis-thaw-fridge-small",
+          "fsis-thaw-fridge-large"
+        ]
+      },
+      "note": "",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 60,
+      "name": "Eggs Large Dozen",
+      "storage_class": "chilled_or_fresh",
+      "bought_state": "unopened",
+      "rules": {
+        "fridge": [
+          "fs-eggs-fridge"
+        ],
+        "freezer": [
+          "fs-eggs-freezer"
+        ]
+      },
+      "note": "",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 156,
+      "name": "Ground Pork 450g",
+      "storage_class": "chilled_or_fresh",
+      "bought_state": "raw",
+      "rules": {
+        "fridge": [
+          "fs-ground-meat-fridge"
+        ],
+        "freezer": [
+          "fs-ground-meat-freezer"
+        ],
+        "after_thaw_fridge": [
+          "fsis-thawed-ground-poultry-seafood-fridge"
+        ],
+        "thaw": [
+          "fsis-thaw-fridge-small",
+          "fsis-thaw-fridge-large"
+        ]
+      },
+      "note": "",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 157,
+      "name": "Pork Shoulder Roast 1.2kg",
+      "storage_class": "chilled_or_fresh",
+      "bought_state": "raw",
+      "rules": {
+        "fridge": [
+          "fs-red-meat-roasts-fridge"
+        ],
+        "freezer": [
+          "fs-red-meat-roasts-freezer"
+        ],
+        "after_thaw_fridge": [
+          "fsis-thawed-red-meat-fridge"
+        ],
+        "thaw": [
+          "fsis-thaw-fridge-small",
+          "fsis-thaw-fridge-large"
+        ]
+      },
+      "note": "",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 158,
+      "name": "Raw Shrimp 340g",
+      "storage_class": "frozen",
+      "bought_state": "frozen",
+      "rules": {
+        "freezer": [
+          "fs-shrimp-freezer"
+        ],
+        "after_thaw_fridge": [
+          "fsis-thawed-ground-poultry-seafood-fridge"
+        ],
+        "thaw": [
+          "fsis-thaw-fridge-small",
+          "fsis-thaw-fridge-large"
+        ]
+      },
+      "note": "Bought frozen: the freezer row applies until thawed, then the FSIS after-thaw time; the chart's 3 - 5 Days row is for fresh shrimp.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 159,
+      "name": "Beef Sirloin Steak 450g",
+      "storage_class": "chilled_or_fresh",
+      "bought_state": "raw",
+      "rules": {
+        "fridge": [
+          "fs-red-meat-steaks-fridge"
+        ],
+        "freezer": [
+          "fs-red-meat-steaks-freezer"
+        ],
+        "after_thaw_fridge": [
+          "fsis-thawed-red-meat-fridge"
+        ],
+        "thaw": [
+          "fsis-thaw-fridge-small",
+          "fsis-thaw-fridge-large"
+        ]
+      },
+      "note": "",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 160,
+      "name": "Chicken Drumsticks 1kg",
+      "storage_class": "chilled_or_fresh",
+      "bought_state": "raw",
+      "rules": {
+        "fridge": [
+          "fs-poultry-pieces-fridge"
+        ],
+        "freezer": [
+          "fs-poultry-pieces-freezer"
+        ],
+        "after_thaw_fridge": [
+          "fsis-thawed-ground-poultry-seafood-fridge"
+        ],
+        "thaw": [
+          "fsis-thaw-fridge-small",
+          "fsis-thaw-fridge-large"
+        ]
+      },
+      "note": "",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 161,
+      "name": "Frozen White Fish 400g",
+      "storage_class": "frozen",
+      "bought_state": "frozen",
+      "rules": {
+        "freezer": [
+          "fs-fatty-fish-freezer",
+          "fs-lean-fish-freezer"
+        ],
+        "after_thaw_fridge": [
+          "fsis-thawed-ground-poultry-seafood-fridge"
+        ],
+        "thaw": [
+          "fsis-thaw-fridge-small",
+          "fsis-thaw-fridge-large"
+        ]
+      },
+      "note": "The bag names basa and cod. Cod is a lean fish on the chart; basa is a catfish and the chart lists catfish as fatty. Both rows are cited and the shorter freezer time is planned.",
+      "synthetic_product": false
+    }
+  ],
+  "unmapped": [
+    {
+      "product_id": 1,
+      "name": "Wheat Bread 1",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 2,
+      "name": "Wheat Bread 2",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 3,
+      "name": "Dark Chocolate Cadbury",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 4,
+      "name": "Milk Chocolate Cadbury",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 5,
+      "name": "Nestles PBJ",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 6,
+      "name": "Canadian Peanut Butter Cream",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 7,
+      "name": "Sourdough Loaf",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 8,
+      "name": "Basmati Rice 2kg",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 9,
+      "name": "Long Grain White Rice 1kg",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 12,
+      "name": "Yellow Onion",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 13,
+      "name": "Fresh Garlic",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 14,
+      "name": "Roma Tomato",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 15,
+      "name": "Canned Diced Tomatoes",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 16,
+      "name": "Extra Virgin Olive Oil 500ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 17,
+      "name": "Canola Oil 1L",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 18,
+      "name": "Butter Salted 454g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 19,
+      "name": "Whole Milk 1L",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 20,
+      "name": "Plain Greek Yogurt 750g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 21,
+      "name": "Spaghetti Pasta 500g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 23,
+      "name": "Cheddar Cheese Block 300g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 24,
+      "name": "Mozzarella Shredded 200g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 25,
+      "name": "Fresh Ginger",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 26,
+      "name": "Cumin Ground 100g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 27,
+      "name": "Turmeric Ground 100g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 28,
+      "name": "Coriander Ground 100g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 29,
+      "name": "Garam Masala 100g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 30,
+      "name": "Frozen Broccoli 500g",
+      "storage_class": "frozen",
+      "status": "unknown",
+      "reason": "Bought frozen; neither cited source has a row for frozen vegetables, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 31,
+      "name": "Tomato Sauce Jar 650ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 32,
+      "name": "Tomato Paste 156ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 33,
+      "name": "Crushed Tomatoes Canned 796ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 34,
+      "name": "Passata Strained Tomatoes 680ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 37,
+      "name": "Russet Potatoes 5lb Bag",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 38,
+      "name": "Baby Potatoes 680g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 39,
+      "name": "Oat Milk 1L",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 40,
+      "name": "Almond Milk 946ml",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 41,
+      "name": "Vegan Cheese Shreds 200g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 42,
+      "name": "Coconut Yogurt 500g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 43,
+      "name": "Parmesan Wedge 200g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 44,
+      "name": "Cheddar Shredded 320g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 48,
+      "name": "Canned Tuna Flaked 170g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Canned fish; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 49,
+      "name": "Gluten-Free Penne 340g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 50,
+      "name": "Gluten-Free Bread 400g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 51,
+      "name": "Penne Rigate 500g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 52,
+      "name": "Fusilli Family Pack 900g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 53,
+      "name": "Broccoli Crown",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 54,
+      "name": "Carrots 1kg",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 55,
+      "name": "Bell Pepper Trio",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 56,
+      "name": "Fresh Basil 30g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 57,
+      "name": "Chicken Stock 900ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 58,
+      "name": "Coconut Milk Canned 400ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 59,
+      "name": "Soy Sauce 500ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 61,
+      "name": "All-Purpose Flour 2.5kg",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 62,
+      "name": "Olive Oil 1L",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 63,
+      "name": "Shaoxing Cooking Wine 750ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 64,
+      "name": "Light Soy Sauce 500ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 65,
+      "name": "Dark Soy Sauce 500ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 66,
+      "name": "Sichuan Peppercorns Whole 50g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 67,
+      "name": "Sichuan Peppercorns Ground 40g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 68,
+      "name": "Dried Red Chilies 100g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 69,
+      "name": "Sichuan Chili Flakes 100g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 70,
+      "name": "Crushed Red Pepper Flakes 60g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 71,
+      "name": "Doubanjiang Chili Bean Paste 500g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 72,
+      "name": "Toasted Sesame Oil 250ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 73,
+      "name": "Toasted Sesame Seeds 100g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 74,
+      "name": "Sesame Seeds 200g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 75,
+      "name": "Rice Vinegar 355ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 76,
+      "name": "Chinkiang Black Vinegar 550ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 77,
+      "name": "Oyster Sauce 510g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 78,
+      "name": "Hoisin Sauce 397g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 79,
+      "name": "Chinese Five-Spice Powder 50g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 80,
+      "name": "Star Anise Whole 30g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 81,
+      "name": "Cornstarch 450g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 82,
+      "name": "Peanut Oil 1L",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 83,
+      "name": "Chili Crisp 210g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 84,
+      "name": "Jasmine Rice 2kg",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 85,
+      "name": "Rice Vermicelli Noodles 454g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 86,
+      "name": "Firm Tofu 454g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 87,
+      "name": "Extra Firm Tofu 454g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 88,
+      "name": "Silken Tofu 300g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 89,
+      "name": "Bok Choy",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 90,
+      "name": "Baby Bok Choy 454g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 91,
+      "name": "Napa Cabbage",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 92,
+      "name": "Fermented Black Beans 227g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 93,
+      "name": "Dried Shiitake Mushrooms 100g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 94,
+      "name": "Fish Sauce 682ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 95,
+      "name": "Ghee 400g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 96,
+      "name": "Red Lentils 900g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 97,
+      "name": "Chickpeas Canned 540ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 98,
+      "name": "Chili Powder 100g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 99,
+      "name": "Black Mustard Seeds 100g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 100,
+      "name": "Cumin Seeds 100g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 101,
+      "name": "Paneer 350g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 102,
+      "name": "Plain Naan 4-Pack",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 103,
+      "name": "Green Cardamom Pods 50g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 104,
+      "name": "Curry Powder 100g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 105,
+      "name": "Green Chilies 100g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 106,
+      "name": "Corn Tortillas 10-Pack",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 107,
+      "name": "Flour Tortillas 10-Pack",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 108,
+      "name": "Black Beans Canned 540ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 109,
+      "name": "Pinto Beans Canned 540ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 110,
+      "name": "Red Kidney Beans Canned 540ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 111,
+      "name": "Jalapeno Peppers",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 112,
+      "name": "Limes 4-Pack",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 113,
+      "name": "Hass Avocados 2-Pack",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 114,
+      "name": "Dried Oregano 10g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 115,
+      "name": "Tomato Salsa Medium 650ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 116,
+      "name": "Queso Fresco 300g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 117,
+      "name": "Sour Cream 500ml",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 118,
+      "name": "Canned Corn Kernels 341ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 119,
+      "name": "Granulated Sugar 1kg",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 120,
+      "name": "Brown Sugar 1kg",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 121,
+      "name": "Icing Sugar 1kg",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 122,
+      "name": "Table Salt 1kg",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 123,
+      "name": "Kosher Salt 1.36kg",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 124,
+      "name": "Fine Sea Salt 750g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 125,
+      "name": "Black Pepper Ground 100g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 126,
+      "name": "Black Peppercorns Whole 100g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 127,
+      "name": "Baking Soda 500g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 128,
+      "name": "Baking Powder 225g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 129,
+      "name": "Pure Vanilla Extract 43ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 130,
+      "name": "Liquid Honey 500g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 131,
+      "name": "Vegetable Oil 1.42L",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 132,
+      "name": "White Vinegar 1L",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 133,
+      "name": "Cayenne Pepper Ground 50g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 134,
+      "name": "Paprika Ground 100g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 135,
+      "name": "Ground Cinnamon 100g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 136,
+      "name": "Bay Leaves 10g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 137,
+      "name": "Dried Thyme 10g",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 138,
+      "name": "Pure Maple Syrup 540ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 139,
+      "name": "Whipping Cream 35% 473ml",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 140,
+      "name": "Vegetable Broth 900ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 141,
+      "name": "Dijon Mustard 250ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 142,
+      "name": "Green Onions",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 143,
+      "name": "Cilantro",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 144,
+      "name": "Flat-Leaf Parsley",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 145,
+      "name": "Fresh Mint 30g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 146,
+      "name": "Lemons 3-Pack",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 147,
+      "name": "Red Onion",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 148,
+      "name": "Shallots 227g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 149,
+      "name": "Baby Spinach 142g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 150,
+      "name": "English Cucumber",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 151,
+      "name": "White Mushrooms 227g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 152,
+      "name": "Zucchini",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 153,
+      "name": "Celery",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 154,
+      "name": "Red Bell Pepper",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 155,
+      "name": "Green Bell Pepper",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 162,
+      "name": "Yellow Onions 3lb Bag",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 163,
+      "name": "Yellow Onions 10lb Bag",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 164,
+      "name": "Organic Yellow Onions 2lb Bag",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 165,
+      "name": "Petite Diced Tomatoes 796ml",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": false
+    },
+    {
+      "product_id": 166,
+      "name": "Frozen Mango Chunks 600g",
+      "storage_class": "frozen",
+      "status": "unknown",
+      "reason": "Bought frozen; neither cited source has a row for frozen fruit, so it is unknown.",
+      "synthetic_product": true
+    },
+    {
+      "product_id": 167,
+      "name": "Sliced Pepperoni 175g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "The chart has no row for dry or cured sausage such as pepperoni. 'Luncheon meat' and 'Sausage, fully cooked' are different products, so it is not mapped.",
+      "synthetic_product": true
+    },
+    {
+      "product_id": 168,
+      "name": "Pizza Dough 500g",
+      "storage_class": "chilled_or_fresh",
+      "status": "unknown",
+      "reason": "Neither cited source has a row for this food, so its storage time is unknown.",
+      "synthetic_product": true
+    },
+    {
+      "product_id": 169,
+      "name": "Instant Yeast 3-Pack",
+      "storage_class": "shelf_stable",
+      "status": "unknown",
+      "reason": "Shelf-stable; neither cited source states a pantry time for it, so it is unknown.",
+      "synthetic_product": true
+    }
+  ]
+}

@@ -664,6 +664,39 @@ def plan_recipe(slug: str,
     return plan
 
 
+# ─── Meal plan ───────────────────────────────────────────────
+# The plan lives in the browser (a MealPlanDraft); these endpoints are stateless.
+
+@app.get("/shelf-life")
+def shelf_life(product_id: Annotated[list[int] | None, Query()] = None) -> dict:
+    """Cited storage and thaw times per product (all products, or those named). A product
+    with no cited row has mapped false, status unknown, its reason, and no number.
+    synthetic_product marks the demo products (166-169)."""
+    from .mealplan import shelf
+
+    names = {p.id: p.name for p in db.load_all_products()}
+    wanted = sorted(set(product_id)) if product_id else sorted(names)
+    out = []
+    for pid in wanted:
+        if pid not in names:
+            continue
+        ps = shelf.for_product(pid)
+        rules = {}
+        if ps.mapped:
+            for kind, ids in (("fridge", ps.fridge), ("freezer", ps.freezer),
+                              ("after_thaw_fridge", ps.after_thaw), ("thaw", ps.thaw)):
+                if ids:
+                    rules[kind] = [shelf.rule(r) for r in ids]
+        out.append({"product_id": pid, "name": names[pid], "mapped": ps.mapped,
+                    "status": "cited" if ps.mapped else "unknown",
+                    "storage_class": ps.storage_class, "bought_state": ps.bought_state,
+                    "rules": rules, "note": ps.note, "reason": ps.reason,
+                    "synthetic_product": ps.synthetic_product})
+    data = shelf.load()
+    return {"sources": shelf.sources(), "rules_of_use": data["rules_of_use"],
+            "products": out}
+
+
 # ─── Provenance ──────────────────────────────────────────────
 
 class RankRequest(BaseModel):
