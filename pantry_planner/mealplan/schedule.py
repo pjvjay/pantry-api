@@ -21,10 +21,10 @@ import json
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .. import db, tripopt
+from .. import db, nutrition, tripopt
 from ..config import settings
 from ..db import SEEDS_DIR
-from ..models import Product, RecipeDoc
+from ..models import MealNutrition, NutritionSource, PeriodNutrition, Product, RecipeDoc
 from ..nlsearch.sql_builder import build_price_matrix_sql
 from . import approved as approved_mod
 from . import lists, place, shelf, trips
@@ -565,16 +565,55 @@ def compute(draft: MealPlanDraft) -> MealSchedule:
     for res in results:
         res.recommended = res.name == rec
 
+    days = [DayOut(date=draft.day(i), weekday=SHORT[draft.day(i).weekday()],
+                   meal_ids=[m.id for m in placed if m.date == draft.day(i)])
+            for i in range(draft.days)]
+    per_recipe, period, nutrition_sources = _nutrition(draft, docs, placed, days)
+    coverage = _coverage(needs)
+    coverage.nutrition = "not_deployed" if period is None else "computed"
     return MealSchedule(
         rev=draft.rev, start_date=draft.start_date, meals=placed,
         unplaced=[m.id for m in placed if m.date is None],
         strategies=results, recommended_strategy=rec, warnings=warnings,
-        days=[DayOut(date=draft.day(i), weekday=SHORT[draft.day(i).weekday()],
-                     meal_ids=[m.id for m in placed if m.date == draft.day(i)])
-              for i in range(draft.days)],
-        coverage=_coverage(needs),
+        days=days, period_nutrition=period, recipe_nutrition=per_recipe,
+        coverage=coverage,
         approved_schedule=_approved_schedule(draft, results, cook),
-        sources=_sources(), synthetic_notice=SYNTHETIC_NOTICE)
+        sources=_sources(nutrition_sources), synthetic_notice=SYNTHETIC_NOTICE)
+
+
+def _nutrition(draft: MealPlanDraft, docs: dict[str, RecipeDoc], placed: list[PlacedMeal],
+               days: list[DayOut]) -> tuple[dict[str, MealNutrition], PeriodNutrition | None,
+                                            list[NutritionSource]]:
+    """Fills each day's nutrition in place: one person's day, one serving of every meal on
+    it, from the recipes' own amounts (never the packs a trip buys). A day is complete only
+    when every slot that is on has a meal and every meal is complete; a recipe whose
+    servings are unknown counts for nothing until the shopper answers. Returns the per-recipe
+    receipts, the period summary and the sources cited, or ({}, None, []) when the
+    nutrition tables are not deployed."""
+    ref = db.load_reference(nutrition.keys_for(ln.name for d in docs.values() for ln in d.lines))
+    if ref is None:
+        return {}, None, []
+    per_recipe = {key: nutrition.meal_nutrition(doc, ref, servings=_recipe_servings(draft, key,
+                                                                                     doc))
+                  for key, doc in docs.items()}
+    slots_on = [s for s in SLOTS if s in draft.prefs.slots_on]
+    targets = draft.nutrition_targets or None
+    by_day: dict[dt.date, list[PlacedMeal]] = {}
+    for m in placed:
+        if m.date is not None:
+            by_day.setdefault(m.date, []).append(m)
+    out = []
+    for day in days:
+        meals = sorted(by_day.get(day.date, []), key=lambda m: (SLOTS.index(m.slot), m.id))
+        planned = {m.slot for m in meals}
+        day.nutrition = nutrition.day_totals(
+            [nutrition.day_meal(m.id, m.recipe_key, m.title, m.slot, per_recipe[m.recipe_key])
+             for m in meals],
+            meals_counted=slots_on, all_meals_planned=all(s in planned for s in slots_on),
+            date=day.date, targets=targets)
+        out.append(day.nutrition)
+    cited = sorted({i for mn in per_recipe.values() for i in mn.source_ids})
+    return per_recipe, nutrition.period_nutrition(out, slots_on), nutrition.sources(ref, cited)
 
 
 def _plan_warnings(draft: MealPlanDraft, placed: list[PlacedMeal],
@@ -653,10 +692,15 @@ def _approved_schedule(draft: MealPlanDraft, results: list[StrategyResult],
             "exportable": bool(trips_out) and all(t["status"] == "approved" for t in trips_out)}
 
 
-def _sources() -> list[dict]:
+def _sources(nutrition_sources: list | None = None) -> list[dict]:
     out = [{"id": s["id"], "title": s["title"], "publisher": s["publisher"], "url": s["url"],
             "page_date": s["page_date"], "retrieved": s["retrieved"], "credit": s["credit"]}
            for s in shelf.sources()]
+    # The nutrition reference, as its own source: the edition caveat travels in the credit.
+    out += [{"id": n.source, "title": n.name, "publisher": n.publisher, "url": n.url,
+             "page_date": None, "retrieved": n.retrieved_at,
+             "credit": f"{n.attribution} Edition: {n.edition}"}
+            for n in nutrition_sources or []]
     out.append({"id": "demo-data", "title": "Demo data", "publisher": "this demo",
                 "url": None, "page_date": None, "retrieved": None,
                 "credit": "Store prices and stock, the demo starter recipes, the library's "

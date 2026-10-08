@@ -15,7 +15,16 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from ..models import DroppedIngredient, MatchLevel, RecipeDoc, TripOption
+from ..models import (
+    DayNutrition,
+    DroppedIngredient,
+    MatchLevel,
+    MealNutrition,
+    NutritionTargets,
+    PeriodNutrition,
+    RecipeDoc,
+    TripOption,
+)
 
 Slot = Literal["breakfast", "lunch", "dinner", "snack"]
 SLOTS: tuple[str, ...] = ("breakfast", "lunch", "dinner", "snack")
@@ -193,7 +202,8 @@ class MealPlanDraft(BaseModel):
     line. packs_override: '<YYYY-MM-DD>:<product_id>' -> packs on that trip's line, 0 for a
     line the shopper dismissed. storage_overrides: product_id (as a string) -> 'fridge' (never
     freeze) or 'freezer' (freeze on arrival). dismissed_dates are never suggested as trips;
-    fixed_dates always are."""
+    fixed_dates always are. nutrition_targets are the shopper's own daily targets, kept in the
+    browser: each day gets a verdict only where its totals prove one."""
     v: int = 1
     id: str = Field(default="", max_length=64)
     rev: int = Field(default=0, ge=0)
@@ -212,6 +222,7 @@ class MealPlanDraft(BaseModel):
     storage_overrides: dict[str, Literal["fridge", "freezer"]] = Field(
         default_factory=dict, max_length=200)
     settings: PlanSettings = Field(default_factory=PlanSettings)
+    nutrition_targets: NutritionTargets = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _unique_meal_ids(self) -> MealPlanDraft:
@@ -367,11 +378,12 @@ class StrategyResult(BaseModel):
 
 
 class DayOut(BaseModel):
-    """One day of the board. nutrition stays None until the nutrition data lands."""
+    """One day of the board. nutrition is what one person eats that day (one serving of each
+    meal), None when the nutrition tables are not deployed."""
     date: dt.date
     weekday: str
     meal_ids: list[str]
-    nutrition: dict | None = None
+    nutrition: DayNutrition | None = None
 
 
 class Coverage(BaseModel):
@@ -383,7 +395,7 @@ class Coverage(BaseModel):
     freshness_unknown: int
     needs: int
     amounts_known: int
-    nutrition: Literal["unknown"] = "unknown"
+    nutrition: Literal["computed", "not_deployed"] = "not_deployed"
 
 
 class MealSchedule(BaseModel):
@@ -396,7 +408,9 @@ class MealSchedule(BaseModel):
     recommended_strategy: Strategy
     warnings: list[PlanWarning]
     days: list[DayOut]
-    period_nutrition: dict | None = None
+    period_nutrition: PeriodNutrition | None = None
+    # recipe_key -> per-serving nutrition with every line's receipt; days carry the totals
+    recipe_nutrition: dict[str, MealNutrition] = Field(default_factory=dict)
     coverage: Coverage
     approved_schedule: dict | None
     sources: list[dict]
