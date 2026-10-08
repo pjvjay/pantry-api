@@ -1,0 +1,28 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<!-- SYNTHETIC test page, written for pantry-api's extractor tests. It imitates
+     an older CMS page saved in windows-1252, not UTF-8, with the charset only in
+     a meta tag and its JSON-LD wrapped in a //<![CDATA[ comment. No text is copied
+     from any site. -->
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1252" />
+<title>Smoky Black Bean Soup – Example Soup Kitchen</title>
+<script type="application/ld+json">
+//<![CDATA[
+{"@context": "http://schema.org", "@type": "Recipe",
+ "name": "Smoky Black Bean Soup",
+ "recipeYield": "6 bowls",
+ "recipeIngredient": ["2 cans (15 oz) black beans, rinsed",
+                      "1 jalapeño, seeded and minced",
+                      "½ cup crème fraîche",
+                      "1 tsp smoked paprika",
+                      "4 cups vegetable stock",
+                      "Chef’s tip: a squeeze of lime"]}
+//]]>
+</script>
+</head>
+<body>
+<h1>Smoky Black Bean Soup</h1>
+<p>A café favourite.</p>
+</body>
+</html>
