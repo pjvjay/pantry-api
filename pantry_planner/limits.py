@@ -15,7 +15,9 @@ per replica, which is enough for one or two replicas and needs no store:
   first request that carries X-Forwarded-For logs a warning saying so.
 - A daily ceiling on estimated LLM spend (LLM_DAILY_COST_CAP_USD; unset means
   no ceiling). Every LLM call adds its estimate (llm.forced_tool_call calls
-  record_spend), and the day resets at UTC midnight. Above the ceiling the
+  record_spend), and the day resets at UTC midnight. The estimate is $0 for
+  Gemini (the free tier) and for any model config.COST_PER_MTOK does not
+  list; the first call to an unlisted model logs a warning. Above the ceiling the
   endpoints that call an LLM answer 503, and so do the MCP plan tools; the
   endpoints that call none (parse-lines, and the meal-plan schedule when it
   lands) keep working, and so does demo mode, which makes no LLM call.
@@ -81,6 +83,8 @@ _buckets: dict[tuple[str, str], tuple[float, float]] = {}   # (endpoint, ip) -> 
 _spend = {"day": "", "usd": 0.0}
 # Whether this process has logged the untrusted-proxy warning: once is enough to be seen.
 _proxy_warned = False
+# Models whose calls counted $0 toward a ceiling, each logged once per process.
+_unpriced_warned: set[str] = set()
 
 # The clocks, as module attributes so tests can move time.
 monotonic = time.monotonic
@@ -91,12 +95,13 @@ def utc_day() -> str:
 
 
 def reset() -> None:
-    """Forget every bucket, today's spend and the proxy warning (tests)."""
+    """Forget every bucket, today's spend and the warnings already logged (tests)."""
     global _proxy_warned
     with _lock:
         _buckets.clear()
         _spend.update(day="", usd=0.0)
         _proxy_warned = False
+        _unpriced_warned.clear()
 
 
 # ─── Client identity ─────────────────────────────────────────
@@ -183,6 +188,21 @@ def record_spend(usd: float) -> None:
         if _spend["day"] != day:
             _spend.update(day=day, usd=0.0)
         _spend["usd"] += usd
+
+
+def warn_unpriced(model: str) -> None:
+    """Say once per model that its calls count $0 toward the ceiling. Only the models in
+    config.COST_PER_MTOK have a price, and validate_model_spec accepts any "claude-" name,
+    so a deployment that sets another model spends with the ceiling seeing nothing, and no
+    response says so. Without a ceiling there is nothing to undercount."""
+    if settings().llm_daily_cost_cap_usd is None:
+        return
+    with _lock:
+        if model in _unpriced_warned:
+            return
+        _unpriced_warned.add(model)
+    log.warning("LLM_DAILY_COST_CAP_USD is set, but %s has no price in config.COST_PER_MTOK, "
+                "so its calls count $0 toward the ceiling. Add its rates there.", model)
 
 
 def budget() -> dict:

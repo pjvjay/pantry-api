@@ -390,6 +390,13 @@ COST_PER_MTOK: dict[str, tuple[float, float]] = {
 }
 
 
+def is_priced(model: str) -> bool:
+    """Whether estimate_cost_usd knows what a call to `model` costs. Gemini's price is known:
+    $0, the free tier this deployment uses."""
+    provider, name = split_model_spec(model)
+    return provider == GEMINI or name in COST_PER_MTOK
+
+
 def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:
     """Estimate USD cost of an LLM call. Returns 0.0 for unknown models.
 

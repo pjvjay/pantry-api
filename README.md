@@ -121,7 +121,10 @@ Every public endpoint is bounded (`pantry_planner/limits.py`), per replica and i
   `Retry-After`. The client is the TCP peer unless `TRUSTED_PROXY_HOPS` says how many
   proxies append to `X-Forwarded-For`; a client-written header is never trusted.
 - **A daily LLM cost ceiling**: every LLM call adds its estimated cost (`forced_tool_call`),
-  reset at UTC midnight. Above `LLM_DAILY_COST_CAP_USD`, `/plan/nl`, `/plan/spec`,
+  reset at UTC midnight. The estimate prices the models in `config.COST_PER_MTOK` only: a
+  Gemini call counts $0 (the free tier), and so does any Anthropic model not listed there,
+  whose first call logs a warning while a ceiling is set. Add a model's rates before
+  pointing a capped deployment at it. Above `LLM_DAILY_COST_CAP_USD`, `/plan/nl`, `/plan/spec`,
   `/plan/{slug}`, `/plan/week` and the MCP plan tools answer 503 / a tool error, "Live planning
   is paused for today; the demo planner still works" (REST: `{"error":
   "llm_budget_exhausted", "detail": "<that sentence>"}`). Endpoints that call no LLM, and demo

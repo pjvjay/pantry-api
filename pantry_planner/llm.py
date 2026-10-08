@@ -29,7 +29,7 @@ import httpx
 from anthropic import Anthropic
 
 from . import httptrace
-from .config import ANTHROPIC, GEMINI, estimate_cost_usd, settings, split_model_spec
+from .config import ANTHROPIC, GEMINI, estimate_cost_usd, is_priced, settings, split_model_spec
 
 DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 
@@ -124,6 +124,8 @@ def forced_tool_call(*, model: str, system: str, messages: list[dict],
     # Every call counts toward the daily ceiling (limits.py), whichever endpoint made it.
     from . import limits
 
+    if not is_priced(result.model):
+        limits.warn_unpriced(result.model)
     limits.record_spend(estimate_cost_usd(result.model, result.input_tokens,
                                           result.output_tokens))
     return result

@@ -194,6 +194,35 @@ def test_every_llm_call_counts_toward_the_ceiling(monkeypatch):
     assert limits.budget()["spent"] == pytest.approx(per_call * len(fakes.anthropic))
 
 
+def test_a_model_with_no_price_is_logged_once_while_a_ceiling_is_set(monkeypatch, env,
+                                                                    caplog):
+    """estimate_cost_usd prices two Anthropic models and counts Gemini as $0 (the free tier).
+    A call to any other model counts $0 too, so a deployment that set one would spend with
+    the ceiling never tripping; the log says so, once per model."""
+    from pantry_planner import config, limits
+    from pantry_planner.llm import forced_tool_call
+    from tests.llm_fakes import FakeProviders
+
+    FakeProviders().install(monkeypatch)
+    tool = {"name": "submit_triage", "description": "d", "input_schema": {"type": "object"}}
+
+    def call(model):
+        forced_tool_call(model=model, system="s", tool=tool, max_tokens=10,
+                         messages=[{"role": "user", "content": "{}"}])
+
+    with caplog.at_level("WARNING", logger="pantry_planner.limits"):
+        call("claude-unlisted-1")                      # no ceiling: nothing to undercount
+        assert not caplog.records
+        env(LLM_DAILY_COST_CAP_USD="5", GEMINI_API_KEY="test-gemini-key")
+        for model in (config.HAIKU, "gemini:gemini-test", "claude-unlisted-1",
+                      "claude-unlisted-1"):
+            call(model)
+        (rec,) = caplog.records
+        assert "claude-unlisted-1 has no price" in rec.getMessage()
+    assert limits.budget()["spent"] == pytest.approx(
+        config.estimate_cost_usd(config.HAIKU, 1000, 200))
+
+
 def test_above_the_ceiling_llm_endpoints_pause_and_the_rest_work(env):
     from pantry_planner import config, limits
 
