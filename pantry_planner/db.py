@@ -8,6 +8,7 @@ from __future__ import annotations
 import functools
 import json
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from typing import NamedTuple
 
@@ -209,6 +210,72 @@ class RecipeLineAmountRow(Base):
     note = Column(String, nullable=False, default="", server_default="")
 
 
+class NutrientSourceRow(Base):
+    """0008_nutrition — one row per reference dataset: its licence, the attribution line
+    shown wherever one of its numbers is, and `edition`, which says which edition the values
+    are believed to be and how sure that is. Columns mirror the migration exactly."""
+    __tablename__ = "nutrient_sources"
+    source = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    publisher = Column(String, nullable=False, default="", server_default="")
+    edition = Column(String, nullable=False, default="", server_default="")
+    licence = Column(String, nullable=False, default="", server_default="")
+    licence_url = Column(String, nullable=False, default="", server_default="")
+    attribution = Column(String, nullable=False, default="", server_default="")
+    url = Column(String, nullable=False, default="", server_default="")
+    retrieved_at = Column(String, nullable=False, default="", server_default="")
+
+
+class NutrientFoodRow(Base):
+    """0008_nutrition — one reference food: a generic food's published values, never a
+    product's label. ref_id is '<source>:<food code>'; description is verbatim; state_note
+    says what was measured ("raw, meat only"). The foreign key to nutrient_sources and the
+    UNIQUE (source, source_food_id) live in SQL only."""
+    __tablename__ = "nutrient_foods"
+    ref_id = Column(String, primary_key=True)
+    source = Column(String, nullable=False)
+    source_food_id = Column(String, nullable=False)
+    food_code = Column(String, nullable=False, default="", server_default="")
+    description = Column(String, nullable=False)
+    state_note = Column(String, nullable=False, default="", server_default="")
+
+
+class NutrientAmountRow(Base):
+    """0008_nutrition — a nutrient per 100 g of a reference food. A nutrient the source did
+    not publish has no row: unknown, which code never reads as 0. The CHECKs (the eight
+    nutrient names, per_100g >= 0) and the cascade live in SQL only."""
+    __tablename__ = "nutrient_amounts"
+    ref_id = Column(String, primary_key=True)
+    nutrient = Column(String, primary_key=True)
+    per_100g = Column(Float, nullable=False)
+    source_code = Column(String, nullable=False, default="", server_default="")
+
+
+class IngredientNutrientMapRow(Base):
+    """0008_nutrition — ingredient key (units.tokens() of a line's name, joined by spaces)
+    -> its reference food. match_kind 'none' (ref_id NULL) means reviewed and nothing fits;
+    a key with no row has not been reviewed. Both stay unknown, for different reasons."""
+    __tablename__ = "ingredient_nutrient_map"
+    ingredient_key = Column(String, primary_key=True)
+    ref_id = Column(String, nullable=True)
+    match_kind = Column(String, nullable=False)
+    note = Column(String, nullable=False, default="", server_default="")
+    reviewed_at = Column(String, nullable=False, default="", server_default="")
+
+
+class NutrientMeasureRow(Base):
+    """0009_nutrient_measures — the source's own weight for a volume or a count of a food
+    ("15ml" = 13.682 g of olive oil). The only way a millilitre or count line becomes grams:
+    no density is ever assumed. volume_ml is set for volume measures only."""
+    __tablename__ = "nutrient_measures"
+    ref_id = Column(String, primary_key=True)
+    measure = Column(String, primary_key=True)
+    grams = Column(Float, nullable=False)
+    volume_ml = Column(Float, nullable=True)
+    verbatim = Column(String, nullable=False)
+    source_ref = Column(String, nullable=False, default="", server_default="")
+
+
 # ─── Engine / session helpers ────────────────────────────────
 
 @functools.lru_cache(maxsize=8)
@@ -294,6 +361,142 @@ def _table_missing(exc: BaseException, table: str) -> bool:
     text = str(exc).lower()
     return table in text and ("no such table" in text or "does not exist" in text
                               or "undefinedtable" in text)
+
+
+# ─── Nutrition reference data (0008, 0009) ──────────────────
+
+NUTRIENT_KEYS = ("energy_kcal", "protein_g", "fat_g", "satfat_g", "carbohydrate_g",
+                 "fibre_g", "sugars_g", "sodium_mg")
+SOURCE_FIELDS = ("name", "publisher", "edition", "licence", "licence_url", "attribution",
+                 "url", "retrieved_at")
+
+
+class NutrientFood(NamedTuple):
+    ref_id: str
+    source: str
+    source_food_id: str
+    food_code: str
+    description: str
+    state_note: str
+    per_100g: dict[str, float]          # only the nutrients the source published
+
+
+class NutrientMeasure(NamedTuple):
+    measure: str
+    grams: float
+    volume_ml: float | None
+    verbatim: str
+    source_ref: str
+
+
+class NutrientMapEntry(NamedTuple):
+    ref_id: str | None                  # None: match_kind 'none'
+    match_kind: str
+    note: str
+
+
+class Reference(NamedTuple):
+    """What load_reference read. measures_deployed False: 0008 is there but 0009 is not, so
+    no volume or count line can be converted (said so per line, never assumed)."""
+    sources: dict[str, dict]
+    foods: dict[str, NutrientFood]
+    measures: dict[str, list[NutrientMeasure]]
+    map: dict[str, NutrientMapEntry]
+    measures_deployed: bool = True
+
+
+def load_reference(keys: Iterable[str] | None = None) -> Reference | None:
+    """The nutrition reference for these ingredient keys (all keys when None): their map
+    rows, the foods those name with their published nutrients and measures, and every
+    source. None when the 0008 tables are not deployed: unknown, which a caller must say,
+    never read as "no nutrients"."""
+    from sqlalchemy.exc import OperationalError, ProgrammingError
+
+    tables = [NutrientSourceRow, NutrientFoodRow, NutrientAmountRow, IngredientNutrientMapRow]
+    try:
+        with Session(engine()) as s:
+            q = s.query(IngredientNutrientMapRow).order_by(IngredientNutrientMapRow.ingredient_key)
+            wanted = None if keys is None else sorted(set(keys))
+            if wanted is not None:
+                q = q.filter(IngredientNutrientMapRow.ingredient_key.in_(wanted))
+            # An empty key list skips the IN () query (a syntax error on Postgres) but still
+            # reads the sources, which also proves the tables exist.
+            map_rows = q.all() if wanted is None or wanted else []
+            mapping = {str(r.ingredient_key): NutrientMapEntry(
+                None if r.ref_id is None else str(r.ref_id), str(r.match_kind), str(r.note or ""))
+                for r in map_rows}
+            ref_ids = sorted({m.ref_id for m in mapping.values() if m.ref_id is not None})
+            food_rows = (s.query(NutrientFoodRow).filter(NutrientFoodRow.ref_id.in_(ref_ids))
+                         .order_by(NutrientFoodRow.ref_id).all()) if ref_ids else []
+            amount_rows = (s.query(NutrientAmountRow)
+                           .filter(NutrientAmountRow.ref_id.in_(ref_ids)).all()) if ref_ids else []
+            sources = {str(r.source): {"source": str(r.source),
+                                       **{k: str(getattr(r, k) or "") for k in SOURCE_FIELDS}}
+                       for r in s.query(NutrientSourceRow).order_by(NutrientSourceRow.source)}
+    except (OperationalError, ProgrammingError) as e:
+        if any(_table_missing(e, t.__tablename__) for t in tables):
+            return None
+        raise
+    per: dict[str, dict[str, float]] = {}
+    for a in amount_rows:
+        per.setdefault(str(a.ref_id), {})[str(a.nutrient)] = float(a.per_100g)
+    foods = {str(f.ref_id): NutrientFood(
+        str(f.ref_id), str(f.source), str(f.source_food_id), str(f.food_code or ""),
+        str(f.description), str(f.state_note or ""),
+        {n: per[str(f.ref_id)][n] for n in NUTRIENT_KEYS if n in per.get(str(f.ref_id), {})})
+        for f in food_rows}
+    measures, deployed = _load_measures(ref_ids)
+    return Reference(sources=sources, foods=foods, measures=measures, map=mapping,
+                     measures_deployed=deployed)
+
+
+def _load_measures(ref_ids: list[str]) -> tuple[dict[str, list[NutrientMeasure]], bool]:
+    """ref_id -> its measures, and False when 0009 is not deployed (its own transaction, so a
+    missing table there does not cost the 0008 data)."""
+    from sqlalchemy.exc import OperationalError, ProgrammingError
+
+    if not ref_ids:
+        return {}, True
+    try:
+        with Session(engine()) as s:
+            rows = (s.query(NutrientMeasureRow).filter(NutrientMeasureRow.ref_id.in_(ref_ids))
+                    .order_by(NutrientMeasureRow.ref_id, NutrientMeasureRow.measure).all())
+    except (OperationalError, ProgrammingError) as e:
+        if _table_missing(e, NutrientMeasureRow.__tablename__):
+            return {}, False
+        raise
+    out: dict[str, list[NutrientMeasure]] = {}
+    for m in rows:
+        out.setdefault(str(m.ref_id), []).append(NutrientMeasure(
+            str(m.measure), float(m.grams), None if m.volume_ml is None else float(m.volume_ml),
+            str(m.verbatim), str(m.source_ref or "")))
+    return out, True
+
+
+def nutrient_rows(data: dict) -> dict[str, list[tuple]]:
+    """seeds/nutrients.json as rows of the five tables, in file order (KEEP-IN-SYNC:
+    pantry-db scripts/gen-seed-sql.py nutrient_rows). source_food_id is the food's own field
+    when the file has one, else its food_code; source_code is the source's nutrient id. A
+    nutrient missing from per_100g gets no row: unknown, never 0."""
+    sources = [(s["source"], *(s.get(k) or "" for k in SOURCE_FIELDS)) for s in data["sources"]]
+    foods, amounts = [], []
+    for f in data["foods"]:
+        foods.append((f["ref_id"], f["source"], str(f.get("source_food_id", f["food_code"])),
+                      str(f.get("food_code", "")), f["description"], f.get("state_note") or ""))
+        codes = f.get("source_codes") or {}
+        for n in NUTRIENT_KEYS:
+            if n in f["per_100g"]:
+                c = codes.get(n) or {}
+                code = c.get("nutrient_code", c.get("nutrient_name_id"))
+                amounts.append((f["ref_id"], n, float(f["per_100g"][n]),
+                                "" if code is None else str(code)))
+    measures = [(m["ref_id"], m["measure"], float(m["grams"]),
+                 None if m.get("volume_ml") is None else float(m["volume_ml"]),
+                 m["verbatim"], m.get("source_ref") or "") for m in data.get("measures", [])]
+    mapping = [(m["ingredient_key"], m.get("ref_id"), m["match_kind"], m.get("note") or "",
+                m.get("reviewed_at") or "") for m in data["map"]]
+    return {"sources": sources, "foods": foods, "amounts": amounts, "measures": measures,
+            "map": mapping}
 
 
 def load_all_recipes() -> list[Recipe]:
@@ -441,7 +644,13 @@ def seed_from_json() -> None:
     init_schema()
     with Session(engine()) as s:
         # Clear existing (amounts before the lines they belong to: in Postgres they cascade
-        # from recipe_ingredients)
+        # from recipe_ingredients; nutrition children before the foods and sources they
+        # point at)
+        s.query(IngredientNutrientMapRow).delete()
+        s.query(NutrientMeasureRow).delete()
+        s.query(NutrientAmountRow).delete()
+        s.query(NutrientFoodRow).delete()
+        s.query(NutrientSourceRow).delete()
         s.query(RecipeLineAmountRow).delete()
         s.query(RecipeIngredientRow).delete()
         s.query(RecipeRow).delete()
@@ -511,6 +720,26 @@ def seed_from_json() -> None:
                         recipe_slug=r["slug"], line_no=i,
                         quantity=None if ing.get("quantity") is None else float(ing["quantity"]),
                         unit=ing.get("unit") or "", note=ing.get("note") or ""))
+
+        # Nutrition reference data (0008, 0009)
+        with (SEEDS_DIR / "nutrients.json").open(encoding="utf-8") as f:
+            rows = nutrient_rows(json.load(f))
+        for row in rows["sources"]:
+            fields = dict(zip(SOURCE_FIELDS, row[1:], strict=True))
+            s.add(NutrientSourceRow(source=row[0], **fields))
+        for ref_id, source, sfid, code, description, state_note in rows["foods"]:
+            s.add(NutrientFoodRow(ref_id=ref_id, source=source, source_food_id=sfid,
+                                  food_code=code, description=description, state_note=state_note))
+        for ref_id, nutrient, per_100g, code in rows["amounts"]:
+            s.add(NutrientAmountRow(ref_id=ref_id, nutrient=nutrient, per_100g=per_100g,
+                                    source_code=code))
+        for ref_id, measure, grams, volume_ml, verbatim, source_ref in rows["measures"]:
+            s.add(NutrientMeasureRow(ref_id=ref_id, measure=measure, grams=grams,
+                                     volume_ml=volume_ml, verbatim=verbatim,
+                                     source_ref=source_ref))
+        for key, ref_id, kind, note, reviewed_at in rows["map"]:
+            s.add(IngredientNutrientMapRow(ingredient_key=key, ref_id=ref_id, match_kind=kind,
+                                           note=note, reviewed_at=reviewed_at))
         s.commit()
     from .config import redact_db_url
     print(f"Seeded {len(products)} products, {len(recipes)} recipes into {redact_db_url(settings().db_url)}")
