@@ -882,21 +882,26 @@ def build_application(recipe_slug: str | None = None,
                       preference: list | None = None,
                       max_km: float | None = None,
                       allow_partial: bool = False,
-                      hooks: list | None = None) -> Application:
+                      hooks: list | None = None,
+                      recipe_spec=None,
+                      display_text: str = "") -> Application:
     """Construct the Burr Application for one run (`hooks`: Burr lifecycle hooks, e.g. the
     StepTimer that times each action).
 
-    Two entry variants sharing the router/selector/plan tail:
+    Three entry variants sharing the router/selector/plan tail:
       * classic (recipe_slug): load_recipe → load_products → …
       * NL2SQL (recipe_text):  parse_and_retrieve → …  (recipe + narrowed
         products both come from the pasted text)
+      * reviewed (recipe_spec, a RecipeSpec): parse_and_retrieve with the
+        spec as the parse, so no parser runs; `display_text` is what the
+        trace shows as the recipe
 
     Conditional transitions:
       * check_escalation → escalate_if_needed  if escalation_decision.escalate
       * check_escalation → skip_escalation     otherwise
     """
-    if (recipe_slug is None) == (recipe_text is None):
-        raise ValueError("provide exactly one of recipe_slug / recipe_text")
+    if sum(x is not None for x in (recipe_slug, recipe_text, recipe_spec)) != 1:
+        raise ValueError("provide exactly one of recipe_slug / recipe_text / recipe_spec")
 
     shared_tail = [
         ("preselect_model", "select_products"),
@@ -919,20 +924,26 @@ def build_application(recipe_slug: str | None = None,
                       escalate_if_needed, skip_escalation, optimize_trips,
                       build_plan]
 
-    if recipe_text is not None:
+    if recipe_text is not None or recipe_spec is not None:
+        parsed = None
+        if recipe_spec is not None:
+            from .nlsearch.schemas import Constraints, ParsedInput
+
+            # A copy: validate_parsed clamps the parse in place, and the caller's spec is the
+            # shopper's reviewed recipe.
+            parsed = ParsedInput(recipe=recipe_spec.model_copy(deep=True),
+                                 constraints=Constraints())
         builder = (
             ApplicationBuilder()
-            .with_actions(parse_and_retrieve.bind(recipe_text=recipe_text,
-                                                  lat=lat, lon=lon,
-                                                  exclude=exclude,
-                                                  preference=preference,
-                                                  max_km=max_km,
-                                                  allow_partial=allow_partial),
+            .with_actions(parse_and_retrieve.bind(
+                              recipe_text=display_text if parsed is not None else recipe_text,
+                              lat=lat, lon=lon, exclude=exclude, preference=preference,
+                              max_km=max_km, allow_partial=allow_partial, parsed=parsed),
                           *common_actions)
             .with_transitions(("parse_and_retrieve", "preselect_model"),
                               *shared_tail)
             .with_entrypoint("parse_and_retrieve")
-            .with_identifiers(app_id=_run_id("nl"))
+            .with_identifiers(app_id=_run_id("nl" if parsed is None else "spec"))
         )
     else:
         # A store-aware classic plan when the caller gives any of lat/lon/max_km; lat/lon
@@ -1004,6 +1015,24 @@ def run_nl(recipe_text: str, lat: float | None = None,
     """
     timer = StepTimer()
     app = build_application(recipe_text=recipe_text, lat=lat, lon=lon,
+                            exclude=exclude, preference=preference,
+                            max_km=max_km, allow_partial=allow_partial, hooks=[timer])
+    _action, _result, state = app.run(halt_after=["build_plan"])
+    return state["plan"].model_copy(update={"burr_run": app.uid, "pipeline": timer.steps})
+
+
+def run_spec(spec, *, lat: float | None = None, lon: float | None = None,
+             exclude: list | None = None, preference: list | None = None,
+             max_km: float | None = None, allow_partial: bool = False,
+             display_text: str = "") -> ShoppingPlan:
+    """Plan a recipe the shopper already reviewed (a RecipeSpec; recipe_doc.to_spec builds
+    one from a RecipeDoc) exactly as given: no parse call of either kind, so the planned
+    names, amounts and units are the reviewed ones. validate_parsed still runs, and anything
+    it drops (the 40-line cap) goes to `skipped`, named; the selector still picks products.
+    Same knobs, errors and result as run_nl; no shopping notes are read, so constraints come
+    only from the arguments. The trace's parse_input step reads "skipped: reviewed lines"."""
+    timer = StepTimer()
+    app = build_application(recipe_spec=spec, display_text=display_text, lat=lat, lon=lon,
                             exclude=exclude, preference=preference,
                             max_km=max_km, allow_partial=allow_partial, hooks=[timer])
     _action, _result, state = app.run(halt_after=["build_plan"])

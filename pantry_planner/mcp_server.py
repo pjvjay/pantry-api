@@ -30,6 +30,8 @@ from pydantic import BaseModel, Field, model_serializer
 
 from .llm import LLMError
 from .models import (
+    MAX_DOC_LINES,
+    AmountBasis,
     DroppedIngredient,
     LlmCallTrace,
     MatchLevel,
@@ -40,6 +42,8 @@ from .models import (
     Product,
     ProductOrigin,
     Recipe,
+    RecipeLine,
+    RecipeSource,
     ShoppingPlan,
     TripOption,
     WeekPlan,
@@ -1059,6 +1063,81 @@ def plan_from_text(recipe_text: Annotated[str, Field(max_length=MAX_TEXT)],
             f"{alert.code.value if alert else 'gate'}: "
             f"{(alert.message if alert else 'constraint infeasible').rstrip('.')}."
             f"{_affected(alert)}{_partial_hint(alert, allow_partial)} (steps: {steps})") from e
+    except LLMError as e:
+        raise ToolError(_llm_message(e)) from e
+
+
+class LineIn(BaseModel):
+    """One reviewed ingredient line for plan_from_lines: planned exactly as given."""
+    name: Annotated[str, Field(min_length=1, max_length=MAX_SEARCH)]
+    quantity: Annotated[float | None, Field(ge=0)] = None
+    unit: Annotated[str, Field(max_length=40)] = ""
+    note: Annotated[str, Field(max_length=300)] = ""
+    text: Annotated[str, Field(max_length=300)] = ""
+    confirmed: bool = True
+    # Who stated the amount; the hub passes the reviewed doc's own. A client
+    # writing lines itself is an assistant writing them.
+    amount_basis: AmountBasis = "written_by_assistant"
+
+
+@server.tool(title="Plan from reviewed lines", annotations=_PLAN)
+def plan_from_lines(doc_key: Annotated[str, Field(min_length=1, max_length=100)],
+                    lines: Annotated[list[LineIn] | None,
+                                     Field(max_length=MAX_DOC_LINES)] = None,
+                    title: Annotated[str | None, Field(max_length=200)] = None,
+                    servings: Annotated[int | None, Field(ge=1, le=100)] = None,
+                    lat: Annotated[float | None, Field(ge=-90, le=90)] = None,
+                    lon: Annotated[float | None, Field(ge=-180, le=180)] = None,
+                    max_km: Annotated[float | None, Field(ge=0.5, le=100)] = None,
+                    exclude_origin: Annotated[list[str] | None,
+                                              Field(max_length=MAX_LIST)] = None,
+                    preference: Annotated[list[str] | None, Field(max_length=MAX_LIST)] = None,
+                    allow_partial: bool = False,
+                    basis: bool = False,
+                    verbose: bool = False) -> PlanResult:
+    """Plan a recipe the shopper has already reviewed, line by line, exactly as
+    reviewed: each line's name, quantity and unit are planned as given, with no
+    re-reading of the recipe. Name the recipe by `doc_key` (for example
+    "imp:1", the key of a recipe the shopper imported); the app fills in its
+    reviewed lines. A client without such an app passes `lines` itself (at
+    most 60, each {name, quantity, unit, note}), with `title` and `servings`
+    when known. The selector still picks the products, so this is SLOW and
+    costs LLM credits unless the server runs in demo mode.
+
+    Location, origin and allow_partial work as in plan_from_text. Every line
+    must be confirmed; an unconfirmed one is an error naming it. The result
+    is shaped like plan_from_text's: read `summary.notes` and the left-out
+    lists the same way."""
+    from . import flow
+    from .models import RecipeDoc
+    from .nlsearch import PlanAborted, UnparseableRecipe
+    from .recipe_doc import UnconfirmedLines, to_recipe_text, to_spec
+
+    if not lines:
+        raise ToolError(f"No lines for {doc_key!r}: plan_from_lines plans reviewed lines, "
+                        "which the app fills in for a doc_key it holds. Without it, pass "
+                        "`lines` (at most 60) or use plan_from_text for recipe text.")
+    _check_countries(exclude_origin, preference)
+    doc = RecipeDoc(
+        key=doc_key, title=title or doc_key, servings=servings,
+        servings_stated=servings is not None,
+        lines=[RecipeLine(line_no=i, text=ln.text or ln.name, name=ln.name,
+                          quantity=ln.quantity, unit=ln.unit, note=ln.note,
+                          confirmed=ln.confirmed, amount_basis=ln.amount_basis)
+               for i, ln in enumerate(lines, start=1)],
+        source=RecipeSource(kind="assistant", method="agent_written"))
+    try:
+        plan = flow.run_spec(to_spec(doc), lat=lat, lon=lon, exclude=exclude_origin,
+                             preference=preference, max_km=max_km,
+                             allow_partial=allow_partial, display_text=to_recipe_text(doc))
+        return PlanResult(summary=_summarize_plan(plan, basis),
+                          full=plan if verbose else None)
+    except UnconfirmedLines as e:
+        raise ToolError(f"{e}.") from e
+    except UnparseableRecipe as e:
+        raise ToolError("Nothing to plan: every line was empty.") from e
+    except PlanAborted as e:
+        raise ToolError(_gate_message(e, allow_partial)) from e
     except LLMError as e:
         raise ToolError(_llm_message(e)) from e
 

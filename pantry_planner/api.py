@@ -27,6 +27,7 @@ from .models import (
     Product,
     ProductOrigin,
     Recipe,
+    RecipeDoc,
     ShoppingPlan,
     WeekPlan,
 )
@@ -298,6 +299,56 @@ def plan_nl(req: NLPlanRequest) -> ShoppingPlan:
         code = e.execution.aborted.code.value if e.execution.aborted else "unknown"
         m.record_plan("nl", "gated", gate=code)
         raise HTTPException(status_code=409, detail=e.execution.model_dump(mode="json"))
+
+
+class SpecPlanRequest(BaseModel):
+    """A recipe the shopper reviewed (RecipeDoc), planned exactly as given: the same
+    location, origin and partial-plan knobs as /plan/nl, and no shopping notes (there is
+    no text to read them from)."""
+
+    doc: RecipeDoc
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+    max_km: float | None = Field(default=None, ge=0.5, le=100)
+    exclude_origin: list[str] = Field(default_factory=list, max_length=50)
+    preference: list[str] = Field(default_factory=list, max_length=50)
+    allow_partial: bool = False
+
+
+@app.post("/plan/spec", response_model=ShoppingPlan)
+def plan_spec(req: SpecPlanRequest) -> ShoppingPlan:
+    """Plan reviewed lines with no parse: what the shopper reviewed is what gets planned
+    (names, quantities and units byte for byte on `basis.lines`). The selector still picks
+    the products. 422 `unconfirmed_lines` names any line not confirmed yet; an unknown
+    country is a 422 and a gate abort a 409, as on /plan/nl."""
+    from . import metrics as m
+    from .nlsearch import PlanAborted, UnparseableRecipe
+    from .recipe_doc import UnconfirmedLines, to_recipe_text, to_spec
+
+    _check_countries(req.exclude_origin, req.preference)
+    try:
+        spec = to_spec(req.doc)
+    except UnconfirmedLines as e:
+        m.record_plan("spec", "unconfirmed")
+        raise HTTPException(status_code=422, detail={
+            "error": "unconfirmed_lines", "line_nos": e.line_nos, "detail": str(e)}) from e
+    try:
+        plan = flow.run_spec(spec, lat=req.lat, lon=req.lon, exclude=req.exclude_origin,
+                             preference=req.preference, max_km=req.max_km,
+                             allow_partial=req.allow_partial,
+                             display_text=to_recipe_text(req.doc))
+    except UnparseableRecipe as e:
+        m.record_plan("spec", "unparseable")
+        raise HTTPException(status_code=422, detail={
+            "error": "no_lines", "detail": "The recipe has no ingredient lines to plan."}) from e
+    except PlanAborted as e:
+        code = e.execution.aborted.code.value if e.execution.aborted else "unknown"
+        m.record_plan("spec", "gated", gate=code)
+        raise HTTPException(status_code=409,
+                            detail=e.execution.model_dump(mode="json")) from e
+    m.record_plan("spec", "ok")
+    m.record_coverage(plan.origin_coverage)
+    return plan
 
 
 class WeekPlanRequest(BaseModel):

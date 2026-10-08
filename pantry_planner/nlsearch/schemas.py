@@ -52,8 +52,10 @@ class ParsedInput(BaseModel):
 
     def display_lines(self) -> list[str]:
         """The UI's 'Interpreted as:' chips."""
+        serves = (f"serves {self.recipe.servings}" if self.recipe.servings_stated
+                  else "servings not stated")
         out = [
-            f"{self.recipe.title} · serves {self.recipe.servings} · "
+            f"{self.recipe.title} · {serves} · "
             f"{len(self.recipe.ingredients)} ingredients"
         ]
         c = self.constraints

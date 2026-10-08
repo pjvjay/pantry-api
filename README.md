@@ -275,6 +275,31 @@ while a nearer alternative exists; that product is then reported, not silently s
 `tests/test_recipe_location.py` covers the unchanged default, the prices and trip, a product
 taken off the only nearby store's shelf, the no-store gate, and the REST and MCP parameters.
 
+## Reviewed recipes (`POST /plan/spec`, MCP `plan_from_lines`)
+
+A recipe the shopper has already reviewed line by line (a `RecipeDoc`: an imported or pasted
+ingredient list, a library recipe with its amounts, a dish the assistant wrote) is planned
+exactly as reviewed. `recipe_doc.to_spec` hands each line's name, quantity and unit to
+`flow.run_spec`, which runs the same retrieval, gates, selector and trip optimizer as
+`/plan/nl` but no parser of either kind: the trace's first step reads "skipped: reviewed
+lines". What the shopper reviewed is what gets planned, and `basis.lines` on the plan shows
+it, byte for byte (`tests/test_plan_spec.py`). Only the products are still chosen by the
+selector.
+
+- `POST /plan/spec` takes `{doc, lat?, lon?, max_km?, exclude_origin?, preference?,
+  allow_partial?}` and returns the same `ShoppingPlan` as `/plan/nl`. A line not confirmed yet
+  (a video transcription the shopper has not ticked) is a 422 `unconfirmed_lines` naming it;
+  an unknown country is a 422 and a gate abort a 409, as on `/plan/nl`.
+- The 40-line planning cap still applies: lines past it, and water or ice, are named on
+  `skipped`, never dropped silently.
+- `recipe_doc.to_recipe_text` renders a doc in the pasted format for traces and transcripts;
+  it is never a planning input.
+
+Every plan carries `basis` (what it was made from: the planned lines, the product chosen for
+each, the constraints and location), `servings` (None when the recipe does not say) and, per
+purchase, `need_qty`/`need_uom` when every line it covers states an amount in one unit. The MCP
+plan tools attach `summary.basis` only with `basis=true`; without it the summary is unchanged.
+
 ## Weekly menu optimizer (`POST /plan/week`)
 
 Plans N dinners from the recipe library under an optional budget — with no
@@ -335,6 +360,7 @@ nothing needs a token.
 | `origin_triage` | free | only when configured | products worth reading a label for (hints, never origins) |
 | `plan_recipe` | 1–3 LLM calls | only when configured | `PlanResult {summary, full}` for a seeded slug. Any of `lat`/`lon`/`max_km` makes it store-aware: each line at its cheapest store in range, `summary.trip` the recommended split, and a chosen product no store in range sells in `summary.out_of_range` (naming the nearest offer); without them, catalog prices and no stores |
 | `plan_from_text` | 2–4 Claude calls | only when configured | `PlanResult` for pasted recipe text (NL2SQL path). `lat`/`lon`/`max_km` define "nearby"; `allow_partial=true` plans what is stocked and in range and lists the rest in `summary.not_stocked` / `summary.out_of_range` |
+| `plan_from_lines` | 1–3 LLM calls (no parse) | only when configured | `PlanResult` for reviewed lines, planned exactly as given (no parse). The model names `doc_key`; the hub fills the reviewed `lines`, `title` and `servings`, and any other client may pass up to 60 `lines` itself |
 | `plan_week` | ~1 selector call per day | only when configured | `WeekResult {summary, full}` |
 | `submit_origin_evidence` | free | **always over HTTP** | `Submission` — a PENDING label reading, deduplicated |
 | `list_origin_submissions` | free | only when configured | `SubmissionPage` — the review queue, oldest first |

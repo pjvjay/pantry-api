@@ -355,7 +355,7 @@ READ_TOOLS = {
     "get_product_origins", "rank_products_by_origin", "origin_triage", "pipeline_status",
     "list_origin_submissions",
 }
-PLAN_TOOLS = {"plan_recipe", "plan_from_text", "plan_week"}
+PLAN_TOOLS = {"plan_recipe", "plan_from_text", "plan_from_lines", "plan_week"}
 # Write tools add to a queue or copy into evidence; nothing is destroyed.
 WRITE_TOOLS = {"submit_origin_evidence", "review_origin_submission"}
 
