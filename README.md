@@ -127,6 +127,18 @@ Every public endpoint is bounded (`pantry_planner/limits.py`), per replica and i
 
 The MCP endpoint's bearer tokens are unchanged; the buckets apply to REST only.
 
+**Behind a proxy, set `TRUSTED_PROXY_HOPS` before or with this version.** Without it the TCP
+peer is the proxy, so every visitor shares one bucket per endpoint: ten plans a minute for
+everyone together, not each. uvicorn rewrites the peer from `X-Forwarded-For` only for a proxy on
+loopback (its `FORWARDED_ALLOW_IPS` default), and neither deployment runs one there. The first
+forwarded request with no trusted proxies logs a warning from `pantry_planner.limits`.
+
+| Deployment | Proxy in front | Where `TRUSTED_PROXY_HOPS` is set |
+| --- | --- | --- |
+| AKS | ingress-nginx | `pantry-gitops` `apps/pantry-api/deployment.yaml` env, set to the ingress depth |
+| Hugging Face Space / Render demo | the platform's front end | `demo/Dockerfile` or the Space's settings, once the platform's hop count is known |
+| Local stack | none, or the frontend's nginx | not needed: every request is the same client |
+
 ## Try both routers side-by-side
 
 ```bash

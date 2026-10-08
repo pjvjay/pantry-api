@@ -133,6 +133,29 @@ def test_client_ip_counts_hops_from_the_right(env):
     assert client_ip(req("")) == "10.0.0.1"
 
 
+def test_a_proxy_nobody_trusts_is_logged_once(env, caplog):
+    """Behind ingress-nginx or a hosting platform's proxy with TRUSTED_PROXY_HOPS unset, the
+    peer is the proxy and every visitor shares its buckets. Nothing in a 429 says why, so the
+    first forwarded request says it in the log, once per process."""
+    from pantry_planner import limits
+
+    c = _client()
+    with caplog.at_level("WARNING", logger="pantry_planner.limits"):
+        c.post("/recipes/parse-lines", json=PASTE)       # no header: nothing to say
+        assert not caplog.records
+        for n in range(3):
+            c.post("/recipes/parse-lines", json=PASTE,
+                   headers={"X-Forwarded-For": f"198.51.100.{n}"})
+        assert len(caplog.records) == 1
+        assert "TRUSTED_PROXY_HOPS is 0" in caplog.records[0].getMessage()
+
+        caplog.clear()
+        env(TRUSTED_PROXY_HOPS="1")
+        limits.reset()
+        c.post("/recipes/parse-lines", json=PASTE, headers={"X-Forwarded-For": "198.51.100.9"})
+        assert not caplog.records
+
+
 # ─── Daily LLM cost ceiling ──────────────────────────────────
 
 def test_spend_is_recorded_per_utc_day(monkeypatch):

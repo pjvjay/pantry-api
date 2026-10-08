@@ -9,7 +9,10 @@ per replica, which is enough for one or two replicas and needs no store:
   Retry-After. The client IP is the TCP peer, or, only when
   TRUSTED_PROXY_HOPS says how many proxies in front of us append to
   X-Forwarded-For, the entry that many hops from the right: anything further
-  left was written by the client and proves nothing.
+  left was written by the client and proves nothing. Behind a proxy with
+  TRUSTED_PROXY_HOPS unset, the peer is the proxy and every client shares its
+  buckets (uvicorn rewrites the peer only for a proxy on loopback), so the
+  first request that carries X-Forwarded-For logs a warning saying so.
 - A daily ceiling on estimated LLM spend (LLM_DAILY_COST_CAP_USD; unset means
   no ceiling). Every LLM call adds its estimate (llm.forced_tool_call calls
   record_spend), and the day resets at UTC midnight. Above the ceiling the
@@ -23,6 +26,7 @@ to REST only.
 """
 from __future__ import annotations
 
+import logging
 import math
 import threading
 import time
@@ -34,6 +38,8 @@ from fastapi import HTTPException, Request
 from .config import settings
 
 PAUSED = "Live planning is paused for today; the demo planner still works."
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -57,6 +63,8 @@ _MAX_BUCKETS = 10_000
 _lock = threading.Lock()
 _buckets: dict[tuple[str, str], tuple[float, float]] = {}   # (endpoint, ip) -> (tokens, at)
 _spend = {"day": "", "usd": 0.0}
+# Whether this process has logged the untrusted-proxy warning: once is enough to be seen.
+_proxy_warned = False
 
 # The clocks, as module attributes so tests can move time.
 monotonic = time.monotonic
@@ -67,10 +75,12 @@ def utc_day() -> str:
 
 
 def reset() -> None:
-    """Forget every bucket and today's spend (tests)."""
+    """Forget every bucket, today's spend and the proxy warning (tests)."""
+    global _proxy_warned
     with _lock:
         _buckets.clear()
         _spend.update(day="", usd=0.0)
+        _proxy_warned = False
 
 
 # ─── Client identity ─────────────────────────────────────────
@@ -83,12 +93,30 @@ def client_ip(request: Request) -> str:
     peer = request.client.host if request.client else "unknown"
     hops = settings().trusted_proxy_hops
     if hops <= 0:
+        if "x-forwarded-for" in request.headers:
+            _warn_untrusted_proxy(peer)
         return peer
     chain = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",")
              if h.strip()]
     if not chain:
         return peer
     return chain[-hops] if len(chain) >= hops else chain[0]
+
+
+def _warn_untrusted_proxy(peer: str) -> None:
+    """Say once per process that X-Forwarded-For arrives while no proxy is trusted. If the
+    peer is a proxy (ingress-nginx, a hosting platform's front end), every client behind it
+    shares one bucket per endpoint, which looks like a limit far lower than configured. The
+    header is still not read: only TRUSTED_PROXY_HOPS can say which entry a proxy wrote."""
+    global _proxy_warned
+    with _lock:
+        if _proxy_warned:
+            return
+        _proxy_warned = True
+    log.warning("requests from %s carry X-Forwarded-For but TRUSTED_PROXY_HOPS is 0, so the "
+                "rate limits key on %s: if that is a proxy, every client behind it shares one "
+                "bucket per endpoint. Set TRUSTED_PROXY_HOPS to the number of proxies in front.",
+                peer, peer)
 
 
 # ─── Token bucket ────────────────────────────────────────────
