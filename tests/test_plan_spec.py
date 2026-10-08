@@ -8,6 +8,7 @@ arithmetic, never from the code under test.
 from __future__ import annotations
 
 import json
+import math
 import os
 
 import pytest
@@ -304,6 +305,27 @@ def test_a_422_renders_whatever_the_rejected_input():
         assert (err["loc"], err["input"]) == (["body", "lat"], shown), raw
 
 
+def test_a_quantity_that_is_not_a_plannable_number_is_a_422():
+    """JSON's 1e309 reads as inf in Python, and NaN parses too. Two such lines bought as one
+    product used to overflow pack_count into a 500; one alone planned with a null need and a
+    null basis quantity, which is not the reviewed line. A reviewed quantity is a finite
+    number from 0 to MAX_LINE_QUANTITY, and the bound's own sum still plans."""
+    from pantry_planner.models import MAX_LINE_QUANTITY
+
+    body = json.dumps({"doc": _doc([{"name": "penne", "quantity": "Q", "unit": "g"},
+                                    {"name": "penne rigate", "quantity": "Q", "unit": "g"}])})
+    bad = {("body", "doc", "lines", n, "quantity") for n in (0, 1)}
+    for raw in ("1e309", "-1e309", "NaN", "1e308", str(MAX_LINE_QUANTITY + 1)):
+        resp = _client().post("/plan/spec", content=body.replace('"Q"', raw),
+                              headers={"content-type": "application/json"})
+        assert resp.status_code == 422, raw
+        assert {tuple(e["loc"]) for e in resp.json()["detail"]} == bad, raw
+    resp = _client().post("/plan/spec", content=body.replace('"Q"', str(MAX_LINE_QUANTITY)),
+                          headers={"content-type": "application/json"})
+    assert resp.status_code == 200, resp.text
+    assert [ln["quantity"] for ln in resp.json()["basis"]["lines"]] == [MAX_LINE_QUANTITY] * 2
+
+
 def test_lines_validate_parsed_drops_are_named_not_lost():
     """45 reviewed lines: the planner's 40-line cap drops 5, which appear by name on
     `skipped` and in `ignored`; water is never bought and is named too."""
@@ -352,3 +374,10 @@ async def test_plan_from_lines_refusals(server):
     with pytest.raises(ToolError):
         await server.call_tool("plan_from_lines", {
             "doc_key": "imp:1", "lines": [{"name": "penne"}] * 61})
+    # an amount past RecipeLine's bound is named as the argument it is, not a masked
+    # "Error executing tool" from inside
+    for q in (math.inf, math.nan, 1e308):
+        with pytest.raises(ToolError, match=r"lines\.0\.quantity"):
+            await server.call_tool("plan_from_lines", {"doc_key": "imp:1", "lines": [
+                {"name": "penne", "quantity": q, "unit": "g"},
+                {"name": "penne rigate", "quantity": q, "unit": "g"}]})

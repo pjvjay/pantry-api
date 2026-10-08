@@ -470,6 +470,9 @@ MAX_DOC_LINES = 60
 MAX_LINE_NAME = 200
 MAX_SERVINGS = 100
 MAX_DOC_WARNINGS = 20
+# A line's quantity, in whatever unit it names. A million grams is a tonne, past any
+# recipe; the bound keeps every sum the planner makes of a doc's lines a finite number.
+MAX_LINE_QUANTITY = 1_000_000
 
 AmountBasis = Literal["stated_by_source", "demo_house_amounts", "parsed_from_your_paste",
                       "transcribed_confirmed_by_you", "written_by_assistant"]
@@ -484,7 +487,9 @@ class LineEvidence(BaseModel):
 class RecipeLine(BaseModel):
     """One ingredient line. `text` is the line as the source wrote it; `name`,
     `quantity` and `unit` are what gets planned. quantity None means the
-    source did not say. A count is unit "each" ("2 eggs"), as parse-lines
+    source did not say; otherwise it is a finite number from 0 to
+    MAX_LINE_QUANTITY (JSON's 1e309 reads as infinity in Python and is
+    refused, not planned). A count is unit "each" ("2 eggs"), as parse-lines
     writes it; unit "" means no unit, and the planner cannot measure a
     quantity without one, so that line's need and pack count are unknown
     rather than guessed. `unit` is planned as written, never rewritten.
@@ -493,7 +498,8 @@ class RecipeLine(BaseModel):
     line_no: int = Field(ge=1)
     text: str = Field(max_length=300)
     name: str = Field(min_length=1, max_length=MAX_LINE_NAME)
-    quantity: float | None = Field(default=None, ge=0)
+    quantity: float | None = Field(default=None, ge=0, le=MAX_LINE_QUANTITY,
+                                   allow_inf_nan=False)
     unit: str = Field(default="", max_length=40)
     note: str = Field(default="", max_length=300)
     evidence: LineEvidence | None = None

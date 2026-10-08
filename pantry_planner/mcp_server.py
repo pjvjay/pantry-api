@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field, model_serializer
 from .llm import LLMError
 from .models import (
     MAX_DOC_LINES,
+    MAX_LINE_QUANTITY,
     MAX_SERVINGS,
     AmountBasis,
     DroppedIngredient,
@@ -1081,7 +1082,9 @@ def plan_from_text(recipe_text: Annotated[str, Field(max_length=MAX_TEXT)],
 class LineIn(BaseModel):
     """One reviewed ingredient line for plan_from_lines: planned exactly as given."""
     name: Annotated[str, Field(min_length=1, max_length=MAX_SEARCH)]
-    quantity: Annotated[float | None, Field(ge=0)] = None
+    # RecipeLine's bound, checked here so a bad amount is named as this tool's argument
+    quantity: Annotated[float | None,
+                        Field(ge=0, le=MAX_LINE_QUANTITY, allow_inf_nan=False)] = None
     unit: Annotated[str, Field(max_length=40)] = ""
     note: Annotated[str, Field(max_length=300)] = ""
     text: Annotated[str, Field(max_length=300)] = ""

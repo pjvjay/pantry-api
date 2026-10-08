@@ -28,6 +28,7 @@ from .llm import LLMError
 from .models import (
     MAX_DOC_LINES,
     MAX_LINE_NAME,
+    MAX_LINE_QUANTITY,
     MAX_SERVINGS,
     OriginRanking,
     Product,
@@ -325,8 +326,8 @@ def parse_lines(req: ParseLinesRequest) -> ParsedLines:
 
     The result stays inside RecipeDoc's bounds, so a client can post it to /plan/spec as it
     stands, warnings included: a name longer than a RecipeLine holds is cut, and a servings
-    count over MAX_SERVINGS comes back as not stated. Both say so in `warnings`, which has
-    one entry per kind of problem, naming its lines."""
+    count over MAX_SERVINGS or an amount over MAX_LINE_QUANTITY comes back as not stated.
+    Each says so in `warnings`, which has one entry per kind of problem, naming its lines."""
     from .nlsearch import lineparse
 
     basis = "stated_by_source" if req.origin == "page" else "parsed_from_your_paste"
@@ -339,6 +340,7 @@ def parse_lines(req: ParseLinesRequest) -> ParsedLines:
     # line would let a long paste with no amounts outgrow the MAX_DOC_WARNINGS a RecipeDoc
     # holds, and the doc a client builds from this output would be a 422.
     cut: list[str] = []
+    too_big: list[str] = []
     unstated: list[str] = []
     for t in kept:
         p = lineparse.parse_line(t)
@@ -349,8 +351,14 @@ def parse_lines(req: ParseLinesRequest) -> ParsedLines:
             # full text side by side.
             name = name[:MAX_LINE_NAME].rstrip()
             cut.append(str(n))
+        qty, unit = p.quantity, p.unit or ""
+        if qty is not None and qty > MAX_LINE_QUANTITY:
+            # As with a catering yield, clamping would plan an amount nobody wrote, so the
+            # line has no amount and the shopper says how much they need.
+            too_big.append(f"{n} ({name})")
+            qty, unit = None, ""
         out.append(ParsedLineOut(line_no=n, text=t, name=name,
-                                 quantity=p.quantity, unit=p.unit or "", note=p.prep or "",
+                                 quantity=qty, unit=unit, note=p.prep or "",
                                  amount_basis=basis))
         if p.quantity is None:
             unstated.append(f"{n} ({name})")
@@ -372,6 +380,10 @@ def parse_lines(req: ParseLinesRequest) -> ParsedLines:
                         if len(cut) == 1 else
                         f"the names of lines {', '.join(cut)} were cut to {MAX_LINE_NAME} "
                         "characters")
+    if too_big:
+        more = f"more than the {MAX_LINE_QUANTITY:,} a plan takes: say how much you need"
+        warnings.append(f"line {too_big[0]} states {more}" if len(too_big) == 1
+                        else f"lines {', '.join(too_big)} state {more}")
     if unstated:
         warnings.append(f"line {unstated[0]} states no amount" if len(unstated) == 1
                         else f"lines {', '.join(unstated)} state no amount")

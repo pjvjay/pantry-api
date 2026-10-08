@@ -339,7 +339,10 @@ selector.
 - `POST /plan/spec` takes `{doc, lat?, lon?, max_km?, exclude_origin?, preference?,
   allow_partial?}` and returns the same `ShoppingPlan` as `/plan/nl`. A line not confirmed yet
   (a video transcription the shopper has not ticked) is a 422 `unconfirmed_lines` naming it;
-  an unknown country is a 422 and a gate abort a 409, as on `/plan/nl`.
+  an unknown country is a 422 and a gate abort a 409, as on `/plan/nl`. A line's `quantity`
+  is a finite number from 0 to 1,000,000 in its own unit (`models.MAX_LINE_QUANTITY`);
+  anything else, including JSON's `1e309`, which Python reads as infinity, is a 422 naming
+  the line.
 - The 40-line planning cap still applies: lines past it, and water or ice, are named on
   `skipped`, never dropped silently.
 - `recipe_doc.to_recipe_text` renders a doc in the pasted format for traces and transcripts;
@@ -347,7 +350,10 @@ selector.
 - `POST /recipes/parse-lines` reads up to 60 ingredient lines (`{title?, yield_text?, lines,
   origin?}`) into the fields a shopper reviews (`line_no, text, name, quantity, unit, note,
   amount_basis`), with `servings` null unless the title or yield states it. It uses the demo
-  parser's line reading (`nlsearch/lineparse.py`): no URL, no LLM, no database.
+  parser's line reading (`nlsearch/lineparse.py`): no URL, no LLM, no database. Its output,
+  `warnings` included, is a valid RecipeDoc as it stands: a servings count or an amount
+  over the bounds comes back unstated, and the warnings come one per kind of problem,
+  naming its lines.
 - `GET /recipes/{slug}/doc` is a library recipe as a RecipeDoc, with its demo house amounts
   (see the catalog notes above), ready to post to `/plan/spec`.
 

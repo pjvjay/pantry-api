@@ -156,6 +156,16 @@ def test_warnings_are_one_per_kind_naming_the_lines():
     assert out["warnings"][0] == "the names of lines 1, 2 were cut to 200 characters"
 
 
+def test_an_amount_over_what_a_line_holds_is_not_stated_and_says_why():
+    out = _post({"yield_text": "Serves 2", "lines": ["2000000 g flour", "500g penne"]}).json()
+    assert [(ln["name"], ln["quantity"], ln["unit"]) for ln in out["lines"]] == \
+        [("flour", None, ""), ("penne", 500.0, "g")]
+    assert out["warnings"] == ["line 1 (flour) states more than the 1,000,000 a plan takes: "
+                               "say how much you need"]
+    # the bound itself is an amount a line holds
+    assert _post({"lines": ["1000000 g flour"]}).json()["lines"][0]["quantity"] == 1_000_000
+
+
 def test_the_worst_paste_still_fits_a_recipe_doc():
     """60 lines, each a problem of every kind a line can have, plus a blank and a catering
     yield: the warnings stay inside RecipeDoc's bound, so the doc a client builds from the
@@ -163,7 +173,8 @@ def test_the_worst_paste_still_fits_a_recipe_doc():
     from pantry_planner.models import MAX_DOC_WARNINGS, RecipeDoc
 
     out = _post({"yield_text": "Makes 150 servings",
-                 "lines": ["-"] + ["x" * 290 + f" {n}" for n in range(59)]}).json()
+                 "lines": ["-"] + ["x" * 290 + f" {n}" for n in range(30)]
+                 + ["9999999 " + "x" * 290 for _ in range(29)]}).json()
     assert len(out["lines"]) == 59
     assert 0 < len(out["warnings"]) <= MAX_DOC_WARNINGS
     RecipeDoc.model_validate({
