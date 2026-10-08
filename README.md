@@ -497,11 +497,22 @@ fields. Only the printed label answers the question.
 This repo is one of six in the **pantry-platform** GitOps demo:
 
 ```
-git push here
-  → GitHub Actions: pytest → ghcr.io/pjvjay/pantry-api:dev-<sha> (amd64+arm64)
-  → CI bumps the image tag in pantry-gitops
+merge a labelled PR to main
+  → GitHub Actions (build.yml): plan vX.Y.Z from the release labels
+  → pytest → ghcr.io/pjvjay/pantry-api:dev-<sha> (amd64+arm64), version baked in
+  → git tag vX.Y.Z → the same digest retagged X.Y.Z, X.Y, latest → GitHub Release
+  → CI sets X.Y.Z in pantry-gitops
   → ArgoCD reconciles the Deployment on AKS
 ```
+
+Every PR carries one release label (`release:major`, `minor`, `patch` or
+`none`), checked by `labels.yml`; `.github/versioning.json` says which paths
+ship. The process, the 0.x policy, rollback (`promote_version`) and the
+platform release train are in
+[RELEASING.md](https://github.com/pjvjay/pantry-platform/blob/main/RELEASING.md).
+The running release is on `/health` (`version`, `revision`, `build`), the MCP
+`serverInfo` and every response's `X-Pantry-Version` header; a build that is
+not a release says `unknown`. `pyproject.toml`'s `0.0.0` is a placeholder.
 
 | Repo | Role |
 |---|---|

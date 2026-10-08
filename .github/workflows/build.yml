@@ -1,17 +1,40 @@
 # ============================================================
-# pantry-api — CI test, build & GitOps bump
+# pantry-api — release on merge: plan, test, build, tag, deploy
 #
 #   push to main
-#     → pytest
-#     → docker build (linux/amd64 + linux/arm64)
-#     → push ghcr.io/pjvjay/pantry-api:dev-<sha>
-#     → bump_image_tag.py in pjvjay/pantry-gitops (no external binary)
-#     → ArgoCD rolls the API Deployment on AKS
+#     → plan     the next vX.Y.Z from the last tag and the release
+#                labels of every PR merged since (the semver-labels
+#                action; the rules and the 0.x policy are in
+#                RELEASING.md in pantry-platform). Nothing shipped → stop.
+#     → test     pytest
+#     → build    docker build (linux/amd64 + linux/arm64) with the
+#                version baked in → push ghcr.io/pjvjay/pantry-api:dev-<sha>
+#     → release  reserve the git tag vX.Y.Z with one API call (whoever
+#                creates it owns the version) → retag the built digest
+#                X.Y.Z, X.Y and latest, no rebuild, and read it back →
+#                a GitHub Release citing PRs, commits, this run, the digest
+#     → deploy   bump_image_tag.py sets X.Y.Z in pjvjay/pantry-gitops
+#                → ArgoCD rolls the API Deployment on AKS
+#
+# The order never changes: git tag, image tag, Release, deploy. Every
+# step is safe to rerun, and a rerun for a commit that a newer tag
+# already contains stops at plan ("covered by vX").
+#
+# Dispatch inputs (Actions → build-and-deploy → Run workflow):
+#   level            release at this level instead of the labels'
+#                    (recorded in the notes with who ran it)
+#   dry_run          plan and test only; build, tag and deploy nothing
+#   promote_version  release and deploy an existing tag again, without a
+#                    rebuild: rollback, a failed deploy, the v0.1.0 bootstrap
+#   promote_major    N.0.0, the only way to 1.0.0
 #
 # Auth:
-#   - GHCR push: the workflow's own GITHUB_TOKEN (packages: write)
+#   - GHCR push and retag, the git tag and the Release: this workflow's
+#     own GITHUB_TOKEN, scoped per job
 #   - gitops write-back: GITOPS_PAT repo secret — a fine-grained PAT
 #     with contents:write on pjvjay/pantry-gitops only
+# Tags created with GITHUB_TOKEN start no workflows, so every release
+# step stays in this one run.
 # ============================================================
 
 name: build-and-deploy
@@ -27,21 +50,117 @@ on:
       - "tests/**"
       - ".github/workflows/build.yml"
   workflow_dispatch:
+    inputs:
+      level:
+        description: "Release level; 'labels' reads the PRs' release labels"
+        type: choice
+        options: [labels, none, patch, minor, major]
+        default: labels
+      dry_run:
+        description: "Plan and test only: build, tag, publish and deploy nothing"
+        type: boolean
+        default: true
+      promote_version:
+        description: "X.Y.Z of an existing tag to release and deploy again (no rebuild)"
+        required: false
+        default: ""
+      promote_major:
+        description: "N.0.0 to start a new major; 1.0.0 ends the 0.x policy"
+        required: false
+        default: ""
 
+# One release at a time and never cancelled halfway. GitHub keeps at most
+# one pending run and replaces older pending ones, which loses nothing: the
+# newer run's plan covers every commit since the last tag.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: release-pantry-api
+  cancel-in-progress: false
 
 permissions:
   contents: read
-  packages: write
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/pantry-api
   GITOPS_REPO: pjvjay/pantry-gitops
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read       # each merged commit's PR and its release label
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}           # release, promote or skip
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      ref: ${{ steps.facts.outputs.ref }}
+      newest: ${{ steps.facts.outputs.newest }}
+      dry_run: ${{ steps.facts.outputs.dry_run }}
+      plan: ${{ steps.facts.outputs.plan }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # plan reads every tag and the first-parent history
+
+      - name: Plan
+        id: plan
+        uses: pjvjay/pantry-platform/.github/actions/semver-labels@e1599b055b95be6a9da1b3583d2cc2cd6de369f8
+        with:
+          command: plan
+          level: ${{ inputs.level != 'labels' && inputs.level || '' }}
+          promote-version: ${{ inputs.promote_version }}
+          promote-major: ${{ inputs.promote_major }}
+          by: "@${{ github.actor }} in run ${{ github.run_id }}"
+          plan-file: plan.json
+
+      - name: Release facts
+        id: facts
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          # The plan travels to the release job as one line of JSON.
+          echo "plan=$(jq -c . plan.json)" >> "$GITHUB_OUTPUT"
+          # The commit to release: HEAD, or the existing tag's commit on a promote.
+          echo "ref=$(jq -r .ref plan.json)" >> "$GITHUB_OUTPUT"
+          echo "dry_run=$DRY_RUN" >> "$GITHUB_OUTPUT"
+          # X.Y and latest move only to the highest version, so promoting an
+          # older release (a rollback) never drags them backwards.
+          highest=$(git tag --list 'v*' | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+                    | sed 's/^v//' | sort -V | tail -1 || true)
+          newest=false
+          if [ -n "$VERSION" ] && { [ -z "$highest" ] || \
+               [ "$(printf '%s\n%s\n' "$highest" "$VERSION" | sort -V | tail -1)" = "$VERSION" ]; }; then
+            newest=true
+          fi
+          echo "newest=$newest" >> "$GITHUB_OUTPUT"
+
+      - name: Notes preview
+        if: steps.plan.outputs.skip != 'true'
+        uses: pjvjay/pantry-platform/.github/actions/semver-labels@e1599b055b95be6a9da1b3583d2cc2cd6de369f8
+        with:
+          command: notes
+          plan-file: plan.json
+          notes-file: notes-preview.md
+
+      - name: Summary
+        env:
+          SKIP_REASON: ${{ steps.plan.outputs.skip-reason }}
+        run: |
+          {
+            echo "### Release plan"
+            if [ -n "$SKIP_REASON" ]; then echo "Nothing to release: $SKIP_REASON"; fi
+            if [ -f notes-preview.md ]; then cat notes-preview.md; fi
+            echo '```json'; cat plan.json; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   test:
+    needs: plan
+    # A promote releases an image that already exists, so there is nothing
+    # new to test. Every other run tests main, as before.
+    if: needs.plan.outputs.mode != 'promote'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,9 +173,15 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
 
-  build-push-bump:
-    needs: test
+  build-push:
+    needs: [plan, test]
+    if: needs.plan.outputs.mode == 'release' && needs.plan.outputs.dry_run != 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -74,32 +199,188 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute image tag
-        id: tag
-        run: echo "tag=dev-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Build metadata
+        id: meta
+        run: |
+          echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
+      # Tagged dev-<sha> only. The version tags are added by the release job,
+      # after the git tag exists, so no image tag names a version that another
+      # run might still win.
       - name: Build and push (multi-arch)
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
-            ${{ env.IMAGE }}:latest
+          tags: ${{ env.IMAGE }}:dev-${{ steps.meta.outputs.short }}
+          build-args: |
+            APP_VERSION=${{ needs.plan.outputs.version }}
+            GIT_SHA=${{ github.sha }}
+            BUILD_TIME=${{ steps.meta.outputs.time }}
 
-      - name: Bump image tag in pantry-gitops
+  release:
+    needs: [plan, build-push]
+    if: >-
+      ${{ !cancelled() && needs.plan.result == 'success'
+          && needs.plan.outputs.dry_run != 'true'
+          && (needs.plan.outputs.mode == 'promote'
+              || (needs.plan.outputs.mode == 'release' && needs.build-push.result == 'success')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write           # the git tag and the Release
+      packages: write           # the version tags on GHCR
+    outputs:
+      digest: ${{ steps.retag.outputs.digest }}
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      REF: ${{ needs.plan.outputs.ref }}
+      MODE: ${{ needs.plan.outputs.mode }}
+      NEWEST: ${{ needs.plan.outputs.newest }}
+    steps:
+      - name: The plan
+        env:
+          PLAN: ${{ needs.plan.outputs.plan }}
+        run: printf '%s\n' "$PLAN" > "$RUNNER_TEMP/plan.json"
+
+      # One POST git/refs: it creates the tag or fails with 422. A 422 on
+      # the same commit is a rerun and continues; on another commit the
+      # version belongs to another run and this one stops. Tags never move.
+      - name: Reserve the tag
+        uses: pjvjay/pantry-platform/.github/actions/semver-labels@e1599b055b95be6a9da1b3583d2cc2cd6de369f8
+        with:
+          command: reserve-tag
+          tag: ${{ needs.plan.outputs.tag }}
+          sha: ${{ needs.plan.outputs.ref }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Retag the built digest
+        id: retag
+        env:
+          BUILT: ${{ needs.build-push.outputs.digest }}
         run: |
-          git clone "https://x-access-token:${{ secrets.GITOPS_PAT }}@github.com/${GITOPS_REPO}.git" gitops
+          set -euo pipefail
+          digest_of() {
+            docker buildx imagetools inspect "$1" 2>/dev/null | awk '$1 == "Digest:" { print $2; exit }'
+          }
+          if [ "$MODE" = release ]; then
+            source="$BUILT"
+          else
+            # promote never rebuilds: the release's own image if it exists,
+            # else the dev-<sha> build of the tagged commit (the bootstrap).
+            source=$(digest_of "$IMAGE:$VERSION" || true)
+            if [ -z "$source" ]; then source=$(digest_of "$IMAGE:dev-${REF::7}" || true); fi
+            if [ -z "$source" ]; then
+              echo "::error::neither $IMAGE:$VERSION nor $IMAGE:dev-${REF::7} exists; promote never rebuilds"
+              exit 1
+            fi
+          fi
+          if ! [[ "$source" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::no usable source digest ('$source')"
+            exit 1
+          fi
+          tags=(-t "$IMAGE:$VERSION")
+          if [ "$NEWEST" = true ]; then tags+=(-t "$IMAGE:${VERSION%.*}" -t "$IMAGE:latest"); fi
+          docker buildx imagetools create "${tags[@]}" "$IMAGE@$source"
+          # Record what the registry now serves for X.Y.Z, whether or not
+          # imagetools kept the digest: that is the digest the train checks.
+          readback=$(digest_of "$IMAGE:$VERSION" || true)
+          if ! [[ "$readback" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::could not read $IMAGE:$VERSION back"
+            exit 1
+          fi
+          if [ "$readback" = "$source" ]; then
+            echo "imagetools kept the digest: $readback"
+          else
+            echo "::notice::imagetools gave $IMAGE:$VERSION a new digest $readback (built $source); recording the read-back"
+          fi
+          echo "digest=$readback" >> "$GITHUB_OUTPUT"
+          if [ "$NEWEST" = true ]; then also="${VERSION%.*} and latest"; else also="nothing else (not the highest version)"; fi
+          {
+            echo "### Image"
+            echo "- source: \`$IMAGE@$source\`"
+            echo "- \`$IMAGE:$VERSION\` reads back as \`$readback\`"
+            echo "- also tagged: $also"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Notes
+        uses: pjvjay/pantry-platform/.github/actions/semver-labels@e1599b055b95be6a9da1b3583d2cc2cd6de369f8
+        with:
+          command: notes
+          plan-file: ${{ runner.temp }}/plan.json
+          notes-file: ${{ runner.temp }}/notes.md
+          image: ${{ env.IMAGE }}
+          digest: ${{ steps.retag.outputs.digest }}
+
+      # The notes carry the "Digest:" line the platform train reads back, and
+      # GitHub's generated list of PRs follows them. A Release that already
+      # exists (a rerun, or a promote of an earlier release) is left alone.
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NOTES: ${{ runner.temp }}/notes.md
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG already has a Release; leaving it as it is"
+          else
+            gh release create "$TAG" --verify-tag --latest="$NEWEST" \
+              --title "pantry-api $VERSION" --notes-file "$NOTES" --generate-notes
+          fi
+
+  deploy:
+    needs: [plan, release]
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Deploy X.Y.Z through pantry-gitops
+        env:
+          GITOPS_PAT: ${{ secrets.GITOPS_PAT }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          REF: ${{ needs.plan.outputs.ref }}
+        run: |
+          set -euo pipefail
+          git clone --quiet "https://x-access-token:${GITOPS_PAT}@github.com/${GITOPS_REPO}.git" gitops
           cd gitops
-          # No downloaded binary: this rewrites one `newTag:` line, which
-          # needs no dependency. The previous step curl'd a kustomize tarball
-          # with no checksum, signature or digest and executed it in a job
-          # holding write access to the deploy repo. The script ships in the
-          # repo it edits and is unit-tested.
-          python3 scripts/bump_image_tag.py \
-            "${IMAGE}" "${{ steps.tag.outputs.tag }}"
           git config user.name  "pantry-ci"
           git config user.email "ci@users.noreply.github.com"
-          git commit -am "bump pantry-api to ${{ steps.tag.outputs.tag }}"
-          git push
+          # No downloaded binary: bump_image_tag.py rewrites one line, and it
+          # ships in the repo it edits. Its tests run first, since this job
+          # holds write access to the deploy repo.
+          python3 -m unittest discover -s scripts
+          message="Deploy ${IMAGE##*/} ${VERSION} (${GITHUB_REPOSITORY}@${REF::7})"
+          # The other app repos deploy into the same file: on a lost push
+          # race, refetch, bump again and push again.
+          for attempt in 1 2 3 4 5; do
+            git fetch --quiet origin main
+            git reset --quiet --hard origin/main
+            python3 scripts/bump_image_tag.py "$IMAGE" "$VERSION"
+            if git diff --quiet; then
+              echo "pantry-gitops main already deploys $VERSION"
+              exit 0
+            fi
+            git commit --quiet -am "$message"
+            if git push --quiet origin HEAD:main; then
+              echo "deployed: $message (attempt $attempt)"
+              exit 0
+            fi
+            echo "push rejected (attempt $attempt); retrying"
+            sleep $((attempt * 5))
+          done
+          echo "::error::could not push the deploy commit after 5 attempts"
+          exit 1
