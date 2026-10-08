@@ -25,7 +25,7 @@ import re
 from .models import Product, RecipeIngredient, Selection, SelectorResult
 from .nlsearch import lineparse
 from .nlsearch.schemas import Constraints, IngredientSpec, ParsedInput, RecipeSpec
-from .nlsearch.units import head_noun, index_text, tokens
+from .nlsearch.units import semantic_key
 
 _TAGS = ("dairy", "gluten", "meat", "nuts", "egg", "soy")
 
@@ -96,18 +96,13 @@ def select_products(ingredients: list[RecipeIngredient],
     preference = [c for c in (preference or []) if c.strip()]
     selections: list[Selection] = []
     for ing in ingredients:
-        toks = set(tokens(ing.name))
-        want = tokens(ing.name)[-1] if tokens(ing.name) else None
-        # "fresh" is a tokenizer stopword (half the catalog says it), yet
-        # "fresh coriander" is cilantro, not ground coriander: read it raw.
-        fresh = "fresh" in ing.name.lower().split()
         pool = [p for p in products if not p.substitute] or products
         if not pool:
             continue
+        # semantic_key is the ranking the alternatives share: overlap, then
+        # "fresh", then head noun.
         pick = min(pool, key=lambda p: (
-            -len(toks & set(tokens(index_text(p.name, p.description)))),
-            0 if not fresh or "fresh" in f"{p.name} {p.description}".lower() else 1,
-            0 if want is not None and head_noun(p.name) == want else 1,
+            *semantic_key(ing.name, p),
             _preference_rank(origins_by_id.get(p.id), preference),
             p.store_price if p.store_price is not None else p.price,
             p.id))
