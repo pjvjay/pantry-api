@@ -505,6 +505,14 @@ def _gate_message(e, allow_partial: bool = False) -> str:
             + (f" Steps: {steps}." if steps else ""))
 
 
+def _check_llm_budget() -> None:
+    """The REST daily LLM ceiling holds here too: /mcp is as public as the REST API."""
+    from . import limits
+
+    if limits.llm_paused():
+        raise ToolError(limits.PAUSED + " Today's LLM budget on this server is spent.")
+
+
 def _llm_message(e: LLMError) -> str:
     """An LLM failure as a tool error. The SDK masks any other exception as
     "Error executing tool", which would hide the one line that says what to
@@ -976,6 +984,7 @@ def plan_recipe(slug: str,
     `basis=true` adds `summary.basis`, what the plan was made from, for a
     client that re-prices or ranks alternatives later; an agent never needs
     it."""
+    _check_llm_budget()
     from . import flow
     from .nlsearch import PlanAborted
 
@@ -1037,6 +1046,7 @@ def plan_from_text(recipe_text: Annotated[str, Field(max_length=MAX_TEXT)],
     recommended store split. `verbose=True` attaches `full` with the
     retrieval `plan_trace` and every trip option. `basis=true` adds
     `summary.basis` (see plan_recipe); an agent never needs it."""
+    _check_llm_budget()
     _check_countries(exclude_origin, preference)
     from . import flow
     from .nlsearch import PlanAborted, UnparseableRecipe
@@ -1108,6 +1118,7 @@ def plan_from_lines(doc_key: Annotated[str, Field(min_length=1, max_length=100)]
     must be confirmed; an unconfirmed one is an error naming it. The result
     is shaped like plan_from_text's: read `summary.notes` and the left-out
     lists the same way."""
+    _check_llm_budget()
     from . import flow
     from .models import RecipeDoc
     from .nlsearch import PlanAborted, UnparseableRecipe
@@ -1160,6 +1171,7 @@ def plan_week(days: Annotated[int, Field(ge=1, le=14)] = 5,
     ["dairy", "gluten"]). `verbose=True` attaches `full` with the retrieval
     trace and every trip option. SLOW (runs the LLM selector per day) and
     costs real Claude API credits — roughly one plan_recipe per day."""
+    _check_llm_budget()
     _check_countries(exclude_origin, preference)
     from . import weekplan
     from .nlsearch import PlanAborted

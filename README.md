@@ -86,6 +86,8 @@ Everything's env-var driven. Defaults in `pantry_planner/config.py`.
 | `DEFAULT_LAT` / `DEFAULT_LON`| `49.28` / `-123.12`              | Shopping location when the request sends none |
 | `ORIGIN_MIN_COVERAGE`        | `0.6`                            | Spend-weighted origin coverage below which a basket is labelled UNVERIFIED |
 | `DB_HOST` (+ `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`) | *(unset)* | Composed into a Postgres URL when `DB_URL` is unset — the Kubernetes path, parts injected from the CNPG credential secret |
+| `TRUSTED_PROXY_HOPS`         | `0`                              | Proxies in front of the API that append to `X-Forwarded-For`; 0 = the header is ignored and the rate limit keys on the TCP peer |
+| `LLM_DAILY_COST_CAP_USD`     | *(unset: no ceiling)*            | Estimated LLM spend per replica per UTC day above which LLM-calling endpoints answer 503 |
 
 The four model settings are **specs**: `gemini:<model>` (e.g.
 `gemini:gemini-flash-latest`) routes that call to Google Gemini through its
@@ -102,6 +104,28 @@ which keys are configured. With `RUNTIME_SETTINGS_ENABLED=1`,
 "classifier": …, "nl2sql": …}}` applies to the next request — no restart;
 `/health` and the MCP `pipeline_status` tool reflect it. Leave it off on a
 public deployment: it lets any caller turn real LLM spend on.
+
+### Deployments and costs
+
+| Deployment | LLM | Why |
+| --- | --- | --- |
+| AKS (`pantry-gitops` `apps/pantry-api`) | **live** | `ANTHROPIC_API_KEY` is mounted and `DEMO_MODE` is not set |
+| Hugging Face Space / Render demo | none | `demo/Dockerfile` sets `DEMO_MODE=1`: deterministic stand-ins, $0 |
+| Local stack | as configured | whatever `.env` says |
+
+Every public endpoint is bounded (`pantry_planner/limits.py`), per replica and in process:
+
+- **A token bucket per client IP and endpoint**: `/plan/nl` and `/plan/spec` 10 a minute,
+  `/recipes/parse-lines` 60 a minute (more endpoints join as they land). Over the limit is a
+  429 with `Retry-After`. The client is the TCP peer unless `TRUSTED_PROXY_HOPS` says how many
+  proxies append to `X-Forwarded-For`; a client-written header is never trusted.
+- **A daily LLM cost ceiling**: every LLM call adds its estimated cost (`forced_tool_call`),
+  reset at UTC midnight. Above `LLM_DAILY_COST_CAP_USD`, `/plan/nl`, `/plan/spec`,
+  `/plan/{slug}`, `/plan/week` and the MCP plan tools answer 503 / a tool error, "Live planning
+  is paused for today; the demo planner still works". Endpoints that call no LLM, and demo
+  mode, keep working. `/health` reports `llm_budget {spent, cap}`.
+
+The MCP endpoint's bearer tokens are unchanged; the buckets apply to REST only.
 
 ## Try both routers side-by-side
 

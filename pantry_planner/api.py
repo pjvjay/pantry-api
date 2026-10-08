@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from . import db, flow
+from . import db, flow, limits
 from .config import (
     RUNTIME_MODEL_FIELDS,
     set_runtime_overrides,
@@ -116,6 +116,8 @@ def health() -> dict:
         "confidence_threshold": cfg.confidence_threshold,
         "demo_mode": cfg.demo_mode,
         "gemini_key_configured": bool(cfg.gemini_api_key),
+        # Today's estimated LLM spend on this replica and the ceiling (None: no ceiling).
+        "llm_budget": limits.budget(),
     }
 
 
@@ -287,7 +289,8 @@ class ParsedLines(BaseModel):
     warnings: list[str]
 
 
-@app.post("/recipes/parse-lines", response_model=ParsedLines)
+@app.post("/recipes/parse-lines", response_model=ParsedLines,
+          dependencies=[Depends(limits.rate_limit("/recipes/parse-lines"))])
 def parse_lines(req: ParseLinesRequest) -> ParsedLines:
     """Read ingredient lines into the RecipeLine fields a shopper reviews before planning
     (nlsearch.lineparse, the demo parser's line reading). Pure: no URL, no LLM, no database.
@@ -341,7 +344,9 @@ class NLPlanRequest(BaseModel):
     allow_partial: bool = False
 
 
-@app.post("/plan/nl", response_model=ShoppingPlan)
+@app.post("/plan/nl", response_model=ShoppingPlan,
+          dependencies=[Depends(limits.require_llm_budget),
+                        Depends(limits.rate_limit("/plan/nl"))])
 def plan_nl(req: NLPlanRequest) -> ShoppingPlan:
     """NL2SQL path: parse a pasted recipe, execute the staged query plan
     (existence → options → brand stats → lookups), route, select. Returns
@@ -387,7 +392,9 @@ class SpecPlanRequest(BaseModel):
     allow_partial: bool = False
 
 
-@app.post("/plan/spec", response_model=ShoppingPlan)
+@app.post("/plan/spec", response_model=ShoppingPlan,
+          dependencies=[Depends(limits.require_llm_budget),
+                        Depends(limits.rate_limit("/plan/spec"))])
 def plan_spec(req: SpecPlanRequest) -> ShoppingPlan:
     """Plan reviewed lines with no parse: what the shopper reviewed is what gets planned
     (names, quantities and units byte for byte on `basis.lines`). The selector still picks
@@ -438,7 +445,8 @@ class WeekPlanRequest(BaseModel):
     preference: list[str] = Field(default_factory=list, max_length=50)
 
 
-@app.post("/plan/week", response_model=WeekPlan)
+@app.post("/plan/week", response_model=WeekPlan,
+          dependencies=[Depends(limits.require_llm_budget)])
 def plan_week(req: WeekPlanRequest) -> WeekPlan:
     """5A: weekly menu optimizer. Rewards ingredient overlap exactly (a
     shared product costs $0 marginal), gates on the cheapest-basket floor
@@ -457,7 +465,8 @@ def plan_week(req: WeekPlanRequest) -> WeekPlan:
         raise HTTPException(status_code=409, detail=e.execution.model_dump(mode="json"))
 
 
-@app.post("/plan/{slug}", response_model=ShoppingPlan)
+@app.post("/plan/{slug}", response_model=ShoppingPlan,
+          dependencies=[Depends(limits.require_llm_budget)])
 def plan_recipe(slug: str,
                 exclude_origin: Annotated[list[str] | None, Query()] = None,
                 preference: Annotated[list[str] | None, Query()] = None,

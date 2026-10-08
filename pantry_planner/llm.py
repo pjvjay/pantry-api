@@ -29,7 +29,7 @@ import httpx
 from anthropic import Anthropic
 
 from . import httptrace
-from .config import ANTHROPIC, GEMINI, settings, split_model_spec
+from .config import ANTHROPIC, GEMINI, estimate_cost_usd, settings, split_model_spec
 
 DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 
@@ -115,11 +115,18 @@ def forced_tool_call(*, model: str, system: str, messages: list[dict],
     if not name:
         raise LLMConfigError(f"model spec {model!r} names no model", provider=provider)
     if provider == GEMINI:
-        return _gemini_call(name, system=system, messages=messages, tool=tool,
-                            max_tokens=max_tokens)
-    return _anthropic_call(name, system=system, messages=messages, tool=tool,
-                           max_tokens=max_tokens, temperature=temperature,
-                           thinking_budget=thinking_budget)
+        result = _gemini_call(name, system=system, messages=messages, tool=tool,
+                              max_tokens=max_tokens)
+    else:
+        result = _anthropic_call(name, system=system, messages=messages, tool=tool,
+                                 max_tokens=max_tokens, temperature=temperature,
+                                 thinking_budget=thinking_budget)
+    # Every call counts toward the daily ceiling (limits.py), whichever endpoint made it.
+    from . import limits
+
+    limits.record_spend(estimate_cost_usd(result.model, result.input_tokens,
+                                          result.output_tokens))
+    return result
 
 
 # ─── Anthropic ────────────────────────────────────────────────

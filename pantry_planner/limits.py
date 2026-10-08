@@ -1,0 +1,166 @@
+"""Public endpoint limits: a token bucket per client and a daily LLM cost ceiling.
+
+The REST API is public on every deployment, and on AKS it runs a live LLM
+(ANTHROPIC_API_KEY mounted, no DEMO_MODE), so one client in a loop could
+spend the month's budget in an afternoon. Two limits, both in-process and
+per replica, which is enough for one or two replicas and needs no store:
+
+- A token bucket per client IP and endpoint. Over the limit is a 429 with
+  Retry-After. The client IP is the TCP peer, or, only when
+  TRUSTED_PROXY_HOPS says how many proxies in front of us append to
+  X-Forwarded-For, the entry that many hops from the right: anything further
+  left was written by the client and proves nothing.
+- A daily ceiling on estimated LLM spend (LLM_DAILY_COST_CAP_USD; unset means
+  no ceiling). Every LLM call adds its estimate (llm.forced_tool_call calls
+  record_spend), and the day resets at UTC midnight. Above the ceiling the
+  endpoints that call an LLM answer 503, and so do the MCP plan tools; the
+  endpoints that call none (parse-lines, and the meal-plan schedule when it
+  lands) keep working, and so does demo mode, which makes no LLM call.
+
+Endpoints join the bucket table as they land (PLAN.md 3.12 lists the ones to
+come). The MCP endpoint's own bearer tokens are unchanged, and buckets apply
+to REST only.
+"""
+from __future__ import annotations
+
+import math
+import threading
+import time
+from dataclasses import dataclass
+from datetime import UTC, datetime
+
+from fastapi import HTTPException, Request
+
+from .config import settings
+
+PAUSED = "Live planning is paused for today; the demo planner still works."
+
+
+@dataclass(frozen=True)
+class Limit:
+    per_minute: float
+    burst: int
+
+
+# Endpoint -> its bucket. Shared names share nothing: each endpoint has its own
+# bucket per client.
+LIMITS: dict[str, Limit] = {
+    "/plan/nl": Limit(per_minute=10, burst=10),
+    "/plan/spec": Limit(per_minute=10, burst=10),
+    "/recipes/parse-lines": Limit(per_minute=60, burst=60),
+}
+
+# Buckets idle this long are full again and can be forgotten.
+_IDLE_S = 600
+_MAX_BUCKETS = 10_000
+
+_lock = threading.Lock()
+_buckets: dict[tuple[str, str], tuple[float, float]] = {}   # (endpoint, ip) -> (tokens, at)
+_spend = {"day": "", "usd": 0.0}
+
+# The clocks, as module attributes so tests can move time.
+monotonic = time.monotonic
+
+
+def utc_day() -> str:
+    return datetime.now(UTC).date().isoformat()
+
+
+def reset() -> None:
+    """Forget every bucket and today's spend (tests)."""
+    with _lock:
+        _buckets.clear()
+        _spend.update(day="", usd=0.0)
+
+
+# ─── Client identity ─────────────────────────────────────────
+
+def client_ip(request: Request) -> str:
+    """The TCP peer, or with TRUSTED_PROXY_HOPS=n the n-th X-Forwarded-For entry from
+    the right (each trusted proxy appends the address it saw). A header shorter than n
+    hops has been through fewer proxies than configured, so its leftmost entry is the
+    one a trusted proxy wrote."""
+    peer = request.client.host if request.client else "unknown"
+    hops = settings().trusted_proxy_hops
+    if hops <= 0:
+        return peer
+    chain = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",")
+             if h.strip()]
+    if not chain:
+        return peer
+    return chain[-hops] if len(chain) >= hops else chain[0]
+
+
+# ─── Token bucket ────────────────────────────────────────────
+
+def take(endpoint: str, ip: str) -> float | None:
+    """Spend one token from (endpoint, ip). None when allowed; otherwise the seconds
+    until the next token."""
+    limit = LIMITS[endpoint]
+    rate = limit.per_minute / 60.0
+    now = monotonic()
+    with _lock:
+        if len(_buckets) > _MAX_BUCKETS:
+            for key in [k for k, (_t, at) in _buckets.items() if now - at > _IDLE_S]:
+                del _buckets[key]
+        tokens, at = _buckets.get((endpoint, ip), (float(limit.burst), now))
+        tokens = min(float(limit.burst), tokens + (now - at) * rate)
+        if tokens >= 1.0:
+            _buckets[(endpoint, ip)] = (tokens - 1.0, now)
+            return None
+        _buckets[(endpoint, ip)] = (tokens, now)
+        return (1.0 - tokens) / rate
+
+
+def rate_limit(endpoint: str):
+    """A FastAPI dependency: 429 with Retry-After when this client is over the limit."""
+    if endpoint not in LIMITS:
+        raise KeyError(f"no limit configured for {endpoint}")
+
+    def check(request: Request) -> None:
+        wait = take(endpoint, client_ip(request))
+        if wait is not None:
+            raise HTTPException(
+                status_code=429, headers={"Retry-After": str(max(1, math.ceil(wait)))},
+                detail={"error": "rate_limited",
+                        "detail": f"Too many requests to {endpoint}; retry in "
+                                  f"{max(1, math.ceil(wait))} s."})
+
+    return check
+
+
+# ─── Daily LLM cost ceiling ──────────────────────────────────
+
+def record_spend(usd: float) -> None:
+    """Add one LLM call's estimated cost to today's total."""
+    if usd <= 0:
+        return
+    day = utc_day()
+    with _lock:
+        if _spend["day"] != day:
+            _spend.update(day=day, usd=0.0)
+        _spend["usd"] += usd
+
+
+def budget() -> dict:
+    """{spent, cap} for today (UTC); cap None means no ceiling."""
+    day = utc_day()
+    with _lock:
+        spent = _spend["usd"] if _spend["day"] == day else 0.0
+    return {"spent": round(spent, 6), "cap": settings().llm_daily_cost_cap_usd}
+
+
+def llm_paused() -> bool:
+    """True when today's spend has reached the ceiling and planning would call an LLM.
+    Demo mode makes no LLM call, so it is never paused."""
+    cfg = settings()
+    if cfg.demo_mode or cfg.llm_daily_cost_cap_usd is None:
+        return False
+    return budget()["spent"] >= cfg.llm_daily_cost_cap_usd
+
+
+def require_llm_budget() -> None:
+    """A FastAPI dependency for endpoints that call an LLM: 503 above the daily ceiling."""
+    if llm_paused():
+        raise HTTPException(status_code=503, detail={"error": "llm_budget_exhausted",
+                                                     "detail": PAUSED})
