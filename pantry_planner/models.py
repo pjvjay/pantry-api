@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .nlsearch.plan import StepPhase, StepResult  # import-safe: plan.py is pydantic-only
 from .nlsearch.schemas import Constraints  # import-safe: schemas.py is pydantic-only
@@ -454,6 +454,84 @@ class ShoppingPlan(BaseModel):
     servings: int | None = None
     # What the plan was made from (see PlanBasis); set on every plan.
     basis: PlanBasis | None = None
+
+
+# ─── Recipe documents: one schema for every recipe the shopper reviews ──
+# A library recipe, a demo starter, a pasted or imported ingredient list and
+# a dish the assistant wrote all reach the planner as a RecipeDoc. Its lines
+# are what the shopper saw and confirmed; recipe_doc.to_spec plans them as
+# given, with no parse. Only ingredient lines and a link back are kept: a
+# recipe's method text is never stored or shown. Mirrored in the frontend's
+# types.ts.
+
+MAX_DOC_LINES = 60
+
+AmountBasis = Literal["stated_by_source", "demo_house_amounts", "parsed_from_your_paste",
+                      "transcribed_confirmed_by_you", "written_by_assistant"]
+
+
+class LineEvidence(BaseModel):
+    """Where a line's amount came from: a verbatim quote, a video timestamp."""
+    quote: str | None = Field(default=None, max_length=300)
+    at: str | None = Field(default=None, pattern=r"^\d{1,3}:\d{2}$")   # mm:ss
+
+
+class RecipeLine(BaseModel):
+    """One ingredient line. `text` is the line as the source wrote it; `name`,
+    `quantity` and `unit` are what gets planned. quantity None means the
+    source did not say; unit "" means no unit. `confirmed` is False only for
+    a line transcribed from a video until the shopper ticks it."""
+    line_no: int = Field(ge=1)
+    text: str = Field(max_length=300)
+    name: str = Field(min_length=1, max_length=200)
+    quantity: float | None = Field(default=None, ge=0)
+    unit: str = Field(default="", max_length=40)
+    note: str = Field(default="", max_length=300)
+    evidence: LineEvidence | None = None
+    confirmed: bool = True
+    amount_basis: AmountBasis
+
+
+class RecipeSource(BaseModel):
+    """Where the recipe came from, for the link back and the labels."""
+    kind: Literal["library", "starter", "pasted", "web", "youtube", "assistant"]
+    method: Literal["db", "seed", "paste", "jsonld", "microdata", "youtube_description",
+                    "youtube_linked_page", "gemini_video", "agent_written"]
+    url: str | None = Field(default=None, max_length=2000)
+    site: str | None = Field(default=None, max_length=200)
+    page_title: str | None = Field(default=None, max_length=300)
+    author: str | None = Field(default=None, max_length=200)
+    channel: str | None = Field(default=None, max_length=200)
+    retrieved_at: str | None = Field(default=None, max_length=40)
+    extractor: str | None = Field(default=None, max_length=100)
+    model: str | None = Field(default=None, max_length=100)
+    label: str | None = Field(default=None, max_length=100)
+
+
+class RecipeDoc(BaseModel):
+    """A recipe as the shopper reviews it. `key` names it: 'lib:<slug>',
+    'starter:<key>', 'my:<uuid>', 'imp:<n>' (chat import) or 'asst:<n>'.
+    servings None means not stated, never silently 1; servings_basis says
+    whose number it is ('source', or 'your_setting' once the shopper
+    answered). Lines are numbered 1..n in order (a client that removes a
+    line renumbers the rest), so a plan's line_no is the doc's line_no."""
+    v: Literal[1] = 1
+    key: str = Field(min_length=1, max_length=100)
+    title: str = Field(min_length=1, max_length=200)
+    servings: int | None = Field(default=None, ge=1, le=100)
+    servings_stated: bool = False
+    servings_basis: Literal["source", "your_setting"] | None = None
+    yield_text: str = Field(default="", max_length=200)
+    lines: list[RecipeLine] = Field(default_factory=list, max_length=MAX_DOC_LINES)
+    source: RecipeSource
+    warnings: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def _numbered_in_order(self) -> RecipeDoc:
+        got = [ln.line_no for ln in self.lines]
+        if got != list(range(1, len(got) + 1)):
+            raise ValueError(f"lines must be numbered 1..{len(got)} in order, got {got}")
+        return self
 
 
 # ─── Weekly menu optimizer (5A) ───────────────────────────────
