@@ -203,7 +203,7 @@ def recipes_from_jsonld(blocks: list[str]) -> list[dict]:
         ingredients = _ingredient_lines(node.get("recipeIngredient", node.get("ingredients")))
         out.append({"name": _first_text(node.get("name")) or _first_text(node.get("headline")),
                     "yield": _yield_text(node.get("recipeYield", node.get("yield"))),
-                    "ingredients": ingredients})
+                    "ingredients": ingredients, "method": "jsonld"})
     return out
 
 
@@ -356,18 +356,23 @@ def recipes_from_microdata(parser: _PageParser) -> list[dict]:
         lines = scope.props.get("recipeIngredient") or scope.props.get("ingredients") or []
         out.append({"name": (scope.props.get("name") or [""])[0],
                     "yield": (scope.props.get("recipeYield") or [""])[0],
-                    "ingredients": [ln for ln in lines if ln]})
+                    "ingredients": [ln for ln in lines if ln], "method": "microdata"})
     if not any(r["ingredients"] for r in out):
         # itemprop="recipeIngredient" with no typed Recipe scope around it
         loose = [ln for s in parser.scopes for ln in s.props.get("recipeIngredient", []) if ln]
         if loose:
-            out.append({"name": clean(parser.title), "yield": "", "ingredients": loose})
+            out.append({"name": clean(parser.title), "yield": "", "ingredients": loose,
+                        "method": "microdata"})
     return out
 
 
 def extract(page: str) -> dict | None:
     """The first recipe with ingredient lines: JSON-LD first, then
-    microdata. None when the page has neither."""
+    microdata. None when the page has neither.
+
+    Returns {"name", "yield", "ingredients", "method"}. `method` is "jsonld"
+    or "microdata", whichever markup held the recipe: an importer records it
+    as the recipe's source, and only this function knows which one it read."""
     parser = _PageParser()
     parser.feed(page)
     parser.close()

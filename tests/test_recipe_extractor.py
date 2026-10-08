@@ -119,7 +119,8 @@ def test_type_list_top_level_array_and_a_broken_block_are_handled(tmp_path):
     alone = ex.extract(_ld({"@type": "WebPage", "mainEntity": {
         "@type": "https://schema.org/Recipe", "name": "Second",
         "recipeIngredient": ["1 egg"]}}))
-    assert alone == {"name": "Second", "yield": "", "ingredients": ["1 egg"]}
+    assert alone == {"name": "Second", "yield": "", "ingredients": ["1 egg"],
+                     "method": "jsonld"}
 
 
 @pytest.mark.parametrize("key,value", [
@@ -158,7 +159,7 @@ def test_html_comment_wrapped_jsonld_and_raw_newlines_in_strings():
             '{"@type": "Recipe", "name": "Two\nLines", "recipeIngredient": "1 cup rice"}\n'
             '--></script>')
     assert ex.extract(page) == {"name": "Two Lines", "yield": "",
-                                "ingredients": ["1 cup rice"]}
+                                "ingredients": ["1 cup rice"], "method": "jsonld"}
 
 
 # ─── microdata fallback ──────────────────────────────────────
@@ -194,9 +195,10 @@ def test_jsonld_wins_over_microdata_and_microdata_fills_in_when_jsonld_is_empty(
              '<span itemprop="name">Micro</span>'
              '<span itemprop="recipeIngredient">2 eggs</span></div>')
     both = _ld({"@type": "Recipe", "name": "LD", "recipeIngredient": ["1 cup flour"]}) + micro
-    assert ex.extract(both)["name"] == "LD"
+    assert (ex.extract(both)["name"], ex.extract(both)["method"]) == ("LD", "jsonld")
     empty_ld = _ld({"@type": "Recipe", "name": "LD", "recipeIngredient": []}) + micro
-    assert ex.extract(empty_ld) == {"name": "Micro", "yield": "", "ingredients": ["2 eggs"]}
+    assert ex.extract(empty_ld) == {"name": "Micro", "yield": "", "ingredients": ["2 eggs"],
+                                    "method": "microdata"}
 
 
 def test_loose_microdata_without_a_recipe_scope_takes_the_page_title():
@@ -204,7 +206,7 @@ def test_loose_microdata_without_a_recipe_scope_takes_the_page_title():
             '<li itemprop="recipeIngredient">1 cup flour</li>'
             '<li itemprop="recipeIngredient">1 egg</li></body></html>')
     assert ex.extract(page) == {"name": "Pancakes", "yield": "",
-                                "ingredients": ["1 cup flour", "1 egg"]}
+                                "ingredients": ["1 cup flour", "1 egg"], "method": "microdata"}
 
 
 # ─── no recipe, bad input ────────────────────────────────────
