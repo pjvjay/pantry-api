@@ -21,6 +21,12 @@
 # The action lives in pantry-platform and is pinned by full commit
 # SHA, never a branch: a moved branch must not change what runs here.
 # Updating it is a one-line PR in each app repo. Read-only token.
+#
+# action-pin checks that pin on every PR and is not advisory: every
+# semver-labels reference here must name one commit on pantry-platform
+# main. A commit that is only on a PR branch is not the code that
+# merged, and build.yml's plan would run it, or fail to find it, once
+# that branch is rewritten or gone.
 # ============================================================
 
 name: labels
@@ -52,3 +58,42 @@ jobs:
           command: check-pr
           advisory: "true"
           predict-ref: origin/${{ github.base_ref }}
+
+  # Runs without the action, so it reports even when the pin cannot be
+  # resolved at all.
+  action-pin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: semver-labels is pinned to pantry-platform main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          pins=$({ grep -rhoE 'pjvjay/pantry-platform/\.github/actions/semver-labels@[^[:space:]]+' \
+                     .github/workflows || true; } | sed 's/.*@//' | sort -u)
+          if [ -z "$pins" ]; then
+            echo "no semver-labels reference; nothing to check"
+            exit 0
+          fi
+          if [ "$(printf '%s\n' "$pins" | grep -c .)" -ne 1 ]; then
+            echo "::error::semver-labels is pinned to more than one ref:" $pins
+            exit 1
+          fi
+          if ! [[ "$pins" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::semver-labels must be pinned by a full commit SHA, not '$pins'"
+            exit 1
+          fi
+          # main...<pin> is "behind" or "identical" exactly when main contains the pin.
+          status=$(gh api "repos/pjvjay/pantry-platform/compare/main...$pins" --jq .status 2>/dev/null) \
+            || status="not found"
+          case "$status" in
+            identical|behind)
+              echo "ok: semver-labels@${pins:0:12} is on pantry-platform main" ;;
+            *)
+              echo "::error::semver-labels@${pins:0:12} is not on pantry-platform main ($status)." \
+                   "Re-pin every reference to a commit on main before merging (RELEASING.md, Bootstrap)"
+              exit 1 ;;
+          esac
