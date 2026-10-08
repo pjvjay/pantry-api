@@ -25,6 +25,7 @@ from .config import (
     validate_model_spec,
 )
 from .llm import LLMError
+from .mealplan.models import RecipeRef, ResolvedRecipe
 from .models import (
     MAX_DOC_LINES,
     MAX_LINE_NAME,
@@ -666,6 +667,56 @@ def plan_recipe(slug: str,
 
 # ─── Meal plan ───────────────────────────────────────────────
 # The plan lives in the browser (a MealPlanDraft); these endpoints are stateless.
+
+class MealPlanResolveRequest(BaseModel):
+    """Recipes to resolve to products, each once: a library slug, a demo starter or a
+    RecipeDoc. The location and origin knobs are those of /plan/spec."""
+
+    recipes: list[RecipeRef] = Field(min_length=1, max_length=12)
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+    max_km: float | None = Field(default=None, ge=0.5, le=100)
+    exclude_origin: list[str] = Field(default_factory=list, max_length=50)
+    preference: list[str] = Field(default_factory=list, max_length=50)
+
+
+class MealPlanResolveResponse(BaseModel):
+    resolved: list[ResolvedRecipe]
+    llm_cost_usd: float          # this call's LLM spend; a cached recipe adds nothing
+    latency_ms: int
+
+
+@app.post("/mealplan/resolve", response_model=MealPlanResolveResponse,
+          dependencies=[Depends(limits.require_llm_budget),
+                        Depends(limits.rate_limit("/mealplan/resolve"))])
+def mealplan_resolve(req: MealPlanResolveRequest) -> MealPlanResolveResponse:
+    """Which products each recipe buys: library recipes through the classic pipeline, every
+    RecipeDoc through /plan/spec's path (reviewed lines planned as given). A recipe that
+    fails comes back with a status of its own (needs_servings, unconfirmed_lines, not_found,
+    unparseable, aborted, llm_error); the request does not fail. Slow when live, instant in
+    demo mode; results are cached per recipe and knobs."""
+    import time
+
+    from .mealplan.resolve import resolve_one
+
+    _check_countries(req.exclude_origin, req.preference)
+    t0 = time.perf_counter()
+    out = [resolve_one(ref, lat=req.lat, lon=req.lon, max_km=req.max_km,
+                       exclude=req.exclude_origin, preference=req.preference)
+           for ref in req.recipes]
+    return MealPlanResolveResponse(
+        resolved=out, llm_cost_usd=round(sum(r.llm_cost_usd for r in out if not r.cached), 6),
+        latency_ms=int((time.perf_counter() - t0) * 1000))
+
+
+@app.get("/mealplan/starters")
+def mealplan_starters() -> list[dict]:
+    """The demo starter recipes (labelled "demo recipe", demo house amounts), each with its
+    RecipeDoc, default slot and the aliases Quick add matches."""
+    from .mealplan.resolve import starters
+
+    return starters()
+
 
 @app.get("/shelf-life")
 def shelf_life(product_id: Annotated[list[int] | None, Query()] = None) -> dict:
