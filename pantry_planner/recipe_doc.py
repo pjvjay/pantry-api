@@ -11,7 +11,8 @@ planning input: a model reading it back could change an amount.
 """
 from __future__ import annotations
 
-from .models import RecipeDoc
+from .db import LineAmount
+from .models import Recipe, RecipeDoc, RecipeLine, RecipeSource
 from .nlsearch.schemas import IngredientSpec, RecipeSpec
 
 # The units that are a can: the demo parser reads "1 can tomatoes" as a
@@ -65,3 +66,29 @@ def to_recipe_text(doc: RecipeDoc) -> str:
     lines = [f"- {_amount(ln.quantity, ln.unit)}{ln.name}" + (f", {ln.note}" if ln.note else "")
              for ln in doc.lines]
     return "\n".join([head, *lines]) + "\n"
+
+
+# What a library doc says about its amounts when the database has none yet.
+AMOUNTS_MISSING = ("amounts unavailable: this database has no recipe_line_amounts table yet "
+                   "(pantry-db migration 0007)")
+NOT_RECORDED = "amount not recorded"
+
+
+def library_doc(recipe: Recipe, amounts: dict[int, LineAmount] | None) -> RecipeDoc:
+    """A library recipe as a RecipeDoc ('lib:<slug>'). Its amounts are demo house amounts:
+    synthetic, labelled on every line. `amounts` None means the table is not deployed: every
+    line is then unquantified and the doc carries a warning saying why."""
+    lines = []
+    for ing in recipe.ingredients:
+        a = (amounts or {}).get(ing.line_no)
+        quantity, unit = (a.quantity, a.unit) if a else (None, "")
+        note = a.note if a else ("" if amounts is None else NOT_RECORDED)
+        lines.append(RecipeLine(
+            line_no=ing.line_no, text=f"{_amount(quantity, unit)}{ing.name}", name=ing.name,
+            quantity=quantity, unit=unit, note=note, amount_basis="demo_house_amounts"))
+    return RecipeDoc(
+        key=f"lib:{recipe.slug}", title=recipe.name, servings=recipe.servings,
+        servings_stated=True, servings_basis="source", yield_text=f"Serves {recipe.servings}",
+        lines=lines,
+        source=RecipeSource(kind="library", method="db", label="demo house amounts"),
+        warnings=[AMOUNTS_MISSING] if amounts is None else [])

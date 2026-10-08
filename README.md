@@ -240,6 +240,16 @@ there first, copy it here (`cmp` the two files), and the derived rows (terms,
 store prices, brands, reviews) come out the same on both sides because
 `storeseed.py` and pantry-db's `gen-seed-sql.py` share one algorithm.
 
+Recipes: 7 library recipes, 37 lines (`seeds/recipes.json`, also a byte-identical copy of
+pantry-db's). Every line has a `quantity`, `unit` and `note`, and these are **demo house
+amounts**: synthetic gram and millilitre amounts written for this demo ("700 g Chicken
+Thighs" for a curry that serves 4), not taken from any cookbook or site. They are labelled
+that way wherever they are shown (`amount_basis: "demo_house_amounts"` on every line of
+`GET /recipes/{slug}/doc`). A line whose amount is not stated has a null `quantity` and a
+`note` saying why. They live in their own table, `recipe_line_amounts` (pantry-db migration
+0007), so the classic `/plan/{slug}` path is unchanged and an API running against a database
+without the table still works: the doc's lines are then unquantified, with a warning.
+
 Store model: 4 seeded stores with lat/lon (one at ~14 km to demo the distance
 gate), per-store prices (±15% deterministic variance), and per-product reviews
 powering the brand stats. Per-ingredient pools feed **three retrieval-aware
@@ -294,6 +304,8 @@ selector.
   `skipped`, never dropped silently.
 - `recipe_doc.to_recipe_text` renders a doc in the pasted format for traces and transcripts;
   it is never a planning input.
+- `GET /recipes/{slug}/doc` is a library recipe as a RecipeDoc, with its demo house amounts
+  (see the catalog notes above), ready to post to `/plan/spec`.
 
 Every plan carries `basis` (what it was made from: the planned lines, the product chosen for
 each, the constraints and location), `servings` (None when the recipe does not say) and, per

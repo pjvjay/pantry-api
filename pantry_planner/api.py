@@ -244,6 +244,21 @@ def get_recipe(slug: str) -> Recipe:
         raise HTTPException(status_code=404, detail=str(e))
 
 
+@app.get("/recipes/{slug}/doc", response_model=RecipeDoc)
+def get_recipe_doc(slug: str) -> RecipeDoc:
+    """A library recipe as a RecipeDoc with its demo house amounts (synthetic, labelled on
+    every line), ready for the meal plan or POST /plan/spec. Before pantry-db migration 0007
+    the lines have no amounts and `warnings` says so."""
+    from .recipe_doc import library_doc
+
+    try:
+        recipe = db.load_recipe(slug)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    amounts = db.load_line_amounts([slug])
+    return library_doc(recipe, None if amounts is None else amounts.get(slug, {}))
+
+
 @app.get("/products", response_model=list[Product])
 def list_products() -> list[Product]:
     return db.load_all_products()
