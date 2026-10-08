@@ -543,3 +543,79 @@ async def test_the_mcp_tools_refuse_with_the_reason():
     with pytest.raises(ToolError):
         await server.call_tool("reprice_plan", {
             "basis": basis, "pins": [{"line_no": 1, "product_id": 1}] * 41})
+
+
+# ─── The REST twins ──────────────────────────────────────────
+
+def _client():
+    from fastapi.testclient import TestClient
+
+    from pantry_planner.api import app
+
+    return TestClient(app)
+
+
+def test_rest_twins_rank_and_reprice_like_the_functions():
+    from pantry_planner import flow
+    from pantry_planner.alternatives import rank_alternatives
+
+    plan = flow.run_nl(MIXED)
+    basis = plan.basis.model_dump(mode="json")
+    c = _client()
+    resp = c.post("/plan/alternatives", json={"basis": basis, "line_no": 1, "limit": 4})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == rank_alternatives(plan.basis, 1, 4).model_dump(mode="json")
+    resp = c.post("/plan/reprice", json={"basis": basis})
+    assert resp.status_code == 200, resp.text
+    again = resp.json()
+    assert again["total_cost"] == plan.total_cost and again["basis"]["pins"] == []
+    assert again["routing_strategy"] == "reprice" and again["total_llm_cost_usd"] == 0.0
+    other = next(i for i in c.post("/plan/alternatives", json={
+        "basis": basis, "line_no": 1}).json()["items"] if not i["current"])
+    swapped = c.post("/plan/reprice", json={
+        "basis": basis, "pins": [{"line_no": 1, "product_id": other["product_id"]}]}).json()
+    trip = next(o for o in swapped["trip_options"] if o["recommended"])
+    assert trip["total_cost"] == other["trip"]["total"]
+
+
+def test_rest_twins_answer_bad_input_with_a_code_and_the_reason():
+    from pantry_planner import flow
+
+    plan = flow.run_nl(MIXED)
+    basis = plan.basis.model_dump(mode="json")
+    c = _client()
+    resp = c.post("/plan/alternatives", json={"basis": basis, "line_no": 9})
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["error"] == "line_not_planned"
+    assert "line 9 is not a planned line" in resp.json()["detail"]["detail"]
+    resp = c.post("/plan/reprice", json={"basis": basis,
+                                         "pins": [{"line_no": 1, "product_id": 999999}]})
+    assert resp.status_code == 422 and resp.json()["detail"]["error"] == "invalid_pin"
+    long = {**basis, "recipe_name": "x" * 201}
+    resp = c.post("/plan/reprice", json={"basis": long})
+    assert resp.status_code == 422 and resp.json()["detail"]["error"] == "invalid_basis"
+    assert c.post("/plan/reprice", json={
+        "basis": {**basis, "exclude_origin": ["Atlantis"]}}).status_code == 422
+    assert c.post("/plan/reprice", json={
+        "basis": basis, "pins": [{"line_no": 1, "product_id": 1}] * 41}).status_code == 422
+    # a product the catalog no longer has: plan again
+    gone = {**basis, "lines": [{**ln, "product_id": 999999} if ln["line_no"] == 1 else ln
+                               for ln in basis["lines"]]}
+    for path, body in (("/plan/reprice", {"basis": gone}),
+                       ("/plan/alternatives", {"basis": gone, "line_no": 1})):
+        resp = c.post(path, json=body)
+        assert resp.status_code == 409 and resp.json()["detail"]["error"] == "stale_basis"
+
+
+def test_rest_twins_have_their_own_sixty_a_minute_buckets(monkeypatch):
+    from pantry_planner import flow, limits
+
+    now = [1000.0]
+    monkeypatch.setattr(limits, "monotonic", lambda: now[0])
+    basis = flow.run_nl("P\n- 500g penne\n").basis.model_dump(mode="json")
+    c = _client()
+    for n in range(60):
+        assert c.post("/plan/reprice", json={"basis": basis}).status_code == 200, n
+    resp = c.post("/plan/reprice", json={"basis": basis})
+    assert resp.status_code == 429 and resp.headers["Retry-After"] == "1"
+    assert c.post("/plan/alternatives", json={"basis": basis, "line_no": 1}).status_code == 200

@@ -112,6 +112,15 @@ class PinError(ValueError):
     that is not a choice for the line; the message says which and why."""
 
 
+class LineNotPlannedError(PinError):
+    """The line number names no planned line (REST 422 line_not_planned)."""
+
+
+class StaleBasisError(BasisError):
+    """The catalog changed under the basis: a product it buys is gone or no longer sold in
+    range. Planning the recipe again is the remedy (REST 409 stale_basis)."""
+
+
 class ValidPin(NamedTuple):
     product_id: int
     tier: str
@@ -344,7 +353,7 @@ def validate_pins(basis: PlanBasis, pins: list[Pin] | None = None, *,
     catalog = catalog if catalog is not None else (_catalog() if merged else {})
     for line_no, pid in merged.items():
         if line_no not in planned:
-            raise PinError(_not_planned(line_no, planned))
+            raise LineNotPlannedError(_not_planned(line_no, planned))
         if pid not in catalog:
             raise PinError(f"unknown product id {pid} in pins")
     merged = {n: pid for n, pid in merged.items() if pid != planned[n].product_id}
@@ -611,7 +620,7 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
         raise BasisError(f"limit must be 1..{MAX_LIMIT}, got {limit}")
     planned = planned_lines(basis)
     if line_no not in planned:
-        raise PinError(_not_planned(line_no, planned))
+        raise LineNotPlannedError(_not_planned(line_no, planned))
     catalog = _catalog()
     with Session(db.engine()) as s:
         valid = validate_pins(basis, [], catalog=catalog, session=s)
@@ -620,8 +629,8 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
         group = sorted(n for n, pid in picks.items() if pid == current_id)
         unknown = sorted({pid for pid in picks.values() if pid not in catalog})
         if unknown:
-            raise BasisError(f"product id(s) {unknown} in the basis are no longer in the "
-                             "catalog; plan the recipe again")
+            raise StaleBasisError(f"product id(s) {unknown} in the basis are no longer in "
+                                  "the catalog; plan the recipe again")
         g = _gather(s, basis, group, catalog, picks, {current_id})
         # A shared purchase is swapped for every line it covers, so a candidate must fill
         # each of them; it carries the loosest of its matches.
@@ -642,8 +651,9 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
 
     offers = flow._cheapest_offers(rows_all, basis.path) if located else {}
     if located and current_id not in offers:
-        raise BasisError(f"{catalog[current_id].name}, the cart's pick for line {line_no}, has "
-                         "no offer in range any more; plan the recipe again")
+        raise StaleBasisError(f"{catalog[current_id].name}, the cart's pick for line "
+                              f"{line_no}, has no offer in range any more; plan the recipe "
+                              "again")
     unavailable = [pid for pid in selectable
                    if pid != current_id and not _available(basis, offers.get(pid))]
     for pid in unavailable:

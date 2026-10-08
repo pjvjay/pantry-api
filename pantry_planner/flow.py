@@ -28,6 +28,7 @@ from typing import Any
 from burr.core import Application, ApplicationBuilder, State, action, expr
 
 from . import db
+from .alternatives import StaleBasisError
 from .config import get_router, settings
 from .models import (
     BasisLine,
@@ -1081,8 +1082,9 @@ def run_spec(spec, *, lat: float | None = None, lon: float | None = None,
 # plan's lines, trip, total and coverage, and the alternatives ranking (which
 # calls price_picks too) quotes the trip total a swap really gives.
 
-class RepriceError(ValueError):
-    """The basis cannot be priced as it stands (a product left the catalog or its range)."""
+class RepriceError(StaleBasisError):
+    """The basis cannot be priced as it stands (a product left the catalog or its range):
+    an alternatives.StaleBasisError, so every caller maps it the same way."""
 
 
 def basis_needs(basis: PlanBasis) -> dict[int, tuple[float, str] | None]:

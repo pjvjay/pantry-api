@@ -72,6 +72,10 @@ LIMITS: dict[str, Limit] = {
     "/plan/nl": Limit(per_minute=10, burst=10),
     "/plan/spec": Limit(per_minute=10, burst=10),
     "/recipes/parse-lines": Limit(per_minute=60, burst=60),
+    # No LLM behind either, but each runs a handful of queries and up to 40 trip
+    # optimisations: generous for a shopper clicking through options, not unbounded.
+    "/plan/alternatives": Limit(per_minute=60, burst=60),
+    "/plan/reprice": Limit(per_minute=60, burst=60),
 }
 
 # Buckets idle this long are full again and can be forgotten.

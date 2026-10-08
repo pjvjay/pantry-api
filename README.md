@@ -117,7 +117,8 @@ public deployment: it lets any caller turn real LLM spend on.
 Every public endpoint is bounded (`pantry_planner/limits.py`), per replica and in process:
 
 - **A token bucket per client IP and endpoint**: `/plan/nl` and `/plan/spec` 10 a minute,
-  `/recipes/parse-lines` 60 a minute (more endpoints join as they land). Over the limit is a
+  `/recipes/parse-lines`, `/plan/alternatives` and `/plan/reprice` 60 a minute (more endpoints
+  join as they land). Over the limit is a
   429 `{"error": "rate_limited", "detail": "Too many requests to ...; retry in N s."}` with
   `Retry-After`. The client is the TCP peer unless `TRUSTED_PROXY_HOPS` says how many
   proxies append to `X-Forwarded-For`; a client-written header is never trusted.
@@ -189,6 +190,7 @@ pantry-planner/
 │   ├── limits.py          # per-client token bucket + daily LLM cost ceiling
 │   ├── packs.py           # pack_count: packs a purchase takes (shared rule)
 │   ├── recipe_doc.py      # RecipeDoc -> RecipeSpec (no parse) / display text
+│   ├── alternatives.py    # rank a plan line's alternatives; pin checks for reprice
 │   ├── demo.py            # CLI entrypoint
 │   ├── nlsearch/          # constrained NL2SQL: parse → query plan → gates
 │   │   ├── plan.py        # QueryPlan/StepResult/PlanAlert formalism
@@ -373,6 +375,39 @@ Every plan carries `basis` (what it was made from: the planned lines, the produc
 each, the constraints and location), `servings` (None when the recipe does not say) and, per
 purchase, `need_qty`/`need_uom` when every line it covers states an amount in one unit. The MCP
 plan tools attach `summary.basis` only with `basis=true`; without it the summary is unchanged.
+
+## Alternatives and re-pricing (`POST /plan/alternatives`, `POST /plan/reprice`)
+
+A finished plan's `basis` is enough to rank the other products for one of its lines and to
+price it again with the shopper's choices, with no LLM call, no parse and no write. The MCP
+tools `rank_alternatives` and `reprice_plan` do the same; the demo hub uses them for the chat
+cart and keeps them away from its model.
+
+- `POST /plan/alternatives` takes `{basis, line_no, limit? 1..25 = 12}` and returns an
+  `AlternativeRanking` (`alternatives.py`). Candidates are the line at the exact, equivalent
+  form, form and generic levels plus its head word (one options query), and same-aisle
+  substitutes when the pool is thin. Order (`ORDER`): same ingredient first, then
+  `units.semantic_key` (the demo selector's own key), pack fit for the recipe's amount, origin
+  preference only when the plan had one, the trip total after the swap, the cost of the
+  recipe's amount, rating only on exact cent ties, catalog id. Each row's `trip` is computed by
+  the same code as a re-price, so choosing it costs exactly that; `rank_reason` says why it is
+  below the row above. Products the origin exclusion drops are in `held_back` with their
+  evidence and never ranked; matches with no offer in range are counted in `unavailable`.
+  Unknowns stay unknown ("Origin not checked", no rating, pack fit `unknown`), and
+  `data_note` labels the demo offers and reviews while `OFFERS_SYNTHETIC` is true.
+- `POST /plan/reprice` takes `{basis, pins? ≤ 40}` (`pins`: `{line_no, product_id}`) and
+  returns a `ShoppingPlan` like `/plan/nl`'s. With no pins it is the plan's own lines, trip,
+  total and coverage. Each pin is checked first: a planned line, a candidate for it, not held
+  back by the origin exclusion, an offer within `max_km` and under the price cap. A pin equal to
+  the plan's pick is dropped, so it undoes a swap. `basis.pins` on the result are the merged
+  pins.
+- Errors on both: 422 `{error: line_not_planned | invalid_pin | invalid_basis, detail}`, 422
+  for an unknown country, 409 `stale_basis` when a product left the catalog or its range (plan
+  again).
+
+`tests/test_reprice.py` and `tests/test_alternatives.py` cover the round trip, the trip
+invariant to the cent, the order, the match levels, the honesty cases, exclusion parity, the
+query count and a 300 ms guard.
 
 ## Weekly menu optimizer (`POST /plan/week`)
 
