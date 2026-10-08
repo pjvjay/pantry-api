@@ -369,6 +369,10 @@ class BasisLine(BaseModel):
     level: MatchLevel = "exact"
     product_id: int | None = None
     confidence: float | None = None
+    # The selector called its pick a substitution. A re-price has no
+    # selector reasoning to read, and the summary's substitution note must
+    # not vanish when the shopper changes another line.
+    substitution: bool = False
 
 
 class Pin(BaseModel):
@@ -401,6 +405,9 @@ class PlanBasis(BaseModel):
     skipped: list[DroppedIngredient] = Field(default_factory=list)
     ingredient_count: int = 0
     pins: list[Pin] = Field(default_factory=list)
+    # How many the recipe serves when it says (the plan's own servings), so a
+    # re-priced plan reports what the plan did.
+    servings: int | None = None
 
 
 class ShoppingPlan(BaseModel):

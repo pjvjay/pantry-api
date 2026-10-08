@@ -434,7 +434,7 @@ def optimize_trips(state: State) -> tuple[dict, State]:
     with _Session(db.engine()) as s:
         rows = list(s.execute(_text(sql), params).mappings())
     duration_ms = int((_time.perf_counter() - t0) * 1000)
-    offers = _best_offers(rows, key=lambda r: (r["price"], r["dist_km2"]))
+    offers = _cheapest_offers(rows, "library")
     # A product no store in range sells (possible only on the classic path, whose selector
     # does not see distance) is left out of the trip, and its nearest offer anywhere named.
     missing = sorted({pid for pid, _ in basket} - offers.keys())
@@ -510,6 +510,16 @@ def _best_offers(rows, *, key) -> dict[int, dict]:
     return best
 
 
+def _cheapest_offers(rows, path: str) -> dict[int, dict]:
+    """Each product's cheapest offer among price-matrix `rows`, broken the way the plan's own
+    path broke ties, so a re-price lands on the store the plan did: the library path prices a
+    line at its cheapest store in range, nearest first on a tie (optimize_trips); the NL and
+    reviewed paths at the store build_options_sql pinned it to (rn_store: price, store id)."""
+    if path == "library":
+        return _best_offers(rows, key=lambda r: (r["price"], r["dist_km2"]))
+    return _best_offers(rows, key=lambda r: (r["price"], r["store_id"]))
+
+
 @action(
     reads=["recipe", "products", "initial_result", "final_result", "preselect_result",
            "escalation_decision", "trip_options", "parsed_input", "origins",
@@ -577,33 +587,8 @@ def build_plan(state: State) -> tuple[dict, State]:
                     details=[{"name": d.ingredient, "reason": d.reason, "suggestions": []}
                              for d in unreachable],
                     partial_would_plan=0)))
-    line_items: list[PlanLineItem] = []
-    for pu in purchases:
-        prod = pu.product
-        sels = [sel for sel, _ in pu.lines]
-        first, others = sels[0], sels[1:]
-        reasoning = first.reasoning + "".join(
-            f" | line {sel.line_no}: {sel.reasoning}" for sel in others)
-        line_items.append(PlanLineItem(
-            line_no=first.line_no,
-            ingredient_name=" + ".join(ing.name for _, ing in pu.lines),
-            product_id=prod.id,
-            product_name=prod.name,
-            product_description=prod.description,
-            price=round(pu.unit_price * pu.packs, 2),
-            confidence=min(sel.confidence for sel in sels),
-            reasoning=reasoning,
-            model_used=final.model_used,
-            store_name=prod.store_name,
-            store_price=prod.store_price,
-            origin=origins_mod.origin_receipt(origins_map.get(prod.id)),
-            # the loosest level among the lines, so a generic one is never hidden
-            match=max((match_levels.get(sel.line_no, "exact") for sel in sels),
-                      key=_MATCH_ORDER.__getitem__),
-            also_lines=[sel.line_no for sel in others],
-            packs=pu.packs,
-            **_need(needs, sels),
-        ))
+    line_items = _line_items(purchases, origins_map=origins_map, match_levels=match_levels,
+                             needs=needs, model_used=lambda _sel: final.model_used)
     total_cost = sum(li.price for li in line_items)
     # A line the selector left without a valid product is reported, never
     # silently dropped: every ingredient lands somewhere on the plan.
@@ -657,6 +642,43 @@ def build_plan(state: State) -> tuple[dict, State]:
         state.update(plan=plan)
 
 
+def _line_items(purchases: list[Purchase], *, origins_map: dict, match_levels: dict,
+                needs: dict[int, tuple[float, str] | None], model_used) -> list[PlanLineItem]:
+    """One PlanLineItem per purchase, priced at its product's (store) price times its packs.
+    `model_used(selection)` names who chose a line's product. Shared by build_plan and
+    reprice, so a re-priced plan's lines are built exactly as the plan's were."""
+    from . import origins as origins_mod
+
+    line_items: list[PlanLineItem] = []
+    for pu in purchases:
+        prod = pu.product
+        sels = [sel for sel, _ in pu.lines]
+        first, others = sels[0], sels[1:]
+        reasoning = first.reasoning + "".join(
+            f" | line {sel.line_no}: {sel.reasoning}" for sel in others)
+        line_items.append(PlanLineItem(
+            line_no=first.line_no,
+            ingredient_name=" + ".join(ing.name for _, ing in pu.lines),
+            product_id=prod.id,
+            product_name=prod.name,
+            product_description=prod.description,
+            price=round(pu.unit_price * pu.packs, 2),
+            confidence=min(sel.confidence for sel in sels),
+            reasoning=reasoning,
+            model_used=model_used(first),
+            store_name=prod.store_name,
+            store_price=prod.store_price,
+            origin=origins_mod.origin_receipt(origins_map.get(prod.id)),
+            # the loosest level among the lines, so a generic one is never hidden
+            match=max((match_levels.get(sel.line_no, "exact") for sel in sels),
+                      key=_MATCH_ORDER.__getitem__),
+            also_lines=[sel.line_no for sel in others],
+            packs=pu.packs,
+            **_need(needs, sels),
+        ))
+    return line_items
+
+
 def _need(needs: dict[int, tuple[float, str] | None], sels: list[Selection]) -> dict:
     """need_qty/need_uom for a purchase: the summed need of its lines when every one is known
     in the same canonical unit, else both None. A sum that is not a finite number (an inf
@@ -681,18 +703,18 @@ def _basis(state: State, plan: ShoppingPlan, purchases: list[Purchase]) -> PlanB
     specs = parsed.recipe.ingredients if parsed is not None else []
     levels = state.get("match_levels") or {}
     bought = {li.product_id for li in plan.line_items}
-    chosen = {sel.line_no: (pu.product.id, sel.confidence)
+    chosen = {sel.line_no: (pu.product.id, sel.confidence, _says_substitution(sel))
               for pu in purchases if pu.product.id in bought for sel, _ in pu.lines}
     lines = []
     for ing in state["recipe"].ingredients:
         spec = specs[ing.line_no - 1] if 0 < ing.line_no <= len(specs) else None
-        product_id, confidence = chosen.get(ing.line_no, (None, None))
+        product_id, confidence, substitution = chosen.get(ing.line_no, (None, None, False))
         lines.append(BasisLine(
             line_no=ing.line_no, name=spec.name if spec else ing.name,
             form=spec.form if spec else None, prep=spec.prep if spec else None,
             quantity=spec.quantity if spec else None, unit=spec.unit if spec else None,
             level=levels.get(ing.line_no, "exact"),
-            product_id=product_id, confidence=confidence))
+            product_id=product_id, confidence=confidence, substitution=substitution))
     loc = state.get("location") or {}
     return PlanBasis(
         path=state.get("plan_path") or ("library" if parsed is None else "nl"),
@@ -705,7 +727,14 @@ def _basis(state: State, plan: ShoppingPlan, purchases: list[Purchase]) -> PlanB
         origin_dropped=len(state.get("origin_dropped") or []),
         interpretation=list(plan.interpretation),
         not_stocked=list(plan.not_stocked), out_of_range=list(plan.out_of_range),
-        skipped=list(plan.skipped), ingredient_count=plan.ingredient_count)
+        skipped=list(plan.skipped), ingredient_count=plan.ingredient_count,
+        servings=plan.servings)
+
+
+def _says_substitution(sel: Selection) -> bool:
+    """Whether the selector called its pick a substitution, which the summary's notes name
+    (mcp_server._substitution_notes reads the same word)."""
+    return "substitut" in sel.reasoning.lower()
 
 
 # ─── Application builder ─────────────────────────────────────
