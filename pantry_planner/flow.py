@@ -41,6 +41,7 @@ from .models import (
     SelectorResult,
     ShoppingPlan,
 )
+from .packs import pack_count
 from .selector import call_selector, merge_selections
 from .tracing import StepTimer, llm_call_trace, llm_span, llm_step, make_tracker
 
@@ -71,12 +72,9 @@ class Purchase:
 def _packs(product: Product, needs: list[tuple[float, str] | None]) -> int:
     """Packs a shared purchase takes: the summed need over the pack size,
     rounded up — or 1 when any line's need is unknown or in another unit
-    (a teaspoon of peppercorns against a 50 g bag says nothing about bags)."""
-    if (len(needs) < 2 or not product.unit_qty
-            or any(n is None or n[1] != product.unit_uom for n in needs)):
-        return 1
-    total = sum(n[0] for n in needs if n is not None)
-    return max(1, math.ceil(total / product.unit_qty - 1e-9))
+    (a teaspoon of peppercorns against a 50 g bag says nothing about bags),
+    and 1 for a single line, as chat plans have always bought."""
+    return pack_count(product.unit_qty, product.unit_uom, needs, min_lines=2) or 1
 
 
 def group_purchases(selections: list[Selection], products_by_id: dict[int, Product],
