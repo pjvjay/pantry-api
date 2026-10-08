@@ -184,6 +184,10 @@ class Settings:
     # one nobody measured.
     origin_min_coverage: float
 
+    # Nutrition: a meal counted for fewer than this share of its ingredients, by count or by
+    # weight, is labelled below the floor ("totals are minimums"), never shown as clean.
+    nutrition_min_coverage: float
+
     # Split-trip optimizer: how a km of driving trades against basket
     # savings ("save $4 by adding a 6 km detour?"). CAD per km.
     travel_cost_per_km: float
@@ -253,6 +257,8 @@ class Settings:
             ),
             origin_min_coverage=float(
                 os.environ.get("ORIGIN_MIN_COVERAGE", "0.6")),
+            nutrition_min_coverage=float(
+                os.environ.get("NUTRITION_MIN_COVERAGE", "0.8")),
             default_lat=float(os.environ.get("DEFAULT_LAT", "49.28")),
             default_lon=float(os.environ.get("DEFAULT_LON", "-123.12")),
             travel_cost_per_km=float(os.environ.get("TRAVEL_COST_PER_KM", "0.50")),

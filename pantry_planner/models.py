@@ -4,9 +4,10 @@ API boundary; plain dataclasses inside would also work.
 """
 from __future__ import annotations
 
-from typing import Literal
+import datetime as dt
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AfterValidator, BaseModel, Field, model_validator
 
 from .nlsearch.plan import StepPhase, StepResult  # import-safe: plan.py is pydantic-only
 from .nlsearch.schemas import Constraints  # import-safe: schemas.py is pydantic-only
@@ -730,6 +731,210 @@ class RecipeDoc(BaseModel):
         return self
 
 
+# ─── Nutrition (P6) ───────────────────────────────────────────
+# Computed by code (nutrition.py) from a recipe's amounts and one reference food per
+# ingredient: published values for a generic food, never a product's label. A None amount
+# is unknown, never 0, and a total that misses a line is a lower bound ("at_least").
+
+NutrientKey = Literal["energy_kcal", "protein_g", "fat_g", "satfat_g", "carbohydrate_g",
+                      "fibre_g", "sugars_g", "sodium_mg"]
+LineStatus = Literal["counted", "no_quantity", "no_conversion", "no_reference", "excluded"]
+
+
+class NutrientTotal(BaseModel):
+    """One nutrient's total. amount None: nothing counted for it (unknown). complete: every
+    line in scope was counted and its reference food published this nutrient; otherwise
+    amount is a lower bound (status "at_least") and `gaps` names the lines it misses."""
+    amount: float | None
+    unit: str
+    status: Literal["complete", "at_least", "unknown"]
+    complete: bool
+    lines_counted: int
+    lines_total: int
+    gaps: list[str] = Field(default_factory=list)
+
+
+class NutritionLine(BaseModel):
+    """One recipe line's receipt. grams is the line's weight in the whole recipe (None when
+    it has none); values are for the meal's basis (per serving x portions, or the whole
+    recipe), only for the nutrients the reference food published (`absent` lists the rest).
+    conversion quotes how grams were reached; reason says why a line was not counted."""
+    line_no: int
+    ingredient: str
+    quantity: float | None
+    unit: str
+    grams: float | None
+    status: LineStatus
+    reason: str = ""
+    key: str
+    match_kind: Literal["generic", "close", "none"] | None = None
+    match_note: str = ""
+    ref_id: str | None = None
+    ref_description: str | None = None
+    state_note: str | None = None
+    source: str | None = None
+    conversion: str | None = None
+    values: dict[str, float] = Field(default_factory=dict)
+    absent: list[str] = Field(default_factory=list)
+    amount_basis: str | None = None
+
+
+class NutritionCoverage(BaseModel):
+    """How much of the meal is counted, by line count and by mass. mass_fraction is over the
+    lines whose weight is known (None when no line has one). meets_floor needs both at or
+    above `floor` (NUTRITION_MIN_COVERAGE)."""
+    lines_total: int
+    lines_counted: int
+    count_fraction: float | None
+    grams_weighed: float
+    grams_known: float
+    mass_fraction: float | None
+    lines_mass_unknown: int
+    floor: float
+    meets_floor: bool
+    note: str
+
+
+class MissingLine(BaseModel):
+    line_no: int
+    ingredient: str
+    reason: Literal["no_quantity", "no_conversion", "no_reference"]
+    detail: str
+
+
+class MealNutrition(BaseModel):
+    """Nutrition of one recipe, per serving (basis per_serving, x portions) or for the whole
+    recipe when it does not say how many it serves (per_recipe). amounts_basis lists where the
+    counted lines' amounts came from; demo_amounts is True when any is demo house amounts, and
+    every surface showing a number then shows the "demo amounts" badge."""
+    basis: Literal["per_serving", "per_recipe"]
+    servings: int | None
+    portions: float
+    totals: dict[str, NutrientTotal]
+    status: Literal["complete", "incomplete", "below_floor"]
+    coverage: NutritionCoverage
+    missing: list[MissingLine]
+    lines: list[NutritionLine]
+    source_ids: list[str]
+    amounts_basis: list[str]
+    demo_amounts: bool
+    note: str
+
+
+class NutritionSource(BaseModel):
+    source: str
+    name: str
+    publisher: str = ""
+    edition: str = ""
+    licence: str = ""
+    licence_url: str = ""
+    attribution: str = ""
+    url: str = ""
+    retrieved_at: str = ""
+
+
+class RecipeNutrition(BaseModel):
+    """GET /recipes/{slug}/nutrition and each item of GET /nutrition/recipes. nutrition None:
+    the reference tables are not deployed, and `note` says so. sources is filled on the
+    single-recipe endpoint; the list carries them once at the top."""
+    slug: str
+    name: str
+    servings: int | None
+    nutrition: MealNutrition | None
+    note: str = ""
+    sources: list[NutritionSource] = Field(default_factory=list)
+
+
+Verdict = Literal["over", "within", "met", "short", "unknown"]
+
+
+class NutritionTarget(BaseModel):
+    """A daily target the shopper typed (source "you"), held in their browser and sent with
+    each request. A "health_canada_dv" label is accepted only for nutrients that have a
+    Health Canada Daily Value: never energy or protein, which have none."""
+    min: float | None = Field(default=None, ge=0)
+    max: float | None = Field(default=None, ge=0)
+    source: Literal["you", "health_canada_dv"] = "you"
+
+    @model_validator(mode="after")
+    def _a_bound(self) -> NutritionTarget:
+        if self.min is None and self.max is None:
+            raise ValueError("a target needs a min, a max or both")
+        if self.min is not None and self.max is not None and self.min > self.max:
+            raise ValueError("a target's min is above its max")
+        return self
+
+
+def _no_dv_for_energy_or_protein(targets: dict[str, NutritionTarget]
+                                 ) -> dict[str, NutritionTarget]:
+    for key, t in targets.items():
+        if t.source == "health_canada_dv" and key in ("energy_kcal", "protein_g"):
+            raise ValueError(f"{key}: Health Canada sets no Daily Value for it, so only a "
+                             "target you set yourself is accepted")
+    return targets
+
+
+NutritionTargets = Annotated[dict[NutrientKey, NutritionTarget],
+                             AfterValidator(_no_dv_for_energy_or_protein)]
+
+
+class TargetCheck(BaseModel):
+    """A verdict per bound, given only where the data proves it: 'over' and 'met' hold for a
+    lower bound; 'within' and 'short' need a complete total. Otherwise 'unknown'."""
+    amount: float | None
+    complete: bool
+    min: Verdict | None = None
+    max: Verdict | None = None
+
+
+class DayMeal(BaseModel):
+    """One meal of a day, per person (one portion)."""
+    meal_id: str
+    recipe_key: str
+    title: str
+    slot: str
+    basis: Literal["per_serving", "per_recipe"]
+    status: Literal["complete", "incomplete", "below_floor"]
+    totals: dict[str, NutrientTotal]
+    amounts_basis: list[str]
+    demo_amounts: bool
+
+
+class DayNutrition(BaseModel):
+    """What one person eats in a day: the sum of each planned meal's per-serving values.
+    complete only when every slot counted (meals_counted) has a meal and every meal is
+    complete; a meal whose servings are unknown adds nothing and keeps the day incomplete."""
+    date: dt.date | None = None
+    meals: list[DayMeal]
+    meals_counted: list[str]
+    all_meals_planned: bool
+    totals: dict[str, NutrientTotal]
+    complete: bool
+    amounts_basis: list[str]
+    demo_amounts: bool
+    note: str
+    targets: dict[str, TargetCheck] | None = None
+
+
+class PeriodTotal(BaseModel):
+    amount: float | None
+    complete: bool
+
+
+class PeriodNutrition(BaseModel):
+    """The plan's days together. The per-day average is over complete days only (None when
+    no day is complete); lower_bound_total sums every day's known amounts."""
+    days_total: int
+    days_complete: int
+    incomplete_days: list[dt.date]
+    per_day_average_over_complete_days: dict[str, float | None] | None
+    lower_bound_total: dict[str, PeriodTotal]
+    slots_counted: list[str]
+    amounts_basis: list[str]
+    demo_amounts: bool
+    note: str
+
+
 # ─── Weekly menu optimizer (5A) ───────────────────────────────
 
 class WeekItem(BaseModel):
@@ -748,6 +953,10 @@ class DayPlan(BaseModel):
     recipe_name: str
     line_items: list[PlanLineItem]
     day_cost: float                    # this dinner priced standalone
+    # Per serving of this dinner, from the recipe's amounts (never the packs bought); None
+    # when the nutrition tables are not deployed. day_totals counts dinner only.
+    nutrition: MealNutrition | None = None
+    day_totals: DayNutrition | None = None
 
 
 class WeekPlan(BaseModel):
@@ -763,3 +972,4 @@ class WeekPlan(BaseModel):
     origin_coverage: OriginCoverage | None = None
     origin_status: str = "not_requested"
     total_llm_cost_usd: float = 0.0
+    nutrition_sources: list[NutritionSource] = Field(default_factory=list)
