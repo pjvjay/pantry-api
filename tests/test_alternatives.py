@@ -136,12 +136,32 @@ def test_the_cart_pick_is_always_listed_and_flagged():
 
 # ─── Order ───────────────────────────────────────────────────
 
-def _key_prefix(ranking, line_name, catalog, use_pref, prefs):
-    from pantry_planner.nlsearch.units import semantic_key
+def _ingredient_word(line_name):
+    """The line's last word that is not a colour, form or descriptor word."""
+    from pantry_planner.nlsearch.planner import WEAK_SUGGESTION_WORDS
+    from pantry_planner.nlsearch.units import tokens
 
+    strong = [t for t in tokens(line_name) if t not in WEAK_SUGGESTION_WORDS]
+    return strong[-1] if strong else ""
+
+
+def _closeness(line_name, product):
+    """semantic_key's shared words and fresh test, then: does the product's name have the
+    line's ingredient word, and is the product mainly that word."""
+    from pantry_planner.nlsearch.units import head_noun, semantic_key, tokens
+
+    overlap, fresh, last = semantic_key(line_name, product)
+    word = _ingredient_word(line_name)
+    if not word:
+        return overlap, fresh, 0, last
+    return (overlap, fresh, int(word not in tokens(product.name)),
+            int(head_noun(product.name) != word))
+
+
+def _key_prefix(ranking, line_name, catalog, use_pref, prefs):
     out = []
     for it in ranking.items:
-        out.append((_TIER[it.tier], semantic_key(line_name, catalog[it.product_id]),
+        out.append((_TIER[it.tier], _closeness(line_name, catalog[it.product_id]),
                     _FIT[it.pack_fit], prefs.get(it.product_id, 0) if use_pref else 0,
                     round(it.trip.total * 100) if it.trip else float("inf")))
     return out
@@ -167,6 +187,42 @@ def test_rows_never_go_up_on_tier_words_pack_fit_preference_then_trip():
             keys = _key_prefix(ranking, ln.name, catalog, use_pref, prefs)
             assert [it.rank for it in ranking.items] == list(range(1, len(keys) + 1))
             assert keys == sorted(keys), (plan.recipe_slug, ln.name)
+
+
+def test_a_line_ending_in_its_ingredient_word_keeps_the_demo_selectors_order():
+    """The demo selector picks by units.semantic_key. Where the line's last word is its
+    ingredient word, the ranking only breaks semantic_key's ties, so within a tier it never
+    puts a product the selector thinks less close above a closer one."""
+    from pantry_planner import db
+    from pantry_planner.nlsearch.units import semantic_key, tokens
+
+    catalog = {p.id: p for p in db.load_all_products()}
+    checked = 0
+    for plan in _located_plans():
+        for ln in plan.basis.lines:
+            toks = tokens(ln.name)
+            if ln.product_id is None or not toks or _ingredient_word(ln.name) != toks[-1]:
+                continue
+            keys = [(_TIER[it.tier], semantic_key(ln.name, catalog[it.product_id]))
+                    for it in _rank(plan, ln.name).items]
+            assert keys == sorted(keys), (plan.recipe_slug, ln.name)
+            checked += 1
+    assert checked > 30
+
+
+def test_a_line_ending_in_a_form_word_ranks_by_its_ingredient_word():
+    """'cumin powder' is about cumin: another form of cumin ranks above powders that are not
+    cumin, and no row is explained by 'powder'."""
+    from pantry_planner import flow
+
+    items = _rank(flow.run_nl(MIXED), "cumin powder").items
+    rows = {it.product: it for it in items}
+    seeds = rows["Cumin Seeds 100g"]
+    assert seeds.rank < rows["Curry Powder 100g"].rank
+    assert seeds.rank < rows["Chinese Five-Spice Powder 50g"].rank
+    assert next(it for it in items if it.rank == seeds.rank + 1).rank_reason.endswith(
+        "its name does not mention cumin.")
+    assert not any("powder" in it.rank_reason for it in items)
 
 
 def test_a_closer_but_dearer_product_ranks_above_a_cheaper_less_close_one():

@@ -56,7 +56,7 @@ from .models import (
     Selection,
 )
 from .nlsearch.schemas import IngredientSpec
-from .nlsearch.units import normalize_quantity, semantic_key, tokens
+from .nlsearch.units import head_noun, normalize_quantity, semantic_key, tokens
 
 # Bounds. A basis arrives from a client (the hub, the browser's meal plan), so
 # it is checked like any other public input before a query is built from it.
@@ -75,21 +75,24 @@ SUBSTITUTE_LIMIT = 5
 THIN_POOL = 3           # as the planner's t4: fewer same-ingredient hits adds substitutes
 
 # The ranking keys, in order. Same ingredient first; then how closely the
-# words match (units.semantic_key, the demo selector's own key, so the ranking
-# cannot disagree with the plan about which product is closer); then whether
-# the cart's packs cover the recipe's amount; then the shopper's origin
-# preference, only when one was given (demo mode and the week planner put it
-# before price too); then what the swap does to the trip total; then the cost
-# of the recipe's amount; then rating, which only breaks exact ties because
-# the reviews are synthetic; then the catalog id, so the order is total.
+# words match (closeness: the demo selector's units.semantic_key with its head
+# test read from the line's ingredient word, so the ranking does not disagree
+# with the plan about which product is closer, and "cumin powder" is about
+# cumin, not powder); then whether the cart's packs cover the recipe's amount;
+# then the shopper's origin preference, only when one was given (demo mode and
+# the week planner put it before price too); then what the swap does to the
+# trip total; then the cost of the recipe's amount; then rating, which only
+# breaks exact ties because the reviews are synthetic; then the catalog id, so
+# the order is total.
 ORDER = ["tier", "semantic_key", "pack_fit", "preference", "trip_total", "cost_for_need",
          "rating", "id"]
 RANKING_TEXT = (
     "Products that are the same ingredient come first. Then: how many of the recipe's words "
-    "the product matches; whether the packs the cart would buy cover the recipe's amount; "
-    "your origin preference, only when you gave one; the trip total after the swap (prices, "
-    "an extra stop and travel); the cost of the recipe's amount; the rating, only to break "
-    "an exact tie (reviews are demo data); and last the catalog number.")
+    "the product matches, and whether it is named for and mainly the ingredient itself (for "
+    "cumin powder, cumin rather than powder); whether the packs the cart would buy cover the "
+    "recipe's amount; your origin preference, only when you gave one; the trip total after "
+    "the swap (prices, an extra stop and travel); the cost of the recipe's amount; the "
+    "rating, only to break an exact tie (reviews are demo data); and last the catalog number.")
 DATA_NOTE = "Store prices, stock at every store and reviews are demo data."
 
 # build_options_sql indexes per line: the line at each level, then its head noun.
@@ -199,17 +202,40 @@ def _point(basis: PlanBasis) -> tuple[float, float]:
             basis.lon if basis.lon is not None else cfg.default_lon)
 
 
-def _head_word(name: str) -> str:
-    """The word the "related" level matches alone: the last word of the name that says what
-    the ingredient is. Colour, form and descriptor words are skipped (the planner's
-    WEAK_SUGGESTION_WORDS), so "cumin powder" relates to cumin, not to baking powder. ""
-    when the name is that one word already (the exact level covers it) or has no such
-    word; an empty spec joins nothing."""
+def _strong_head(name: str) -> str:
+    """The ingredient word of a line's name: its last word that says what the ingredient is.
+    Colour, form and descriptor words are skipped (the planner's WEAK_SUGGESTION_WORDS), so
+    "cumin powder" is about cumin and "roma tomatoes" about tomato. "" when every word is
+    such a word."""
     from .nlsearch.planner import WEAK_SUGGESTION_WORDS
 
-    toks = tokens(name)
-    strong = [t for t in toks if t not in WEAK_SUGGESTION_WORDS]
-    return strong[-1] if strong and len(toks) > 1 else ""
+    strong = [t for t in tokens(name) if t not in WEAK_SUGGESTION_WORDS]
+    return strong[-1] if strong else ""
+
+
+def _head_word(name: str) -> str:
+    """The word the "related" level matches alone, the line's ingredient word, so "cumin
+    powder" relates to cumin, not to baking powder. "" when the name is that one word
+    already (the exact level covers it) or has no such word; an empty spec joins nothing."""
+    return _strong_head(name) if len(tokens(name)) > 1 else ""
+
+
+def closeness(line_name: str, product: Product) -> tuple[int, int, int, int]:
+    """How closely `product` answers a line, lower first: units.semantic_key's shared words
+    and fresh test; then whether the product's name has the line's ingredient word
+    (_strong_head); then whether the product is mainly that word (its head noun).
+
+    semantic_key reads the head from the line's last word, which for "cumin powder" is the
+    form word: Curry Powder would rank above Cumin Seeds, and the row would say "not mainly
+    powder". For a line that ends in its ingredient word, as most do, this is semantic_key's
+    order with some of its ties broken, so the ranking still agrees with the plan about which
+    product is closer. The demo selector keeps semantic_key, so no plan changes."""
+    overlap, fresh, last_word_miss = semantic_key(line_name, product)
+    word = _strong_head(line_name)
+    if not word:
+        return overlap, fresh, 0, last_word_miss
+    return (overlap, fresh, 0 if word in tokens(product.name) else 1,
+            0 if head_noun(product.name) == word else 1)
 
 
 def _spec(line: BasisLine, name: str | None = None) -> IngredientSpec:
@@ -575,7 +601,7 @@ class _Row:
     pref: int
     rating: AltRating | None
     organic: bool
-    semantic: tuple[int, int, int]
+    semantic: tuple[int, int, int, int]     # closeness()
     preferred: bool = False         # matches an entry of the shopper's preference
     trip: AltTrip | None = None
 
@@ -691,7 +717,7 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
             origin=_alt_origin(g.origins.get(pid), pid in g.demo),
             pref=pref, preferred=pref < worst,
             rating=rating, organic="organic" in tokens(f"{p.name} {p.description}"),
-            semantic=semantic_key(planned[line_no].name, p)))
+            semantic=closeness(planned[line_no].name, p)))
 
     if located and base_trip is not None:
         rows.sort(key=lambda r: r.pre_key(use_pref))
@@ -883,8 +909,12 @@ def _first_difference(r: _Row, above: _Row, line: BasisLine, located: bool, use_
                     f"{-above.semantic[0]})")
         if r.semantic[1] != above.semantic[1]:
             return "it is not sold as fresh, which the recipe asks for"
+        word = _strong_head(line.name)
+        if r.semantic[2] != above.semantic[2]:
+            return f"its name does not mention {word}"
         toks = tokens(line.name)
-        return f"it is not mainly {toks[-1]}" if toks else "it is less about the ingredient"
+        word = word or (toks[-1] if toks else "")
+        return f"it is not mainly {word}" if word else "it is less about the ingredient"
     if _FIT_RANK[r.pack_fit] > _FIT_RANK[above.pack_fit]:
         return ("its packs fall short of the recipe's amount" if r.pack_fit == "short"
                 else "its pack can't be compared with the recipe's amount")
