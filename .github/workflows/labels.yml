@@ -1,0 +1,54 @@
+# ============================================================
+# pantry-api — release label check
+#
+# Every PR carries one release label (release:major, release:minor,
+# release:patch or release:none); RELEASING.md in pantry-platform
+# says which, and what "major" means for this repo. This job checks
+# rules R1-R4 and prints the version merging the PR next would
+# release:
+#
+#   R1  exactly one release label
+#   R2  release:none if and only if no shipped path changed
+#       (.github/versioning.json shipped_paths)
+#   R3  into main: at least the highest label of the PRs it carries
+#       (the "Lands: #N" line, base-branch links, "(#N)" subjects)
+#   R4  every shipped path also triggers build.yml
+#
+# ADVISORY for now: a broken rule is a warning, not a failure, and
+# the job is not a required check. Making it required is the owner's
+# call (a ruleset change), after a few weeks of labelled PRs.
+#
+# The action lives in pantry-platform and is pinned by full commit
+# SHA, never a branch: a moved branch must not change what runs here.
+# Updating it is a one-line PR in each app repo. Read-only token.
+# ============================================================
+
+name: labels
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  release-label:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # the prediction reads tags and first-parent history
+
+      - name: Release label (advisory)
+        uses: pjvjay/pantry-platform/.github/actions/semver-labels@e1599b055b95be6a9da1b3583d2cc2cd6de369f8
+        with:
+          command: check-pr
+          advisory: "true"
+          predict-ref: origin/${{ github.base_ref }}
