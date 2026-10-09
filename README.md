@@ -121,8 +121,8 @@ Every public endpoint is bounded (`pantry_planner/limits.py`), per replica and i
 - **A token bucket per client IP and endpoint**: `/plan/nl` and `/plan/spec` 10 a minute,
   `/recipes/parse-lines`, `/plan/alternatives` and `/plan/reprice` 60 a minute,
   `/mealplan/resolve` 6 a minute (burst 3), `/mealplan/schedule` 120 a minute,
-  `/mealplan/selection/parse` and `/mealplan/suggest-cook-days` 60 a minute (more endpoints
-  join as they land). Over the limit is a
+  `/mealplan/selection/parse`, `/mealplan/suggest-cook-days` and `/mealplan/alternatives` 60
+  a minute (more endpoints join as they land). Over the limit is a
   429 `{"error": "rate_limited", "detail": "Too many requests to ...; retry in N s."}` with
   `Retry-After`. The client is the TCP peer unless `TRUSTED_PROXY_HOPS` says how many
   proxies append to `X-Forwarded-For`; a client-written header is never trusted.
@@ -208,6 +208,8 @@ pantry-planner/
 │   │   ├── shelf.py       # seeds/shelf_life.json: cited storage and thaw rows
 │   │   ├── trips.py       # windows, minimum interval stabbing, purchases and packs
 │   │   ├── approved.py    # fingerprints, needs_review diffs, price deltas
+│   │   ├── pins.py        # the shopper's pins, checked like a cart swap (meal_basis)
+│   │   ├── options.py     # POST /mealplan/alternatives: Options for a trip line
 │   │   ├── warnings.py    # ranked warnings and their remedies
 │   │   ├── lists.py       # the per-trip shopping list text
 │   │   └── schedule.py    # POST /mealplan/schedule: pure, byte-identical
@@ -452,7 +454,9 @@ shopper), `POST /mealplan/resolve` picks products once per recipe, and
 and proposes the fewest shopping trips that keep each perishable inside its cited storage
 time, for a "fresh" and a "fewest trips" (freeze on arrival) strategy, with a shopping list
 per trip grouped by store and aisle. `POST /mealplan/suggest-cook-days` proposes a
-freshness-aware layout with a cited reason per move. Storage and thaw times come only from
+freshness-aware layout with a cited reason per move. `POST /mealplan/alternatives` gives every
+trip line the chat cart's Options: the same ranking, each row's figures from the plan
+re-scheduled with that product pinned. Storage and thaw times come only from
 `seeds/shelf_life.json` (FoodSafety.gov's Cold Food Storage Chart and USDA FSIS's "The Big
 Thaw", quoted verbatim); a product with no cited row is planned with the shopper's own
 buy-ahead setting and labelled so. The 4 demo starters (`GET /mealplan/starters`) are

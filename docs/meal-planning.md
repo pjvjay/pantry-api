@@ -19,6 +19,7 @@ products 166-169 are synthetic demo data, and say so.
 | `POST /mealplan/resolve` | Which products each recipe buys, once per distinct recipe | the selector, when live | 6/min, burst 3; 503 above the daily LLM ceiling |
 | `POST /mealplan/schedule` | Meals, trips for both strategies, warnings, lists | no | 120/min |
 | `POST /mealplan/suggest-cook-days` | A freshness-aware layout, as a proposal | no | 60/min |
+| `POST /mealplan/alternatives` | Options for one trip line: ranked products and what each does to the plan | no | 60/min |
 | `GET /mealplan/starters` | The 4 demo starter recipes, labelled "demo recipe" | no | none |
 | `GET /shelf-life?product_id=` | Cited storage and thaw rows per product | no | none |
 
@@ -99,6 +100,47 @@ recipe that fails keeps its own status (`needs_servings`, `unconfirmed_lines`, `
 
 The schedule uses only the product id per line from this result (or the shopper's pin). The
 amounts are read again from the recipe itself on every schedule call.
+
+The draft's `settings` may carry the plan's origin rules, `exclude_origin` and `preference`
+(at most 50 known countries each), which the console passes to resolve with the shopping
+point.
+
+## Options for a trip line, and pins
+
+Every trip line has the chat cart's Options dialog. `POST /mealplan/alternatives` takes
+`{draft, trip_date, product_id, strategy?, limit? 1..25 = 12}` and answers
+`{rev, strategy, trip_date, product_id, product, stocked, pinned, lines[], plan_total,
+ranking}` (`mealplan/options.py`, no LLM):
+
+- `lines` are the recipe lines the purchase covers, which can span recipes (salt for the
+  pizza and the biryani), each `{recipe_key, title, line_no, ingredient, planner_product_id,
+  pinned_product_id}`. Choosing a product pins it on every one of them
+  (`pins[recipe_key][line_no]`); a pin equal to `planner_product_id` is no pin, which is how
+  "Back to the planner's pick" works.
+- `ranking` is an `AlternativeRanking` from `alternatives.rank_alternatives` over those
+  lines, each rebuilt as resolve planned it (`pins.meal_basis`): the candidates, the
+  held-back products, `unavailable`, the facts, reasons and `ORDER` are the chat cart's. Its
+  need is what these meals need on this trip. Each row's `trip` is the plan re-scheduled with
+  that product pinned, under the same strategy, by the schedule's own code: `trip.total` and
+  `trip.delta` are the strategy's total and its change ("$0.40 less on your plan's trips"),
+  `packs` and `cost_for_need` what the trip line then buys and charges, `trip.buys_at` the
+  store and pack price there. A row whose price the plan cannot work out (its pack is in
+  other units than the need) has no total and says so; it is never shown as cheaper.
+- `stocked: false` when no store in range sells the line's product any more: its options are
+  listed and it is not among the rows. The `no_longer_stocked` and `not_stocked` warnings'
+  `open_options` remedy opens exactly this.
+- 422 with the schedule's codes for a draft it refuses; 409 `no_trip_line` when the trip buys
+  no such product (the plan changed).
+
+Every schedule call checks every pin of a resolved recipe as a cart swap is checked
+(`alternatives.validate_pins`): the line is one the recipe bought a product for, the product
+is one of its candidates, the plan's origin exclusion does not hold it back, and a store in
+range sells it. Otherwise it is 422 `pin_invalid` with `recipe_key`, `line_no` and the reason
+("... is evidenced as United States (made or packed there), which this plan excludes"). A pin
+applies to every meal of its recipe, wherever the meals move. Pins are bounded: at most 40
+lines per recipe, line numbers of at most 4 digits, product ids from 1 to 2^31 - 1. An
+approved trip whose products change through a pin becomes `needs_review` by the fingerprint
+rule below.
 
 ### Unknown servings
 
