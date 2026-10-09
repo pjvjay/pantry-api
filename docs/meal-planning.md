@@ -72,6 +72,16 @@ Only exact and plural matches may be accepted without asking. Alias and fuzzy ma
 back with `needs_confirmation: true`, and the console shows "chicken briyani → Chicken
 Biryani (demo starter)?" with Use or Not this.
 
+The route is public and calls no LLM, so its work is bounded. At most 20 dishes are read
+from one text (a plan holds 12 recipes), and a warning says where the unread ones begin. A
+dish name of more than 12 words is not matched. Runs of spaces read as one. The fuzzy level
+is a minimum-cost assignment over the word-distance matrix (at most 7 × 7), not a search of
+every word order. Each word distance is computed once per request, and only up to the
+word's allowance. One request spends at most 50,000 rows of that distance
+(`MAX_FUZZY_ROWS`), about eight times what 20 typed dishes against 50 recipes of real words
+use. Past that, the dish it ran out on and every later one get no fuzzy match (never one
+picked from the recipes compared so far), and a warning says from which dish.
+
 ## Resolve: products, once per recipe
 
 A recipe is resolved when it enters the tray, never on a drag. Library recipes go through
