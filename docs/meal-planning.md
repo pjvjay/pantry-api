@@ -85,7 +85,9 @@ amounts are read again from the recipe itself on every schedule call.
 
 A recipe that does not say how many it serves resolves with status `needs_servings`. Until
 the shopper answers ("How many does this recipe serve?"), its lines have no packs, no need,
-no leftover and no price, the trip total is marked as a floor ("Total at least"), and a
+no leftover and no price, and the trip total is marked as a floor ("Total at least"). When
+no line on a trip has a price, its total is unknown (`total_cost: null`, "Total unknown (no
+line has a price yet)"), never $0.00, and so is the strategy's when no trip has one. A
 `must_fix` warning offers `set_servings`. The answer is stored as `recipes[key].servings`
 (or `ref.servings` when resolving) and labelled `servings_basis: "your_setting"`.
 
@@ -235,8 +237,8 @@ review.
 
 `list_text` is built by code: grouped by store in the order of the recommended stops, then by
 aisle (the product's catalog category), each line with packs, size, need and price, lines
-not stocked in range last, then the total ("Total at least" when a price is unknown) and the
-footer "Prices and stock are demo data." The console's Copy list and Print list use it, and
+not stocked in range last, then the total ("Total at least" when a price is unknown, "Total
+unknown (no line has a price yet)" when none is known) and the footer "Prices and stock are demo data." The console's Copy list and Print list use it, and
 the calendar export puts it in the trip's description.
 
 "Ordered together" means exactly this: one list per store per trip. No store ordering,

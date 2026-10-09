@@ -2,7 +2,8 @@
 
 Grouped by store in the order of the trip's recommended stops, then by aisle (the product's
 catalog category), each line with packs, size, need and price. Lines with no store in range
-come last. The footer says the prices and stock are demo data. The same text is what Copy
+come last. The total is "at least" when a line has no price, and "unknown" when no line has
+one. The footer says the prices and stock are demo data. The same text is what Copy
 list and Print list give, and what a calendar export puts in the trip's description.
 """
 from __future__ import annotations
@@ -40,7 +41,7 @@ def _line(ln: TripLine) -> str:
 
 
 def list_text(date: dt.date, strategy: str, stores: list[str], lines: list[TripLine],
-              total: float, floor: bool) -> str:
+              total: float | None, floor: bool) -> str:
     out = [f"Shopping trip {day_label(date)} {date.year} ({strategy.replace('_', ' ')})"]
     order = {s: i for i, s in enumerate(stores)}
     groups: dict[str, list[TripLine]] = {}
@@ -57,6 +58,7 @@ def list_text(date: dt.date, strategy: str, stores: list[str], lines: list[TripL
             out.extend(_line(ln) for ln in sorted(by_aisle[aisle],
                                                   key=lambda x: (x.product.name, x.storage)))
     out.append("")
-    out.append(f"Total {'at least ' if floor else ''}${total:.2f}")
+    out.append("Total unknown (no line has a price yet)" if total is None
+               else f"Total {'at least ' if floor else ''}${total:.2f}")
     out.append(FOOTER)
     return "\n".join(out) + "\n"

@@ -287,6 +287,15 @@ def test_needs_servings_leaves_no_number_in_the_recipes_trip_lines():
                                   "price_delta")] == [None] * 5
         assert trip["total_is_floor"] is True
         assert "does not say how many it serves" in trip["list_text"]
+    # no line on the trip has a price, so neither the trip nor the plan has a total: an
+    # unknown is never $0.00, in the JSON or in the list the shopper copies
+    for name in ("fresh", "fewest_trips"):
+        st = strategy(sched, name)
+        assert (st["total_cost"], st["total_is_floor"]) == (None, True)
+        for t in st["trips"]:
+            assert t["total_cost"] is None
+            assert t["list_text"].splitlines()[-2] == "Total unknown (no line has a price yet)"
+            assert "$0.00" not in t["list_text"]
     must = [w for w in sched["warnings"] if w["code"] == "needs_servings"]
     assert must and must[0]["level"] == "must_fix"
     assert must[0]["remedies"] == [{"op": "set_servings", "recipe_key": "my:s"}]
@@ -296,6 +305,28 @@ def test_needs_servings_leaves_no_number_in_the_recipes_trip_lines():
     ((_t, salmon),) = lines_of(answered, "fresh", 47)
     assert (salmon["packs"], salmon["need_qty"]) == (1, 400.0) and salmon["price"] is not None
     assert "needs_servings" not in [w["code"] for w in answered["warnings"]]
+    ((trip, rice),) = lines_of(answered, "fresh", 8)
+    assert trip["total_cost"] == round(salmon["price"] + rice["price"], 2)
+    assert trip["list_text"].splitlines()[-2] == f"Total ${trip['total_cost']:.2f}"
+    assert strategy(answered, "fresh")["total_cost"] == trip["total_cost"]
+
+
+def test_a_trip_with_a_priced_line_keeps_a_floor_and_an_empty_plan_costs_nothing():
+    """One priced line and one unknown: the total is the priced line's, marked "at least".
+    A plan with no meals has no trips, and its 0.00 is a fact, not an unknown."""
+    known = doc_recipe("my:k", "Rice Bowl", 2, [("Basmati Rice", 200, "g", 8)])
+    unknown = doc_recipe("my:u", "Salmon", None, [("Atlantic Salmon", 400, "g", 47)])
+    meals = [{"id": "a", "recipe_key": "my:k", "date": day(2).isoformat()},
+             {"id": "b", "recipe_key": "my:u", "date": day(2).isoformat(), "slot": "lunch"}]
+    sched = schedule(doc_draft({"my:k": known, "my:u": unknown}, meals=meals))
+    ((trip, rice),) = lines_of(sched, "fresh", 8)
+    ((_t, salmon),) = lines_of(sched, "fresh", 47)
+    assert rice["price"] is not None and salmon["price"] is None
+    assert (trip["total_cost"], trip["total_is_floor"]) == (rice["price"], True)
+    assert trip["list_text"].splitlines()[-2] == f"Total at least ${rice['price']:.2f}"
+    empty = schedule(doc_draft({"my:k": known}))
+    st = strategy(empty, "fresh")
+    assert (st["trips"], st["total_cost"], st["total_is_floor"]) == ([], 0.0, False)
 
 
 # ─── Facts on every line ─────────────────────────────────────

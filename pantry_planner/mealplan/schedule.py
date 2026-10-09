@@ -356,7 +356,10 @@ def _strategy(ctx: _Ctx, name: str) -> tuple[StrategyResult, list[PlanWarning]]:
     order = {"shop": 0, "freeze": 1, "thaw": 2, "cook": 3}
     actions.sort(key=lambda a: (a.date, order[a.kind], a.trip_id or "", a.meal_id or "",
                                 a.product_id or 0, a.text))
-    total = round(sum(t.total_cost for t in out_trips), 2) + 0.0
+    known = [t.total_cost for t in out_trips if t.total_cost is not None]
+    unpriced = any(t.lines for t in out_trips) and not any(
+        ln.price is not None for t in out_trips for ln in t.lines)
+    total = None if unpriced else round(sum(known), 2) + 0.0
     result = StrategyResult(
         name=name, recommended=False, trips=out_trips, actions=actions, total_cost=total,
         total_is_floor=any(t.total_is_floor for t in out_trips), warning_counts={})
@@ -401,7 +404,10 @@ def _price_trip(ctx: _Ctx, name: str, day: int, lines: list[TripLine], dismissed
     stores = list(best.stores) if best else sorted({ln.store for ln in lines if ln.store})
     for s in sorted({ln.store for ln in lines if ln.store} - set(stores)):
         stores.append(s)
-    total = round(sum(ln.price for ln in lines if ln.price is not None), 2) + 0.0
+    # A trip whose lines all lack a price has an unknown total, not $0.00. A trip with no
+    # lines at all costs nothing, so its 0.00 is a fact.
+    prices = [ln.price for ln in lines if ln.price is not None]
+    total = None if lines and not prices else round(sum(prices), 2) + 0.0
     floor = any(ln.price is None for ln in lines)
     fp = approved_mod.trip_fingerprint(date, lines)
     trip_id = f"{name}-{date.isoformat()}"

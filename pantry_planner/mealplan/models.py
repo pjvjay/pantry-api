@@ -307,6 +307,9 @@ class TripDiff(BaseModel):
 
 
 class Trip(BaseModel):
+    """One shopping trip. total_cost sums the lines that have a price; total_is_floor is True
+    when a line has none, and total_cost is None when the trip has lines and not one of them
+    is priced, since an unknown is never shown as $0.00."""
     id: str
     date: dt.date
     status: Literal["suggested", "approved", "needs_review"]
@@ -317,7 +320,7 @@ class Trip(BaseModel):
     recommended: TripOption | None
     frontier: list[TripOption]
     not_stocked: list[str]
-    total_cost: float
+    total_cost: float | None
     total_is_floor: bool
     price_delta: float | None = None
     fingerprint: str
@@ -353,11 +356,12 @@ class PlanWarning(BaseModel):
 
 
 class StrategyResult(BaseModel):
+    """total_cost sums the trips' known totals, None when no line on any trip is priced."""
     name: Strategy
     recommended: bool
     trips: list[Trip]
     actions: list[Action]
-    total_cost: float
+    total_cost: float | None
     total_is_floor: bool
     warning_counts: dict[str, int]
 
