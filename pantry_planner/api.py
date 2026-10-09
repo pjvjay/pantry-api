@@ -23,6 +23,7 @@ from .models import (
     ShoppingPlan,
     WeekPlan,
 )
+from .version import app_revision, app_version, build_info
 
 # The MCP Streamable-HTTP endpoint rides this app at /mcp (mounted at
 # the bottom of the file). MCP_HTTP_ENABLED=false turns it off — the
@@ -55,7 +56,7 @@ async def _lifespan(app: FastAPI):
 
 app = FastAPI(
     title="pantry-planner",
-    version="0.1.0",
+    version=app_version(),
     description=(
         "Match recipe ingredients to store products with an LLM-driven pipeline. "
         "Toggle routing strategy via ROUTING_STRATEGY env var."
@@ -83,10 +84,41 @@ def _check_countries(*lists: list[str] | None) -> None:
         })
 
 
+class _VersionHeader:
+    """Pure-ASGI: stamp X-Pantry-Version on every HTTP response, /mcp
+    included, so any reply says which release produced it. Pure ASGI
+    rather than @app.middleware: the /mcp responses stream, and wrapping
+    `send` is all this needs."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        stamp = (b"x-pantry-version", app_version().encode("ascii", "replace"))
+
+        async def send_with_version(message):
+            if message["type"] == "http.response.start":
+                message = {**message, "headers": [*message.get("headers", []), stamp]}
+            await send(message)
+
+        await self.app(scope, receive, send_with_version)
+
+
+app.add_middleware(_VersionHeader)
+
+
 @app.get("/health")
 def health() -> dict:
+    # version is "unknown" and revision and build values are null when the
+    # release cannot be read (pantry_planner/version.py); never a guess.
     return {
         "status": "ok",
+        "version": app_version(),
+        "revision": app_revision(),
+        "build": build_info(),
         "routing_strategy": settings().routing_strategy,
         "default_model": settings().selector_model_default,
         "escalation_model": settings().selector_model_escalation,
