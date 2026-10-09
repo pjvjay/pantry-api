@@ -11,7 +11,7 @@ meal servings / recipe servings.
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -30,6 +30,13 @@ MAX_RECIPES = 12
 MAX_DAYS = 14
 MAX_SERVINGS = 20
 MAX_DRAFT_BYTES = 256 * 1024
+# Packs on one trip line, as the draft sends them back (an override, or an approved trip's
+# snapshot). The engine never computes more: MAX_LINE_QUANTITY x 20 servings x 56 meals of
+# a 2-pack is about 6e8. The bound keeps packs x price a finite float; JSON's integers have
+# no limit, and one past 1e308 would fail the price sum with a 500.
+MAX_PACKS = 10_000_000_000
+# A line's price at approval: MAX_PACKS packs at $1,000 each. Finite, so the delta is too.
+MAX_LINE_PRICE = 1e13
 
 
 class MealPlanError(ValueError):
@@ -158,9 +165,10 @@ class SnapshotLine(BaseModel):
     """One line of a trip as the shopper approved it. Price is kept for the delta only: it
     is not part of the fingerprint."""
     product_id: int
-    packs: int | None = None
+    packs: int | None = Field(default=None, ge=0, le=MAX_PACKS)
     storage: Storage
-    price_at_approval: float | None = None
+    price_at_approval: float | None = Field(default=None, ge=0, le=MAX_LINE_PRICE,
+                                            allow_inf_nan=False)
 
 
 class ApprovedTrip(BaseModel):
@@ -199,7 +207,8 @@ class MealPlanDraft(BaseModel):
     trips: list[ApprovedTrip] = Field(default_factory=list, max_length=MAX_DAYS)
     dismissed_dates: list[dt.date] = Field(default_factory=list, max_length=MAX_DAYS)
     fixed_dates: list[dt.date] = Field(default_factory=list, max_length=MAX_DAYS)
-    packs_override: dict[str, int] = Field(default_factory=dict, max_length=200)
+    packs_override: dict[str, Annotated[int, Field(le=MAX_PACKS)]] = Field(
+        default_factory=dict, max_length=200)
     storage_overrides: dict[str, Literal["fridge", "freezer"]] = Field(
         default_factory=dict, max_length=200)
     settings: PlanSettings = Field(default_factory=PlanSettings)

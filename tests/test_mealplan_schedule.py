@@ -124,6 +124,63 @@ def test_a_draft_over_256_kb_is_refused(example):
     assert r.status_code == 413
 
 
+def _post_raw(path: str, body: str):
+    return client().post(path, content=body, headers={"content-type": "application/json"})
+
+
+def test_a_line_quantity_must_be_a_finite_number_up_to_a_million():
+    """JSON's Infinity, NaN and 1e309 read as non-finite floats in Python. One in a doc line
+    used to fail the needs with a 500; a huge finite one came back as computed packs and a
+    price. Both routes that compute a schedule now refuse the draft, naming the line."""
+    entry = doc_recipe("my:s", "Salmon Rice", 2, [("Atlantic Salmon", 400, "g", 47),
+                                                  ("Basmati Rice", 200, "g", 8)])
+    body = json.dumps(doc_draft({"my:s": entry},
+                                meals=[{"id": "m", "recipe_key": "my:s",
+                                        "date": day(2).isoformat()}]))
+    # the doc's line comes first; the resolved copy after it is not what gets planned
+    assert body.index('"quantity": 400') < body.index('"resolved"')
+    for bad in ("Infinity", "-Infinity", "NaN", "1e309", "1.7e308", "1000001"):
+        for path in ("/mealplan/schedule", "/mealplan/suggest-cook-days"):
+            r = _post_raw(path, body.replace('"quantity": 400', f'"quantity": {bad}', 1))
+            assert r.status_code == 422, (bad, path, r.text)
+            (err,) = r.json()["detail"]
+            assert err["loc"][-4:] == ["doc", "lines", 0, "quantity"]
+    # the bound itself is an amount a line holds
+    ok = _post_raw("/mealplan/schedule",
+                   body.replace('"quantity": 400', '"quantity": 1000000', 1))
+    assert ok.status_code == 200
+
+
+def test_pack_counts_and_approved_prices_in_the_draft_are_bounded(example):
+    """A pack override or an approved trip's snapshot comes back from the browser. An integer
+    past 1e308 used to fail the price sum with a 500, and an infinite or huge price at
+    approval came back as a delta."""
+    sched = schedule(example)
+    trip = strategy(sched, "fresh")["trips"][0]
+    first = trip["lines"][0]
+    key = f'{trip["date"]}:{first["product"]["id"]}'
+    for packs in (10**400, 10**11):
+        r = _post_raw("/mealplan/schedule",
+                      json.dumps({**example, "packs_override": {key: packs}}))
+        assert r.status_code == 422, packs
+        snap = _approve(sched, days=[index(trip["date"])])
+        snap[0]["snapshot"][0]["packs"] = packs
+        r = _post_raw("/mealplan/schedule", json.dumps({**example, "trips": snap}))
+        assert r.status_code == 422, packs
+    snap = _approve(sched, days=[index(trip["date"])])
+    snap[0]["snapshot"][0]["price_at_approval"] = 12345.0
+    body = json.dumps({**example, "trips": snap})
+    assert body.count("12345.0") == 1
+    for bad in ("Infinity", "NaN", "1e308", "-1"):
+        r = _post_raw("/mealplan/schedule", body.replace("12345.0", bad))
+        assert r.status_code == 422, bad
+    # an override the shopper can type is still planned as theirs
+    r = schedule({**example, "packs_override": {key: 5}})
+    ((_t, line),) = [(t, ln) for t, ln in lines_of(r, "fresh", first["product"]["id"])
+                     if t["date"] == trip["date"]]
+    assert (line["packs"], line["packs_basis"]) == (5, "your_setting")
+
+
 def test_a_product_the_catalog_no_longer_has_is_stale(example):
     stale = json.loads(json.dumps(example))
     stale["resolved"]["starter:mango_milkshake"]["lines"][0]["product_id"] = 99999
