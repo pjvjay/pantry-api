@@ -58,7 +58,13 @@ statuses:
 **One map, keyed by ingredient.** The key is `units.tokens()` of the line's name joined by
 spaces (`"Chicken Thighs"` gives `chicken thigh`). Lookup tries the full key, then the
 generic key (descriptor words dropped, only when one was), then the head noun, and stops at
-the first key with a row. `match_kind` is one of:
+the first key with a row. A shorter key is tried only when every word it leaves out names a
+cut, size or preparation (`nutrition.SAME_FOOD_WORDS`: chopped, sliced, minced, diced,
+grated, shredded, cubed, peeled, trimmed, organic, boneless, skinless), because a row is
+reviewed for one food. "Boneless skinless chicken thighs" uses the `chicken thigh` row, but
+"peanut butter", "coconut water", "garlic salt", "unsalted butter" and "lean ground beef"
+never borrow the `butter`, `water`, `salt` or `beef` row: until they have rows of their own
+they are not reviewed, named, and the meal's totals are minimums. `match_kind` is one of:
 - `generic`: the same food;
 - `close`: a near food, with a note saying how it differs;
 - `none`: reviewed, and nothing fits ("garam masala", "peanut butter and jelly jam").

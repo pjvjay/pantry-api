@@ -216,13 +216,56 @@ def test_water_counts_through_its_reviewed_reference(seeded_db):
 def test_key_lookup_order():
     from pantry_planner.nutrition import candidate_keys, lookup
 
-    beef = ref(foods=[RICE, OIL], mapping={"ground beef": "test:1", "beef": "test:2"})
+    beef = ref(foods=[RICE, OIL], mapping={"ground beef": "test:1", "beef": "test:2",
+                                           "chicken thigh": "test:1"})
     assert lookup("Ground Beef", beef)[0] == "ground beef"      # the full key wins
-    assert lookup("Lean Ground Beef", beef)[0] == "beef"        # head noun, no full row
-    assert candidate_keys("Light Soy Sauce") == ["light soy sauce", "soy sauce", "sauce"]
-    # no descriptor dropped: generic_tokens is [] and the generic step is skipped
-    assert candidate_keys("Basmati Rice") == ["basmati rice", "rice"]
+    # a shorter key stands in only when the words it drops leave the food the same
+    assert lookup("Boneless Skinless Chicken Thighs", beef)[0] == "chicken thigh"
+    assert candidate_keys("Boneless Skinless Chicken Thighs") == [
+        "boneless skinless chicken thigh", "chicken thigh"]
+    assert candidate_keys("Shredded Mozzarella") == ["shredded mozzarella", "mozzarella"]
+    # lean and ground change what 100 g holds: no fallback to a bare "beef"
+    assert lookup("Lean Ground Beef", beef) == ("lean ground beef", None)
+    assert candidate_keys("Light Soy Sauce") == ["light soy sauce"]
+    assert candidate_keys("Basmati Rice") == ["basmati rice"]
     assert lookup("Saffron", beef) == ("saffron", None)
+
+
+@pytest.mark.parametrize("name, full", [
+    ("Peanut Butter", "peanut butter"), ("Almond Butter", "almond butter"),
+    ("Salted Butter", "salted butter"), ("Unsalted Butter", "unsalted butter"),
+    ("Coconut Water", "coconut water"), ("Rose Water", "rose water"),
+    ("Garlic Salt", "garlic salt"), ("Sea Salt", "sea salt"),
+    ("Whole Wheat Spaghetti", "whole wheat spaghetti"),
+])
+def test_a_reviewed_row_is_never_lent_to_another_food(seeded_db, name, full):
+    """The seed reviews "butter", "water", "salt" and "spaghetti". Peanut butter is not
+    butter, coconut water is not municipal water, garlic salt is not table salt, and whole
+    wheat spaghetti is not enriched white spaghetti: each line is not reviewed, named, and
+    leaves the totals as minimums, never a complete figure from another food's row."""
+    from pantry_planner import db
+
+    reference = db.load_reference()
+    ln = meal(doc(line(1, name, 40, "g")), reference).lines[0]
+    assert (ln.key, ln.status, ln.ref_id, ln.match_kind) == (full, "no_reference", None, None)
+    assert ln.reason == f"no reference food has been chosen for '{full}'"
+
+
+def test_a_paste_of_two_unreviewed_foods_is_unknown_not_complete(seeded_db):
+    """The review's probe: 40 g peanut butter and 500 ml coconut water read as 'complete'
+    from the butter and water rows. Now nothing is counted, so every total is unknown."""
+    from pantry_planner import db
+
+    mn = meal(doc(line(1, "Peanut Butter", 40, "g"), line(2, "Coconut Water", 500, "ml")),
+              db.load_reference())
+    assert [ln.status for ln in mn.lines] == ["no_reference", "no_reference"]
+    assert mn.status == "below_floor"
+    assert all(t.amount is None and t.status == "unknown" for t in mn.totals.values())
+    # a cut or preparation word still finds the reviewed row
+    thighs = meal(doc(line(1, "Boneless Skinless Chicken Thighs", 300, "g")),
+                  db.load_reference()).lines[0]
+    assert (thighs.key, thighs.status, thighs.ref_id) == ("chicken thigh", "counted",
+                                                          "cnf-api:853")
 
 
 # ─── Coverage ────────────────────────────────────────────────

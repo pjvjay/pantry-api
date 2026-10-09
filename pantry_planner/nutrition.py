@@ -24,12 +24,17 @@ for each nutrient the reference food published. The rules that keep the numbers 
 The reference is looked up by ingredient key: units.tokens() of the line's name joined by
 spaces ("chicken thigh"), then the generic key (descriptors dropped, only when one was), then
 the head noun. The first key with a map row wins, so "ground beef" never falls back to a
-bare "beef" when it has its own row. A row with match_kind 'none' (reviewed, nothing fits)
-stops the lookup, and is reported differently from a key nobody reviewed.
+bare "beef" when it has its own row. A shorter key is tried only when every word it leaves
+out names a cut, size or preparation (SAME_FOOD_WORDS): a row is reviewed for one food, and
+"peanut butter", "coconut water" or "garlic salt" are other foods than its "butter",
+"water" or "salt". Such a line has no reference and is named, so its meal's totals are
+minimums. A row with match_kind 'none' (reviewed, nothing fits) stops the lookup, and is
+reported differently from a key nobody reviewed.
 """
 from __future__ import annotations
 
 import re
+from collections import Counter
 from collections.abc import Iterable
 
 from .config import settings
@@ -74,17 +79,39 @@ _SIZE_WORDS = {"pee", "wee", "small", "medium", "large", "extra", "jumbo"}
 
 # ─── Keys and reference lookup ───────────────────────────────
 
+# The words a shorter key may leave out of a name. Each names how the food is cut or
+# prepared, or that it was grown organically or had its bone or skin taken off, and none
+# changes what 100 g of the edible food holds. tokens() already drops "fresh", "large",
+# "small" and "medium". Words that do change it (dried, smoked, lean, salted, unsalted,
+# whole, light, frozen, toasted, low sodium, bone-in, and any word that names another food,
+# such as the "peanut" of "peanut butter") are left out on purpose, so a name with one of
+# them needs a map row of its own.
+SAME_FOOD_WORDS = frozenset({
+    "chopped", "sliced", "minced", "diced", "grated", "shredded", "cubed", "peeled",
+    "trimmed", "organic", "boneless", "skinless",
+})
+
+
 def nutrition_key(name: str) -> str:
     """The ingredient key: 'Chicken Thighs' -> 'chicken thigh'."""
     return " ".join(tokens(name))
 
 
+def _same_food(name: str, key: str) -> bool:
+    """True when every word of the name that `key` leaves out is in SAME_FOOD_WORDS."""
+    dropped = Counter(tokens(name)) - Counter(key.split())
+    return all(w in SAME_FOOD_WORDS for w in dropped)
+
+
 def candidate_keys(name: str) -> list[str]:
     """The keys tried for a name, in order: full, generic (only when a descriptor was
-    dropped), head noun. Duplicates and empty keys are left out."""
-    out: list[str] = []
-    for key in (nutrition_key(name), " ".join(generic_tokens(name)), head_noun(name) or ""):
-        if key and key not in out:
+    dropped), head noun. A shorter key is kept only when the words it drops leave the food
+    the same ('boneless skinless chicken thighs' -> 'chicken thigh', never 'peanut butter'
+    -> 'butter'). Duplicates and empty keys are left out."""
+    full = nutrition_key(name)
+    out: list[str] = [full] if full else []
+    for key in (" ".join(generic_tokens(name)), head_noun(name) or ""):
+        if key and key not in out and _same_food(name, key):
             out.append(key)
     return out
 
