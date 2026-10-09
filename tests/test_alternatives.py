@@ -98,10 +98,11 @@ def _located_plans():
 
 def test_every_rows_trip_total_is_what_reprice_charges_to_the_cent():
     from pantry_planner import flow
-    from pantry_planner.alternatives import rank_alternatives
+    from pantry_planner.alternatives import _catalog, _unit_price, rank_alternatives
     from pantry_planner.models import Pin
 
-    checked = 0
+    catalog = _catalog()
+    checked = elsewhere = 0
     for plan in _located_plans():
         for ln in plan.basis.lines:
             if ln.product_id is None:
@@ -109,17 +110,32 @@ def test_every_rows_trip_total_is_what_reprice_charges_to_the_cent():
             ranking = rank_alternatives(plan.basis, ln.line_no)
             assert ranking.lines and ln.line_no in ranking.lines
             for it in ranking.items:
-                assert it.trip is not None, (plan.recipe_slug, ln.name, it.product)
+                where = (plan.recipe_slug, ln.name, it.product)
+                assert it.trip is not None, where
                 again = flow.reprice(plan.basis, [Pin(line_no=n, product_id=it.product_id)
                                                   for n in ranking.lines])
                 trip = next(o for o in again.trip_options if o.recommended)
-                assert round(trip.total_cost * 100) == round(it.trip.total * 100), \
-                    (plan.recipe_slug, ln.name, it.product)
+                assert round(trip.total_cost * 100) == round(it.trip.total * 100), where
                 assert trip.stores == it.trip.stores
+                # The row's price is the one the cart charges after the swap: the store the
+                # trip buys it at and that store's price a pack, times the packs bought.
+                bought = next(i for i in trip.items if i.product_id == it.product_id)
+                purchase = next(li for li in again.line_items if li.product_id == it.product_id)
+                buys = it.trip.buys_at
+                assert buys is not None and buys.store == bought.store_name, where
+                assert it.packs == purchase.packs, where
+                assert round(buys.price * it.packs * 100) == round(bought.price * 100), where
+                if it.cost_for_need is not None:
+                    packs_for_need = it.cost_for_need / buys.price
+                    assert abs(packs_for_need - round(packs_for_need)) < 1e-6, where
+                assert it.unit_price == _unit_price(catalog[it.product_id], buys.price)[0]
+                elsewhere += buys.store != it.offer.store
                 if it.current:
                     assert it.trip.delta == 0.0 and it.trip.stops_delta == 0
                 checked += 1
     assert checked > 100
+    # the lowest price in range is often not where the best trip buys (the case to get right)
+    assert elsewhere > 0
 
 
 def test_the_cart_pick_is_always_listed_and_flagged():

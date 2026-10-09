@@ -394,6 +394,9 @@ cart and keeps them away from its model.
   recipe's amount, origin preference only when the plan had one, the trip total after the
   swap, the cost of the recipe's amount, rating only on exact cent ties, catalog id. Each
   row's `trip` is computed by the same code as a re-price, so choosing it costs exactly that;
+  `trip.buys_at` is the store that trip buys the product at and its price a pack there, which
+  the re-priced cart charges and `cost_for_need` and `unit_price` are worked out at (`offer` is
+  the lowest price in range, which the trip skips when the stop costs more than it saves);
   `rank_reason` says why it is below the row above. Products the origin exclusion drops are
   in `held_back` with their evidence and never ranked; products matching the line's words
   with no offer in range are counted in `unavailable`. Unknowns stay unknown ("Origin not

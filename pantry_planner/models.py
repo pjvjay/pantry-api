@@ -501,17 +501,29 @@ class AltMove(BaseModel):
     to_store: str
 
 
+class AltBuy(BaseModel):
+    """Where a trip buys a product, and its price a pack there."""
+    store: str
+    price: float
+    distance_km: float | None = None
+
+
 class AltTrip(BaseModel):
     """The cart's recommended trip re-optimised with this product on the line,
     exactly as reprice_plan would: `total` is that trip's total (basket plus
     travel), `delta` its difference from the cart's trip now (0.00 for the
-    cart's own pick). `merges_with_line` names another line this product
-    already fills (the two become one purchase); `moved_items` are the other
-    purchases the new trip buys at a different store."""
+    cart's own pick). `buys_at` is the store that trip buys this product at
+    and its price a pack there, which is what the cart charges after the
+    swap; it can differ from the row's `offer`, the lowest price in range,
+    when stopping there costs more than it saves. `merges_with_line` names
+    another line this product already fills (the two become one purchase);
+    `moved_items` are the other purchases the new trip buys at a different
+    store."""
     total: float
     delta: float
     stores: list[str]
     stops_delta: int
+    buys_at: AltBuy | None = None
     merges_with_line: int | None = None
     moved_items: list[AltMove] = Field(default_factory=list)
 
@@ -545,8 +557,10 @@ class RankedAlternative(BaseModel):
     cart's pick when it matches none of the line's words). `packs` is what
     the cart would buy; `pack_fit` whether that covers the recipe's need;
     `cost_for_need` the price of enough packs for the need (None when the
-    need or the pack size is unknown or in another unit). `trip` is None
-    when the plan has no location or the trip effect was not worked out.
+    need or the pack size is unknown or in another unit), at the price a
+    pack where the row's trip buys it (`trip.buys_at`), or at `offer` when
+    there is no trip; `unit_price` likewise. `trip` is None when the plan
+    has no location or the trip effect was not worked out.
     `rank_reason` says, in plain words, why the row sits below the one
     above it."""
     rank: int

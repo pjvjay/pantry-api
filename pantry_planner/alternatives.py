@@ -38,6 +38,7 @@ from sqlalchemy.orm import Session
 from . import db
 from .config import settings
 from .models import (
+    AltBuy,
     AltCounts,
     AlternativeRanking,
     AltMove,
@@ -727,12 +728,17 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
         for r in to_eval:
             r.trip, packs_after = _trip_effect(basis, picks, group, r.product.id, catalog,
                                                rows_all, base_trip, baseline[0])
-            if packs_after is not None and packs_after != r.packs:
-                # The product already fills another line: one purchase, packs for both
+            if packs_after is not None:
+                # The product may already fill another line: one purchase, packs for both
                 # needs. The cart counts what the re-price buys.
                 r.packs = packs_after
-                r.pack_fit, r.cost_for_need, r.pack_reason = _pack_facts(
-                    r.product, r.offer.price, packs_after, needs, lines)
+            # The cart pays the price where the trip buys the product, which is not always
+            # the lowest price in range (a stop there can cost more than it saves), so the
+            # cost for the need and the unit price are worked out at that price.
+            price = r.trip.buys_at.price if r.trip and r.trip.buys_at else r.offer.price
+            r.pack_fit, r.cost_for_need, r.pack_reason = _pack_facts(
+                r.product, price, r.packs, needs, lines)
+            r.unit_price, r.unit_basis = _unit_price(r.product, price)
 
     rows.sort(key=lambda r: r.key(located, use_pref))
     items = [_item(i + 1, r, rows[i - 1] if i else None, planned[line_no], located, use_pref,
@@ -797,6 +803,9 @@ def _trip_effect(basis: PlanBasis, picks: dict[int, int], group: list[int], pid:
         return None, packs
     total, stores, where = after
     base_total, base_stores, base_where = base_trip
+    # the matrix row the optimiser priced the product from at the store it chose
+    there = [r for r in rows if r["product_id"] == pid and r["store_name"] == where.get(pid)]
+    at = min(there, key=lambda r: (r["price"], r["store_id"])) if there else None
     others = sorted(n for n, q in picks.items() if q == pid and n not in group)
     names = {pu.product.id: pu.product.name for pu in base_purchases}
     moved = [AltMove(product_id=q, product=names.get(q, catalog[q].name),
@@ -805,6 +814,9 @@ def _trip_effect(basis: PlanBasis, picks: dict[int, int], group: list[int], pid:
              if q in where and q != picks[group[0]] and base_where[q] != where[q]]
     return AltTrip(total=total, delta=round(total - base_total, 2) + 0.0, stores=stores,
                    stops_delta=len(stores) - len(base_stores),
+                   buys_at=AltBuy(store=at["store_name"], price=at["price"],
+                                  distance_km=round(math.sqrt(max(at["dist_km2"], 0.0)), 1))
+                   if at is not None else None,
                    merges_with_line=others[0] if others else None,
                    moved_items=moved), packs
 
