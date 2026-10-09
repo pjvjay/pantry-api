@@ -120,9 +120,9 @@ Every public endpoint is bounded (`pantry_planner/limits.py`), per replica and i
 
 - **A token bucket per client IP and endpoint**: `/plan/nl` and `/plan/spec` 10 a minute,
   `/recipes/parse-lines`, `/plan/alternatives` and `/plan/reprice` 60 a minute,
-  `/mealplan/resolve` 6 a minute (burst 3), `/mealplan/schedule` 120 a minute,
-  `/mealplan/selection/parse`, `/mealplan/suggest-cook-days` and `/mealplan/alternatives` 60
-  a minute (more endpoints join as they land). Over the limit is a
+  `/mealplan/resolve` and `/mealplan/plan` 6 a minute (burst 3), `/mealplan/schedule` 120 a
+  minute, `/mealplan/selection/parse`, `/mealplan/suggest-cook-days` and
+  `/mealplan/alternatives` 60 a minute (more endpoints join as they land). Over the limit is a
   429 `{"error": "rate_limited", "detail": "Too many requests to ...; retry in N s."}` with
   `Retry-After`. The client is the TCP peer unless `TRUSTED_PROXY_HOPS` says how many
   proxies append to `X-Forwarded-For`; a client-written header is never trusted.
@@ -601,6 +601,7 @@ nothing needs a token.
 | `plan_from_text` | 2–4 Claude calls | only when configured | `PlanResult` for pasted recipe text (NL2SQL path). `lat`/`lon`/`max_km` define "nearby"; `allow_partial=true` plans what is stocked and in range and lists the rest in `summary.not_stocked` / `summary.out_of_range` |
 | `plan_from_lines` | 1–3 LLM calls (no parse) | only when configured | `PlanResult` for reviewed lines, planned exactly as given (no parse). The model names `doc_key`; the hub fills the reviewed `lines`, `title` and `servings`, and any other client may pass up to 60 `lines` itself |
 | `plan_week` | ~1 selector call per day | only when configured | `WeekResult {summary, full}` |
+| `plan_meals` | ~1 selector call per new recipe (none in demo mode) | only when configured | `MealPlanResult {summary, draft, full}`: counted `dishes` ("3 Pepperoni Pizza") drafted into a 1-14 day meal plan, each count a meal at household servings. Only exact and plural title matches are placed; an alias or fuzzy match is a `summary.proposals` entry the shopper accepts, and other names are `summary.unmatched`. `summary.ops` are what a console applies to the plan it holds (`current`); nothing is saved and no trip is approved. `summary.nutrition` is one line to quote as it stands ("(demo amounts)"). Also `POST /mealplan/plan` |
 | `rank_alternatives` | free (no LLM) | only when configured | `AlternativeRanking` for one planned line of a plan's `basis` (`basis=true` on a plan tool): every other product that could fill it in the planner's order, the cart's pick flagged `current`, facts from the catalog or stated as unknown, each row's trip effect and why it sits where it does; `held_back` for what the origin exclusion drops. The demo hub calls it for the cart and hides it from its model |
 | `reprice_plan` | free (no LLM) | only when configured | `PlanResult` for a plan's `basis` priced again with the shopper's `pins` (`{line_no, product_id}`, at most 40): with no pins the summary is the plan's own; each pin is checked (a candidate, not held back by origin, an offer in range) and named in `notes`. Hidden from the hub's model too |
 | `submit_origin_evidence` | free | **always over HTTP** | `Submission` — a PENDING label reading, deduplicated |

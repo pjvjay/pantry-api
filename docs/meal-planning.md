@@ -18,6 +18,7 @@ products 166-169 are synthetic demo data, and say so.
 | `POST /mealplan/selection/parse` | Quick add: counted dishes and the period, matched to recipes | no | 60/min |
 | `POST /mealplan/resolve` | Which products each recipe buys, once per distinct recipe | the selector, when live | 6/min, burst 3; 503 above the daily LLM ceiling |
 | `POST /mealplan/schedule` | Meals, trips for both strategies, warnings, lists | no | 120/min |
+| `POST /mealplan/plan` | MCP `plan_meals` over REST: counted dishes drafted into a plan, as ops for a console | the selector, when live (new recipes only) | 6/min, burst 3; 503 above the daily LLM ceiling |
 | `POST /mealplan/suggest-cook-days` | A freshness-aware layout, as a proposal | no | 60/min |
 | `POST /mealplan/alternatives` | Options for one trip line: ranked products and what each does to the plan | no | 60/min |
 | `GET /mealplan/starters` | The 4 demo starter recipes, labelled "demo recipe" | no | none |
@@ -326,3 +327,23 @@ an account.
 
 Storage times are general food-safety guidance, not advice for a particular food or
 household.
+
+## The assistant's draft (`plan_meals`, `POST /mealplan/plan`)
+
+An agent drafts a plan with the MCP tool `plan_meals` (`pantry_planner/mealplan/assistant.py`):
+counted `dishes` (`{recipe, count, slot?}`, the recipe a key, a library slug, a starter key or
+a title; or a dish the assistant writes, with `lines` and `servings`, its amounts labelled
+`written_by_assistant`), the shopper's `current` plan in brief, and `proposed`, the dishes an
+app read from the shopper's words that need their yes. The same rule as Quick add holds: only
+an exact or plural title match is placed. An alias or fuzzy match ("chicken briyani") comes
+back in `summary.proposals` with its question and the op a console applies on "Use", never
+placed; a name that fits several recipes, or none, is in `summary.unmatched` with what it could
+be.
+
+New meals are spread over free slots by the schedule's own placement; the current plan's meals
+never move, its window is lengthened but never shortened, and its approved trips are never
+touched (the summary warns that new meals will put them up for review). The summary's trips,
+totals, warnings and `nutrition` line come from `schedule.compute` on the draft, so they are
+what the Meal plan shows once the shopper applies `summary.ops` (`set_window`, `add_recipe`,
+`add_meals`, `place`) as one undo step. The tool saves nothing and has no way to approve a
+trip. Tests: `tests/test_mcp_meals.py`.
