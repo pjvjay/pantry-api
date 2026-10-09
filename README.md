@@ -232,7 +232,7 @@ ingredients cost the same single round trip as 4. Deliberately deferred at
 this catalog size: materialized stats views, a pool/result cache keyed on
 grocery sets, `pg_trgm` fuzzy indexing.
 
-Catalog: 161 products (`seeds/products.json`) — staples plus the Sichuan,
+Catalog: 165 products (`seeds/products.json`) — staples plus the Sichuan,
 Indian, Mexican and baking pantry that real recipe links ask for. The file is
 a byte-identical copy of [pantry-db](https://github.com/pjvjay/pantry-db)'s
 `seeds/products.json`, which also generates the Postgres `seed.sql`; change it
@@ -605,6 +605,14 @@ and `meets_floor` before calling a basket clean: below the floor
 (`ORIGIN_MIN_COVERAGE`, default 0.6) the basket is labelled UNVERIFIED,
 because unchecked lines are not verified-clean lines.
 
+When an exclusion removes every candidate for an ingredient, the plan stops
+with `excluded_by_origin` naming it, the products it removed and the
+same-aisle alternatives still available (Red Onion, Mexico, for an American
+yellow onion): the trade is stated, never made silently. With
+`allow_partial` (`POST /plan/{slug}?allow_partial=true`, or the MCP tools'
+argument) the rest of the recipe is planned and the ingredient goes to
+`out_of_range` with the same options; the MCP error says to retry that way.
+
 ### Loading evidence
 
 The container is a supervised, hard rate-limited browser agent — it was blocked
@@ -634,6 +642,29 @@ seafood and fresh produce the origin is not published online at all: retailer
 pages carry no country anywhere in the DOM and explicitly tell customers to
 read the package, and Open Food Facts holds those records with empty origin
 fields. Only the printed label answers the question.
+
+### Checking the catalog against a real store
+
+The demo catalog is synthetic, so nothing said whether it looks like a real
+shelf, and it did not: its only yellow onion was American, so "nothing from
+the United States" could not plan a bolognese, while a Real Canadian
+Superstore sells yellow onions in 2, 3, 10 and 25 lb bags.
+`python -m evals.reality_eval` (no LLM calls, no network) checks every
+ingredient of the recipe library and writes `evals/reports/reality.md`:
+
+- **exclusion**: whether a candidate is left once a common exclusion (United
+  States, China) removes what is evidenced as coming from there;
+- **choice**: the catalog's products for it against the reference store's;
+- **price**: median unit price (per kg, L or each) within a factor of two of
+  the reference store's;
+- **origin**: every origin the reference store sells it from (read off a
+  label) is one the catalog offers too.
+
+The reference rows are in `evals/datasets/reference_basket.json`, captured by
+hand: one product on one shelf on one day, with the link, and its origin only
+when someone read the label (store sites rarely publish it for produce, and
+refuse automated reads). The report lists the ingredients still to capture.
+`--strict` exits 1 when a check fails.
 
 ## How it deploys
 

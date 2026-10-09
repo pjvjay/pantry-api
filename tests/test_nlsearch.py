@@ -532,7 +532,8 @@ def test_brand_stats_keep_reviewless_products():
 def test_thin_pool_gets_labeled_substitutes():
     from pantry_planner.nlsearch.schemas import IngredientSpec
 
-    r = _run(_parsed(ingredients=[IngredientSpec(name="yellow onion")]))
+    # one red onion in the catalog (yellow onion has four since the onion bags were added)
+    r = _run(_parsed(ingredients=[IngredientSpec(name="red onion")]))
     pool = r.pools[0]
     direct = [p for p in pool if not p.substitute]
     subs = [p for p in pool if p.substitute]

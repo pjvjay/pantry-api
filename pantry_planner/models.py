@@ -372,10 +372,12 @@ class ShoppingPlan(BaseModel):
     # describing a basket as clean. "unverified" means coverage is below the
     # floor, not that anything excluded shipped.
     origin_status: str = "not_requested"
-    # Partial plans (NL path, allow_partial=True): ingredients left out
-    # instead of aborting. not_stocked = the catalog has no match at all (t1);
+    # Partial plans (allow_partial=True): ingredients left out instead of
+    # aborting. not_stocked = the catalog has no match at all (t1, NL path);
     # out_of_range = stocked, but no offer within the distance/price/diet
-    # constraints (t2). skipped = never planned, whatever allow_partial says:
+    # constraints (t2), or every candidate is evidenced as coming from an
+    # excluded country (either path; its suggestions name the removed
+    # products and the alternatives left). skipped = never planned, whatever allow_partial says:
     # water and ice (never bought), lines past the 40-ingredient cap, and
     # lines the selector returned no valid product for. total_cost,
     # origin_coverage and trip_options cover the planned line_items only.
