@@ -411,11 +411,19 @@ def test_pack_fit_is_unknown_when_units_differ_or_no_amount_is_given():
     assert penne["Gluten-Free Penne 340g"].pack_fit == "short"
     # 500 g of penne takes two 340 g bags: the cost of the need, not of the cart's one pack
     gf = penne["Gluten-Free Penne 340g"]
-    assert gf.cost_for_need == round(2 * gf.offer.price, 2)
+    pack = gf.trip.buys_at.price if gf.trip and gf.trip.buys_at else gf.offer.price
+    assert gf.cost_for_need == round(2 * pack, 2)
+    assert _rank(plan, "penne").need_note == ""
+    no_amount = flow.run_nl("P\n- salt\n- 500g penne\n")
+    assert _rank(no_amount, "salt").need_note == "Recipe gives no amount"
+    # A library recipe is planned by name: its lines carry no amount, though the database has
+    # demo house amounts for them, so the recipe is not said to give none.
     classic = flow.run("tomato_penne", max_km=12, **HOME)
-    for it in _rank(classic, classic.basis.lines[0].name).items:
+    ranking = _rank(classic, classic.basis.lines[0].name)
+    assert (ranking.need, ranking.need_note) == ("", "Planned without amounts (a library recipe)")
+    for it in ranking.items:
         assert (it.pack_fit, it.cost_for_need) == ("unknown", None)
-        assert any(r.text == "Recipe gives no amount" for r in it.reasons)
+        assert any(r.text == "Planned without amounts (a library recipe)" for r in it.reasons)
 
 
 def test_the_data_note_follows_offers_synthetic(monkeypatch):

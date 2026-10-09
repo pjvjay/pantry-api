@@ -540,26 +540,36 @@ def _total_need(needs: list[tuple[float, str] | None]) -> tuple[float, str] | No
     return round(sum(n[0] for n in needs if n), 4), needs[0][1]
 
 
+def _no_need(needs: list[tuple[float, str] | None], lines: list[BasisLine],
+             library: bool) -> str:
+    """Why the lines have no amount to compare packs with ('' when they have one). A library
+    recipe is planned by its ingredient names alone: its lines carry no amount even where
+    the database holds demo house amounts for them, so the recipe is not said to give none."""
+    if _total_need(needs) is not None:
+        return ""
+    unmeasured = [ln for ln, n in zip(lines, needs, strict=True) if n is None]
+    if not unmeasured:
+        return "The recipe's lines give amounts in different units"
+    if all(ln.quantity is None for ln in lines):
+        return ("Planned without amounts (a library recipe)" if library
+                else "Recipe gives no amount")
+    if unmeasured[0].quantity is None:
+        return f"Recipe gives no amount for line {unmeasured[0].line_no}"
+    ln = unmeasured[0]
+    amount = f"{ln.quantity:g} {ln.unit or ''}".strip()
+    return f"Recipe amount {amount!r} can't be compared with a pack"
+
+
 def _pack_facts(product: Product, price: float, cart_packs: int,
-                needs: list[tuple[float, str] | None], lines: list[BasisLine]
-                ) -> tuple[str, float | None, Reason]:
+                needs: list[tuple[float, str] | None], lines: list[BasisLine],
+                library: bool = False) -> tuple[str, float | None, Reason]:
     """(pack_fit, cost_for_need, the pack reason) for one candidate."""
     from .packs import pack_count
 
     need = _total_need(needs)
     if need is None:
-        unmeasured = [ln for ln, n in zip(lines, needs, strict=True) if n is None]
-        if not unmeasured:
-            why = "The recipe's lines give amounts in different units"
-        elif all(ln.quantity is None for ln in lines):
-            why = "Recipe gives no amount"
-        elif unmeasured[0].quantity is None:
-            why = f"Recipe gives no amount for line {unmeasured[0].line_no}"
-        else:
-            ln = unmeasured[0]
-            amount = f"{ln.quantity:g} {ln.unit or ''}".strip()
-            why = f"Recipe amount {amount!r} can't be compared with a pack"
-        return "unknown", None, Reason(code="pack", text=why, tone="unknown")
+        return "unknown", None, Reason(code="pack", text=_no_need(needs, lines, library),
+                                       tone="unknown")
     qty, uom = need
     if not product.unit_qty or not product.unit_uom:
         return "unknown", None, Reason(code="pack", text="Pack size not listed", tone="unknown")
@@ -713,6 +723,7 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
     synthetic = settings().offers_synthetic
     needs = _needs(basis, group)
     lines = [planned[n] for n in group]
+    library = basis.path == "library"
     use_pref = bool(basis.preference)
     worst = len(basis.preference) * 2
     baseline = _price(basis, picks, catalog, rows_all)
@@ -729,7 +740,7 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
         else:
             offer = AltOffer(store="", price=p.price)
         cart_packs = flow._packs(p, needs)
-        fit, cost, pack_reason = _pack_facts(p, offer.price, cart_packs, needs, lines)
+        fit, cost, pack_reason = _pack_facts(p, offer.price, cart_packs, needs, lines, library)
         unit_price, unit_basis = _unit_price(p, offer.price)
         st = stats.get(pid)
         rating = (AltRating(avg=st[0], count=st[1], synthetic=synthetic)
@@ -759,7 +770,7 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
             # cost for the need and the unit price are worked out at that price.
             price = r.trip.buys_at.price if r.trip and r.trip.buys_at else r.offer.price
             r.pack_fit, r.cost_for_need, r.pack_reason = _pack_facts(
-                r.product, price, r.packs, needs, lines)
+                r.product, price, r.packs, needs, lines, library)
             r.unit_price, r.unit_basis = _unit_price(r.product, price)
 
     rows.sort(key=lambda r: r.key(located, use_pref))
@@ -770,8 +781,9 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
     need = _total_need(needs)
     return AlternativeRanking(
         line_no=line_no, lines=group, ingredient=" + ".join(ln.name for ln in lines),
-        need=_fmt_qty(*need) if need else "", need_qty=need[0] if need else None,
-        need_uom=need[1] if need else None, order=list(ORDER), ranking_text=RANKING_TEXT,
+        need=_fmt_qty(*need) if need else "", need_note=_no_need(needs, lines, library),
+        need_qty=need[0] if need else None, need_uom=need[1] if need else None,
+        order=list(ORDER), ranking_text=RANKING_TEXT,
         items=shown,
         held_back=[_held(pid, catalog, g) for pid in held],
         total=len(items), unavailable=len(unavailable),

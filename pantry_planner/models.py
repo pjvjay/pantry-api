@@ -611,9 +611,11 @@ class AlternativeRanking(BaseModel):
     """The ranked options for one planned line. `lines` are every recipe line
     the cart's purchase covers (a swap applies to all of them; pin each).
     `need` is the recipe's amount for those lines ("500 g"), "" when not
-    given. `order` names the ranking keys in order and `ranking_text` says
-    them in plain words. `items` holds the first `limit` rows plus the
-    cart's pick wherever it ranks; `total` counts every ranked row;
+    given, and then `need_note` says why ("Recipe gives no amount",
+    "Planned without amounts (a library recipe)"). `order` names the
+    ranking keys in order and `ranking_text` says them in plain words.
+    `items` holds the first `limit` rows plus the cart's pick wherever it
+    ranks; `total` counts every ranked row;
     `unavailable` the products matching the line's words (any level, or its
     head word) with no offer in range (or under the price cap); same-aisle
     substitutes are looked up in range only, as the planner's are, so none
@@ -622,6 +624,7 @@ class AlternativeRanking(BaseModel):
     lines: list[int]
     ingredient: str
     need: str = ""
+    need_note: str = ""
     need_qty: float | None = None
     need_uom: str | None = None
     order: list[str]
