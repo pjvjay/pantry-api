@@ -358,8 +358,10 @@ class ShoppingPlan(BaseModel):
     candidate_count: int = 0
     # Every LLM call the plan made, phase by phase (both paths; empty in demo mode).
     llm_calls: list[LlmCallTrace] = Field(default_factory=list)
-    # The Burr run that traced this plan, step by step (its app id in the Burr UI).
+    # The Burr run that traced this plan, step by step (its app id in the Burr UI), and how long
+    # each of its steps took: [{step, ms, error}], in order.
     burr_run: str = ""
+    pipeline: list[dict] = Field(default_factory=list)
     # Split-trip optimizer: stops-vs-cost frontier for the chosen basket
     trip_options: list[TripOption] = Field(default_factory=list)
     # Provenance of the basket as a whole. Only computed when the caller

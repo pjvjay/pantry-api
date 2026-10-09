@@ -42,7 +42,7 @@ from .models import (
     ShoppingPlan,
 )
 from .selector import call_selector, merge_selections
-from .tracing import llm_call_trace, llm_span, llm_step, make_tracker
+from .tracing import StepTimer, llm_call_trace, llm_span, llm_step, make_tracker
 
 # ─── Purchases: selections -> what is actually bought ────────
 # Two recipe lines can resolve to one product (mala chicken's "ground
@@ -768,8 +768,10 @@ def build_application(recipe_slug: str | None = None,
                       exclude: list | None = None,
                       preference: list | None = None,
                       max_km: float | None = None,
-                      allow_partial: bool = False) -> Application:
-    """Construct the Burr Application for one run.
+                      allow_partial: bool = False,
+                      hooks: list | None = None) -> Application:
+    """Construct the Burr Application for one run (`hooks`: Burr lifecycle hooks, e.g. the
+    StepTimer that times each action).
 
     Two entry variants sharing the router/selector/plan tail:
       * classic (recipe_slug): load_recipe → load_products → …
@@ -839,7 +841,8 @@ def build_application(recipe_slug: str | None = None,
             .with_entrypoint("load_recipe")
             .with_identifiers(app_id=_run_id(recipe_slug))
         )
-    return builder.with_tracker(make_tracker()).build()
+    builder = builder.with_tracker(make_tracker())
+    return (builder.with_hooks(*hooks) if hooks else builder).build()
 
 
 def _run_id(name: str) -> str:
@@ -859,10 +862,12 @@ def run(recipe_slug: str, *, exclude: list | None = None,
     Any of `lat`/`lon`/`max_km` makes the plan store-aware (stores per line,
     trip options); without them it is priced from the catalog as before.
     """
+    timer = StepTimer()
     app = build_application(recipe_slug=recipe_slug, exclude=exclude,
-                            preference=preference, lat=lat, lon=lon, max_km=max_km)
+                            preference=preference, lat=lat, lon=lon, max_km=max_km,
+                            hooks=[timer])
     _action, _result, state = app.run(halt_after=["build_plan"])
-    return state["plan"].model_copy(update={"burr_run": app.uid})
+    return state["plan"].model_copy(update={"burr_run": app.uid, "pipeline": timer.steps})
 
 
 def run_nl(recipe_text: str, lat: float | None = None,
@@ -879,8 +884,9 @@ def run_nl(recipe_text: str, lat: float | None = None,
     `out_of_range` instead of aborting (a gate still fires when nothing
     would remain).
     """
+    timer = StepTimer()
     app = build_application(recipe_text=recipe_text, lat=lat, lon=lon,
                             exclude=exclude, preference=preference,
-                            max_km=max_km, allow_partial=allow_partial)
+                            max_km=max_km, allow_partial=allow_partial, hooks=[timer])
     _action, _result, state = app.run(halt_after=["build_plan"])
-    return state["plan"].model_copy(update={"burr_run": app.uid})
+    return state["plan"].model_copy(update={"burr_run": app.uid, "pipeline": timer.steps})
