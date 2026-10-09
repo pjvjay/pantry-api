@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
@@ -113,7 +114,12 @@ class BasisError(ValueError):
 
 class PinError(ValueError):
     """A pin names a line that is not planned, an unknown product, or a product
-    that is not a choice for the line; the message says which and why."""
+    that is not a choice for the line; the message says which and why, and
+    `line_no` names the line when the pin's line is known."""
+
+    def __init__(self, message: str, line_no: int | None = None):
+        super().__init__(message)
+        self.line_no = line_no
 
 
 class LineNotPlannedError(PinError):
@@ -404,9 +410,9 @@ def validate_pins(basis: PlanBasis, pins: list[Pin] | None = None, *,
     catalog = catalog if catalog is not None else (_catalog() if merged else {})
     for line_no, pid in merged.items():
         if line_no not in planned:
-            raise LineNotPlannedError(_not_planned(line_no, planned))
+            raise LineNotPlannedError(_not_planned(line_no, planned), line_no)
         if pid not in catalog:
-            raise PinError(f"unknown product id {pid} in pins")
+            raise PinError(f"unknown product id {pid} in pins", line_no)
     merged = {n: pid for n, pid in merged.items() if pid != planned[n].product_id}
     if not merged:
         return {}
@@ -427,13 +433,14 @@ def validate_pins(basis: PlanBasis, pins: list[Pin] | None = None, *,
         if pid in g.held:
             country, fld = g.held[pid]
             raise PinError(f"{product.name} is evidenced as {_where(country, fld)}, which "
-                           "this plan excludes")
+                           "this plan excludes", line_no)
         if match is None:
             raise PinError(f"{product.name} is not an option for line {line_no} "
-                           f"({line.name}): {_why_not(basis, line, product, near.get(pid))}")
+                           f"({line.name}): {_why_not(basis, line, product, near.get(pid))}",
+                           line_no)
         if not _available(basis, offers.get(pid)):
             raise PinError(f"{product.name} cannot be bought for line {line_no} "
-                           f"({line.name}): {_unavailable(basis, near.get(pid))}")
+                           f"({line.name}): {_unavailable(basis, near.get(pid))}", line_no)
         out[line_no] = ValidPin(product_id=pid, tier=_TIER[match], match=match)
     return out
 
@@ -639,6 +646,9 @@ class _Row:
     semantic: tuple[int, int, int, int]     # closeness()
     preferred: bool = False         # matches an entry of the shopper's preference
     trip: AltTrip | None = None
+    # why a row the trip effect was worked out for has none (TripEffect): "its price on your
+    # plan's trips is unknown (...)"
+    trip_note: str = ""
 
     def trip_cents(self, located: bool) -> float:
         if self.trip is not None:
@@ -668,11 +678,40 @@ def _trip_of(options) -> tuple[float, list[str], dict[int, str]] | None:
     return best.total_cost, list(best.stores), {i.product_id: i.store_name for i in best.items}
 
 
-def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
-                      ) -> AlternativeRanking:
+@dataclass
+class TripEffect:
+    """The trip effect of another planner, in place of the cart's single trip: the meal
+    plan's trips (mealplan/options.py). The ranking keeps everything else (candidates, held
+    back, availability, facts, ORDER, reasons); only these come from the other planner:
+
+    needs      line_no -> the amount the purchase is for on that planner's trip, not the
+               recipe's one batch;
+    on_trip    the stores that trip stops at now;
+    packs      the packs that planner buys of a product for `needs`, before its effect is
+               worked out;
+    effect     product_id -> (the trip with that product on every line of the purchase,
+               the packs then bought, what that planner then charges for them, and why
+               there is no trip when there is none): its own figures, so a row says what
+               choosing it costs there;
+    where      how the reasons name the trip total ("your plan's trips").
+
+    The current pick may have no offer in range any more (a line no longer stocked, the
+    reason to look for another product): it is then left out of the rows instead of making
+    the ranking stale."""
+    needs: dict[int, tuple[float, str] | None]
+    on_trip: set[str]
+    packs: Callable[[Product, list], int]
+    effect: Callable[[int], tuple[AltTrip | None, int | None, float | None, str]]
+    where: str = "your trip"
+    max_eval: int = MAX_TRIP_EVAL
+
+
+def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT, *,
+                      effect: TripEffect | None = None) -> AlternativeRanking:
     """The other products that could fill `line_no`, in ORDER, with the cart's pick always
     included and flagged current. Deterministic for the same basis and database; no LLM,
-    no write. Raises BasisError or PinError (a bad basis, an unplanned line, a bad pin)."""
+    no write. Raises BasisError or PinError (a bad basis, an unplanned line, a bad pin).
+    `effect`: another planner's trips stand in for the cart's (TripEffect)."""
     from . import flow
     from .origins import preference_rank
 
@@ -712,23 +751,29 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
 
     offers = flow._cheapest_offers(rows_all, basis.path) if located else {}
     if located and current_id not in offers:
-        raise StaleBasisError(f"{catalog[current_id].name}, the cart's pick for line "
-                              f"{line_no}, has no offer in range any more; plan the recipe "
-                              "again")
+        if effect is None:
+            raise StaleBasisError(f"{catalog[current_id].name}, the cart's pick for line "
+                                  f"{line_no}, has no offer in range any more; plan the "
+                                  "recipe again")
+        # Another planner's line no longer stocked: its options are what the shopper needs.
+        del selectable[current_id]
     unavailable = [pid for pid in selectable
                    if pid != current_id and not _available(basis, offers.get(pid))]
     for pid in unavailable:
         del selectable[pid]
 
     synthetic = settings().offers_synthetic
-    needs = _needs(basis, group)
+    needs = [effect.needs.get(n) for n in group] if effect else _needs(basis, group)
     lines = [planned[n] for n in group]
     library = basis.path == "library"
     use_pref = bool(basis.preference)
     worst = len(basis.preference) * 2
-    baseline = _price(basis, picks, catalog, rows_all)
-    base_trip = _trip_of(baseline[1]) if located else None
-    base_stores = set(base_trip[1]) if base_trip else set()
+    if effect is None:
+        baseline = _price(basis, picks, catalog, rows_all)
+        base_trip = _trip_of(baseline[1]) if located else None
+        base_stores = set(base_trip[1]) if base_trip else set()
+    else:
+        base_trip, base_stores = None, set(effect.on_trip)
 
     rows: list[_Row] = []
     for pid, match in selectable.items():
@@ -739,7 +784,7 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
                              on_trip=o["store"] in base_stores)
         else:
             offer = AltOffer(store="", price=p.price)
-        cart_packs = flow._packs(p, needs)
+        cart_packs = effect.packs(p, needs) if effect else flow._packs(p, needs)
         fit, cost, pack_reason = _pack_facts(p, offer.price, cart_packs, needs, lines, library)
         unit_price, unit_basis = _unit_price(p, offer.price)
         st = stats.get(pid)
@@ -755,12 +800,17 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
             rating=rating, organic="organic" in tokens(f"{p.name} {p.description}"),
             semantic=closeness(planned[line_no].name, p)))
 
-    if located and base_trip is not None:
+    max_eval = effect.max_eval if effect else MAX_TRIP_EVAL
+    if located and (base_trip is not None or effect is not None):
         rows.sort(key=lambda r: r.pre_key(use_pref))
-        to_eval = rows[:MAX_TRIP_EVAL] + [r for r in rows[MAX_TRIP_EVAL:] if r.current]
+        to_eval = rows[:max_eval] + [r for r in rows[max_eval:] if r.current]
         for r in to_eval:
-            r.trip, packs_after = _trip_effect(basis, picks, group, r.product.id, catalog,
-                                               rows_all, base_trip, baseline[0])
+            charged: float | None = None
+            if effect is not None:
+                r.trip, packs_after, charged, r.trip_note = effect.effect(r.product.id)
+            else:
+                r.trip, packs_after = _trip_effect(basis, picks, group, r.product.id, catalog,
+                                                   rows_all, base_trip, baseline[0])
             if packs_after is not None:
                 # The product may already fill another line: one purchase, packs for both
                 # needs. The cart counts what the re-price buys.
@@ -771,11 +821,16 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
             price = r.trip.buys_at.price if r.trip and r.trip.buys_at else r.offer.price
             r.pack_fit, r.cost_for_need, r.pack_reason = _pack_facts(
                 r.product, price, r.packs, needs, lines, library)
+            if effect is not None:
+                # What the other planner charges for the packs it buys, never a figure of
+                # this module's own (unknown when it leaves the packs unknown).
+                r.cost_for_need = charged
             r.unit_price, r.unit_basis = _unit_price(r.product, price)
 
     rows.sort(key=lambda r: r.key(located, use_pref))
+    where = effect.where if effect else "your trip"
     items = [_item(i + 1, r, rows[i - 1] if i else None, planned[line_no], located, use_pref,
-                   synthetic)
+                   synthetic, where=where, max_eval=max_eval)
              for i, r in enumerate(rows)]
     shown = items[:limit] + [it for it in items[limit:] if it.current]
     need = _total_need(needs)
@@ -864,22 +919,25 @@ def _held(pid: int, catalog: dict[int, Product], g: _Gathered) -> HeldBack:
 
 
 def _item(rank: int, r: _Row, above: _Row | None, line: BasisLine, located: bool,
-          use_pref: bool, synthetic: bool) -> RankedAlternative:
+          use_pref: bool, synthetic: bool, *, where: str = "your trip",
+          max_eval: int = MAX_TRIP_EVAL) -> RankedAlternative:
     p = r.product
     return RankedAlternative(
         rank=rank, current=r.current, product_id=p.id, product=p.name, brand=p.brand,
         size=p.unit_size, tier=r.tier, match=r.match, offer=r.offer, packs=r.packs,
         pack_fit=r.pack_fit, cost_for_need=r.cost_for_need, unit_price=r.unit_price,
         unit_basis=r.unit_basis, trip=r.trip, origin=r.origin, rating=r.rating,
-        says_organic=r.organic, reasons=_reasons(r, line, located, synthetic),
-        rank_reason=_rank_reason(rank, r, above, line, located, use_pref, synthetic))
+        says_organic=r.organic, reasons=_reasons(r, line, located, synthetic, where),
+        rank_reason=_rank_reason(rank, r, above, line, located, use_pref, synthetic,
+                                 where=where, max_eval=max_eval))
 
 
 def _money(cents: float) -> str:
     return f"${abs(cents) / 100:.2f}"
 
 
-def _reasons(r: _Row, line: BasisLine, located: bool, synthetic: bool) -> list[Reason]:
+def _reasons(r: _Row, line: BasisLine, located: bool, synthetic: bool,
+             where: str = "your trip") -> list[Reason]:
     """At most five reasons, each from a fact on the row: the match, the pack, the origin,
     the trip and the rating. Unknowns are stated as unknown."""
     p = r.product
@@ -910,11 +968,12 @@ def _reasons(r: _Row, line: BasisLine, located: bool, synthetic: bool) -> list[R
     if r.trip is not None:
         t = r.trip
         if t.delta < 0:
-            text_, tone = f"${-t.delta:.2f} less on your trip", "plus"
+            text_, tone = f"${-t.delta:.2f} less on {where}", "plus"
         elif t.delta > 0:
-            text_, tone = f"${t.delta:.2f} more on your trip", "minus"
+            text_, tone = f"${t.delta:.2f} more on {where}", "minus"
         else:
-            text_, tone = "No change to your trip total", "info"
+            text_, tone = ("No change to your trip total" if where == "your trip"
+                           else f"No change to the total of {where}"), "info"
         if t.stops_delta > 0:
             text_ += f" and {t.stops_delta} more stop{'s' if t.stops_delta > 1 else ''}"
             tone = "minus"
@@ -924,7 +983,9 @@ def _reasons(r: _Row, line: BasisLine, located: bool, synthetic: bool) -> list[R
             text_ += f"; already bought for line {t.merges_with_line}"
         out.append(Reason(code="trip", text=text_, tone=tone))
     elif located:
-        out.append(Reason(code="trip", text="Trip effect not worked out", tone="unknown"))
+        out.append(Reason(code="trip", text=(r.trip_note[:1].upper() + r.trip_note[1:]
+                                             if r.trip_note else "Trip effect not worked out"),
+                          tone="unknown"))
     else:
         out.append(Reason(code="trip", text="Catalog price: the plan has no shopping location",
                           tone="info"))
@@ -938,16 +999,20 @@ def _reasons(r: _Row, line: BasisLine, located: bool, synthetic: bool) -> list[R
 
 
 def _rank_reason(rank: int, r: _Row, above: _Row | None, line: BasisLine, located: bool,
-                 use_pref: bool, synthetic: bool) -> str:
+                 use_pref: bool, synthetic: bool, *, where: str = "your trip",
+                 max_eval: int = MAX_TRIP_EVAL) -> str:
     """Why `r` sits below the row above it: the first ranking key on which it is worse,
     in plain words."""
     if above is None:
         return "Ranked first: nothing ranks above it."
-    return f"Below #{rank - 1}: {_first_difference(r, above, line, located, use_pref, synthetic)}."
+    why = _first_difference(r, above, line, located, use_pref, synthetic, where=where,
+                            max_eval=max_eval)
+    return f"Below #{rank - 1}: {why}."
 
 
 def _first_difference(r: _Row, above: _Row, line: BasisLine, located: bool, use_pref: bool,
-                      synthetic: bool) -> str:
+                      synthetic: bool, *, where: str = "your trip",
+                      max_eval: int = MAX_TRIP_EVAL) -> str:
     if _TIER_RANK[r.tier] > _TIER_RANK[above.tier]:
         return ("not the same ingredient" if r.tier == "other"
                 else "it matches none of the recipe's words")
@@ -970,10 +1035,12 @@ def _first_difference(r: _Row, above: _Row, line: BasisLine, located: bool, use_
         return "its origin is further down your preference"
     mine, theirs = r.trip_cents(located), above.trip_cents(located)
     if mine != theirs:
+        if mine == math.inf and r.trip_note:
+            return r.trip_note
         if mine == math.inf:
-            return f"its trip effect was not worked out (only the first {MAX_TRIP_EVAL} are)"
+            return f"its trip effect was not worked out (only the first {max_eval} are)"
         if located:
-            return f"{_money(mine - theirs)} more on your trip"
+            return f"{_money(mine - theirs)} more on {where}"
         return f"it costs {_money(mine - theirs)} more"
     mine_c = round(r.cost_for_need * 100) if r.cost_for_need is not None else math.inf
     theirs_c = round(above.cost_for_need * 100) if above.cost_for_need is not None else math.inf
