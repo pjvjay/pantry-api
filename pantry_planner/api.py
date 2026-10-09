@@ -10,11 +10,18 @@ import contextlib
 import os
 from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel, Field
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import db, flow
-from .config import settings
+from .config import (
+    RUNTIME_MODEL_FIELDS,
+    set_runtime_overrides,
+    settings,
+    validate_model_spec,
+)
+from .llm import LLMError
 from .models import (
     OriginRanking,
     Product,
@@ -64,6 +71,17 @@ app = FastAPI(
 )
 
 
+@app.exception_handler(LLMError)
+async def _llm_error(request: Request, exc: LLMError) -> JSONResponse:
+    """A failed LLM call is the provider's (or the config's) failure, not a
+    500 and not the caller's 4xx: 502 by default, 429 when the quota ran
+    out, 503 when the call can't be made as configured (no key). The
+    message names what to fix and never carries a key."""
+    return JSONResponse(status_code=exc.http_status, content={
+        "error": "llm_call_failed", "provider": exc.provider or None,
+        "detail": str(exc)})
+
+
 def _check_countries(*lists: list[str] | None) -> None:
     """Reject unrecognised country names up front.
 
@@ -85,14 +103,93 @@ def _check_countries(*lists: list[str] | None) -> None:
 
 @app.get("/health")
 def health() -> dict:
+    cfg = settings()            # effective: env + any runtime overrides
     return {
         "status": "ok",
-        "routing_strategy": settings().routing_strategy,
-        "default_model": settings().selector_model_default,
-        "escalation_model": settings().selector_model_escalation,
-        "confidence_threshold": settings().confidence_threshold,
-        "demo_mode": settings().demo_mode,
+        "routing_strategy": cfg.routing_strategy,
+        "default_model": cfg.selector_model_default,
+        "escalation_model": cfg.selector_model_escalation,
+        "classifier_model": cfg.classifier_model,
+        "nl2sql_model": cfg.nl2sql_model,
+        "confidence_threshold": cfg.confidence_threshold,
+        "demo_mode": cfg.demo_mode,
+        "gemini_key_configured": bool(cfg.gemini_api_key),
     }
+
+
+# ─── Runtime settings (demo UI) ──────────────────────────────
+# Demo mode and the four model specs, switchable without a restart. GET is
+# always available (no secrets: key PRESENCE only). POST needs
+# RUNTIME_SETTINGS_ENABLED=1 — on a public deployment it would let any
+# visitor turn real LLM spend on.
+
+class RuntimeModels(BaseModel):
+    """Model specs: "gemini:<model>", "anthropic:<model>" or "claude-..."."""
+
+    model_config = ConfigDict(extra="forbid")
+    selector_default: str | None = None
+    selector_escalation: str | None = None
+    classifier: str | None = None
+    nl2sql: str | None = None
+
+    @field_validator("*")
+    @classmethod
+    def _valid_spec(cls, v: str | None) -> str | None:
+        return None if v is None else validate_model_spec(v)
+
+
+class RuntimeSettingsUpdate(BaseModel):
+    """Any subset; omitted fields keep their current value."""
+
+    model_config = ConfigDict(extra="forbid")
+    demo_mode: bool | None = None
+    models: RuntimeModels | None = None
+
+
+class RuntimeSettings(BaseModel):
+    demo_mode: bool
+    models: dict[str, str]
+    gemini_key_configured: bool
+    anthropic_key_configured: bool
+    editable: bool
+
+
+def _runtime_settings() -> RuntimeSettings:
+    cfg = settings()
+    return RuntimeSettings(
+        demo_mode=cfg.demo_mode,
+        models={api: getattr(cfg, field) for api, field in RUNTIME_MODEL_FIELDS.items()},
+        gemini_key_configured=bool(cfg.gemini_api_key),
+        anthropic_key_configured=bool(cfg.anthropic_api_key),
+        editable=cfg.runtime_settings_enabled,
+    )
+
+
+def _require_runtime_settings_enabled() -> None:
+    # A dependency, so it runs before the body is validated: a disabled
+    # endpoint answers 403 whatever was posted.
+    if not settings().runtime_settings_enabled:
+        raise HTTPException(status_code=403, detail=(
+            "Runtime settings are read-only here; set RUNTIME_SETTINGS_ENABLED=1 "
+            "to allow POST /settings/runtime."))
+
+
+@app.get("/settings/runtime", response_model=RuntimeSettings)
+def get_runtime_settings() -> RuntimeSettings:
+    return _runtime_settings()
+
+
+@app.post("/settings/runtime", response_model=RuntimeSettings,
+          dependencies=[Depends(_require_runtime_settings_enabled)])
+def update_runtime_settings(req: RuntimeSettingsUpdate) -> RuntimeSettings:
+    """Switch demo mode and/or model specs for every later request."""
+    try:
+        set_runtime_overrides(
+            demo_mode=req.demo_mode,
+            models=req.models.model_dump() if req.models else None)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    return _runtime_settings()
 
 
 @app.get("/metrics")
@@ -142,6 +239,12 @@ class NLPlanRequest(BaseModel):
     # from these countries; preference is soft guidance to the selector.
     exclude_origin: list[str] = Field(default_factory=list, max_length=50)
     preference: list[str] = Field(default_factory=list, max_length=50)
+    # Same knobs as the MCP plan_from_text tool: max_km overrides any
+    # distance stated in the text; allow_partial plans what is stocked and
+    # in range and lists the rest (not_stocked / out_of_range) instead of a
+    # 409. Defaults keep the original behaviour.
+    max_km: float | None = Field(default=None, ge=0.5, le=100)
+    allow_partial: bool = False
 
 
 @app.post("/plan/nl", response_model=ShoppingPlan)
@@ -157,7 +260,8 @@ def plan_nl(req: NLPlanRequest) -> ShoppingPlan:
     try:
         plan = flow.run_nl(req.recipe_text, lat=req.lat, lon=req.lon,
                            exclude=req.exclude_origin,
-                           preference=req.preference)
+                           preference=req.preference,
+                           max_km=req.max_km, allow_partial=req.allow_partial)
         m.record_plan("nl", "ok")
         m.record_coverage(plan.origin_coverage)
         return plan
@@ -212,19 +316,29 @@ def plan_week(req: WeekPlanRequest) -> WeekPlan:
 @app.post("/plan/{slug}", response_model=ShoppingPlan)
 def plan_recipe(slug: str,
                 exclude_origin: Annotated[list[str] | None, Query()] = None,
-                preference: Annotated[list[str] | None, Query()] = None) -> ShoppingPlan:
+                preference: Annotated[list[str] | None, Query()] = None,
+                lat: Annotated[float | None, Query(ge=-90, le=90)] = None,
+                lon: Annotated[float | None, Query(ge=-180, le=180)] = None,
+                max_km: Annotated[float | None, Query(ge=0.5, le=100)] = None) -> ShoppingPlan:
     """Run the pipeline for one recipe. Returns the shopping plan.
 
     `exclude_origin` removes candidates positively evidenced as coming from
     those countries — never candidates that merely lack evidence. The
     returned plan carries per-line provenance and a spend-weighted coverage
-    figure saying how much of the basket was actually checked."""
+    figure saying how much of the basket was actually checked.
+
+    Any of `lat`/`lon`/`max_km` makes the plan store-aware: each line is
+    priced at its cheapest store within `max_km` of the point (the server's
+    default point when lat/lon are omitted; any distance when max_km is),
+    `trip_options` splits the basket across stores, and a chosen product no
+    store in range sells goes to `out_of_range` naming the nearest offer."""
     from . import metrics as m
     from .nlsearch import PlanAborted
 
     _check_countries(exclude_origin, preference)
     try:
-        plan = flow.run(slug, exclude=exclude_origin, preference=preference)
+        plan = flow.run(slug, exclude=exclude_origin, preference=preference,
+                        lat=lat, lon=lon, max_km=max_km)
     except ValueError as e:
         m.record_plan("recipe", "not_found")
         raise HTTPException(status_code=404, detail=str(e)) from e

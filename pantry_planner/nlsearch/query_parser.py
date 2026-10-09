@@ -1,7 +1,8 @@
 """TRANSLATION: multi-shot constrained semantic parse of a pasted recipe.
 
-One Claude call with a forced tool (same idiom as selector.py) returns the
-two-part parse: RecipeSpec (what to cook) + Constraints (how to shop).
+One LLM call with a forced tool (llm.forced_tool_call, same idiom as
+selector.py; NL2SQL_MODEL picks the provider) returns the two-part parse:
+RecipeSpec (what to cook) + Constraints (how to shop).
 The model never writes SQL — it parameterizes a fixed pattern menu, and
 validate_parsed() clamps every value against the live DB vocabulary.
 
@@ -12,12 +13,12 @@ from __future__ import annotations
 
 import time
 
-from anthropic import Anthropic
-
 from ..config import estimate_cost_usd, settings
-from .schemas import Constraints, IngredientSpec, ParsedInput, RecipeSpec
+from ..llm import forced_tool_call
+from .schemas import ParsedInput
 
 ALLOWED_TAGS = {"dairy", "gluten", "meat", "nuts", "egg", "soy"}
+MAX_INGREDIENTS = 40
 ALLOWED_FORMS = {"canned", "frozen", "dried", "ground", "smoked", "pickled", "powdered"}
 
 PARSER_SYSTEM = """\
@@ -27,16 +28,27 @@ planner. Extract TWO things via the submit_parse tool:
 1. recipe — title, servings, and the ingredient list. Normalize each
    ingredient:
    * name: the PRODUCT to buy — no quantities, no units, no prep words.
-     When a form IS the product, keep the compound name ("tomato sauce",
-     "ground beef").
+     KEEP every word the recipe wrote that changes WHICH product is bought:
+     boneless, skinless, bone-in, whole, unsalted, salted, smoked,
+     low-sodium, extra-virgin, light/dark, toasted, and the variety
+     (Sichuan, basmati, Kashmiri). "1 lb boneless skinless chicken thighs"
+     -> name "boneless skinless chicken thigh", NOT "chicken thigh": a
+     bone-in thigh is a different product. Never add a word the recipe did
+     not write. When a form IS the product, keep the compound name
+     ("tomato sauce", "ground beef").
    * form: a PURCHASE form only if the shelf product differs:
      canned/frozen/dried/ground/smoked/pickled/powdered.
-     "canned tomatoes" -> name "tomato", form "canned".
-   * prep: what the COOK does (mashed/diced/shredded/minced) — record it,
-     but it must NOT stay in name. "mashed potatoes" -> name "potato",
-     prep "mashed" (you buy fresh potatoes to mash).
+     "canned tomatoes" -> name "tomato", form "canned";
+     "ground Sichuan peppercorns" -> name "Sichuan peppercorn", form
+     "ground". Never drop a written form: ground and whole peppercorns are
+     different products.
+   * prep: what the COOK does (mashed/diced/shredded/minced/sliced/chopped)
+     — record it, but it must NOT stay in name. "mashed potatoes" -> name
+     "potato", prep "mashed" (you buy fresh potatoes to mash).
    * quantity + unit exactly as written ("400g" -> 400, "g").
    * category_hint: your best guess from the known vocabulary below.
+   * water and ice: list them like any other line (name "water"); the
+     planner knows they are never bought.
 
 2. constraints — budget/dietary/scope filters from the notes or title:
    * "no dairy" (dietary) -> exclude_tags ["dairy"]  (strictest reading)
@@ -91,6 +103,15 @@ E) "Baking day! 2.5kg all-purpose flour, dozen eggs, 454g butter,
 
 F) "Grilled cheese x2 — bread, cheddar, butter" (no notes)
    -> three ingredients, no constraints at all (all fields null/empty).
+
+G) "Mala chicken (serves 4)\\n- 1 lb boneless skinless chicken thighs, cubed
+   \\n- 1 tsp ground Sichuan peppercorns\\n- 2 tsp Sichuan peppercorns
+   \\n- 3/4 cup water"
+   -> {{name "boneless skinless chicken thigh", prep "cubed", quantity 1,
+        unit "lb", category_hint "poultry"}},
+      {{name "Sichuan peppercorn", form "ground", quantity 1, unit "tsp"}},
+      {{name "Sichuan peppercorn", quantity 2, unit "tsp"}},
+      {{name "water", quantity 0.75, unit "cup"}}
 """
 
 _ING_SCHEMA = {
@@ -148,23 +169,21 @@ def parse_input(text_input: str, *, model: str | None = None) -> ParsedInput:
 
     cfg = settings()
     try:
-        client = Anthropic(api_key=cfg.anthropic_api_key)
         t0 = time.perf_counter()
-        resp = client.messages.create(
+        reply = forced_tool_call(
             model=model or cfg.nl2sql_model,
             max_tokens=2048,
             temperature=0.0,   # structured extraction: same input, same parse
             system=PARSER_SYSTEM.format(vocab=prompt_block(db_vocab())),
-            tools=[PARSER_TOOL],
-            tool_choice={"type": "tool", "name": "submit_parse"},
+            tool=PARSER_TOOL,
             messages=[{"role": "user", "content": text_input}],
         )
         latency_ms = int((time.perf_counter() - t0) * 1000)
-        tool_block = next(b for b in resp.content if b.type == "tool_use")
-        parsed = ParsedInput.model_validate(tool_block.input)
+        parsed = ParsedInput.model_validate(reply.input)
         parsed.cost_usd = estimate_cost_usd(
-            resp.model, resp.usage.input_tokens, resp.usage.output_tokens)
+            reply.model, reply.input_tokens, reply.output_tokens)
         parsed.latency_ms = latency_ms
+        parsed.http = reply.http
         return parsed
     except Exception as e:  # noqa: BLE001 — housing failure mode: degrade, don't raise
         return ParsedInput(error=str(e)[:200])
@@ -221,9 +240,11 @@ def validate_parsed(parsed: ParsedInput, vocab: dict[str, str]) -> ParsedInput:
     parsed.recipe.servings = max(1, parsed.recipe.servings)
     # Public-endpoint bound: cap the plan at 40 ingredients (keeps the
     # VALUES rowsets well under SQLite's parameter limit). Surfaced, not
-    # silent — the dropped count lands in the interpretation chips.
-    if len(parsed.recipe.ingredients) > 40:
-        dropped = len(parsed.recipe.ingredients) - 40
-        parsed.recipe.ingredients = parsed.recipe.ingredients[:40]
-        parsed.ignored.append(f"{dropped} ingredients over the 40-ingredient cap")
+    # silent — the dropped count lands in the interpretation chips and the
+    # dropped ingredients, by name, on the plan's `skipped` list.
+    if len(parsed.recipe.ingredients) > MAX_INGREDIENTS:
+        parsed.over_cap = parsed.recipe.ingredients[MAX_INGREDIENTS:]
+        parsed.recipe.ingredients = parsed.recipe.ingredients[:MAX_INGREDIENTS]
+        parsed.ignored.append(f"{len(parsed.over_cap)} ingredients over the "
+                              f"{MAX_INGREDIENTS}-ingredient cap")
     return parsed

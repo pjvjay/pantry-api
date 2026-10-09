@@ -24,19 +24,68 @@ import re
 
 from .models import Product, RecipeIngredient, Selection, SelectorResult
 from .nlsearch.schemas import Constraints, IngredientSpec, ParsedInput, RecipeSpec
-from .nlsearch.units import tokens
+from .nlsearch.units import head_noun, index_text, tokens
 
+# A leading amount: "2", "1.5", "1/4", "1 1/2", "1½", "¾", and a range's
+# lower end ("1 to 3", "1-3") — then an optional unit. Units normalize_quantity
+# knows become a size need; the rest (inch, pinch, bunch, ...) only count.
+_NUM = r"(?:\d+(?:\.\d+)?(?:\s+\d+/\d+|\s*[½¼¾⅓⅔⅛])?|\d+/\d+|[½¼¾⅓⅔⅛])"
 _QTY = re.compile(
-    r"^(\d+(?:\.\d+)?)\s*(g|kg|ml|l|lb|oz|cups?|cans?|cloves?|dozen)?\s+",
+    rf"^({_NUM})(?:\s*(?:-|–|to)\s*{_NUM})?\s*"
+    r"(g|grams?|kg|kilograms?|ml|millilit(?:er|re)s?|l|lit(?:er|re)s?|lbs?|pounds?"
+    r"|oz|ounces?|cups?|cans?|cloves?|dozen|tbsps?|tablespoons?|tsps?|teaspoons?"
+    r"|inch(?:es)?|thumbs?|pinch(?:es)?|bunch(?:es)?|sprigs?|slices?|pieces?|heads?"
+    r"|stalks?|handfuls?)?\.?(?=\s|$)\s*",
     re.IGNORECASE)
+_FRACTIONS = {"½": 0.5, "¼": 0.25, "¾": 0.75, "⅓": 1 / 3, "⅔": 2 / 3, "⅛": 0.125}
 _FORMS = {"canned", "frozen", "dried", "ground", "smoked", "pickled", "powdered"}
+# What the COOK does, kept out of the name as the live parser keeps it out
+# ("1 cup chopped cilantro" buys cilantro). Purchase descriptors — boneless,
+# skinless, whole, unsalted, smoked, low-sodium — stay in the name, as the
+# live parser keeps them: they decide which product to buy. "crushed" is not
+# here: Crushed Tomatoes and Crushed Red Pepper Flakes are products.
+_PREP = {"chopped", "sliced", "minced", "diced", "shredded", "grated", "mashed",
+         "peeled", "cubed", "julienned", "finely", "thinly", "roughly", "freshly",
+         "fine"}
+# "5 garlic cloves", "2 thyme sprigs": the count word comes after the name
+_TRAILING_COUNT = {"clove", "cloves", "sprig", "sprigs", "stalk", "stalks"}
 _TAGS = ("dairy", "gluten", "meat", "nuts", "egg", "soy")
+
+
+def _amount(text: str) -> float:
+    """"1 1/2" -> 1.5, "1½" -> 1.5, "3/4" -> 0.75, "2" -> 2.0."""
+    total = 0.0
+    for part in re.findall(r"\d+/\d+|\d+(?:\.\d+)?|[½¼¾⅓⅔⅛]", text):
+        if part in _FRACTIONS:
+            total += _FRACTIONS[part]
+        elif "/" in part:
+            num, den = part.split("/")
+            total += int(num) / int(den) if int(den) else 0.0
+        else:
+            total += float(part)
+    return round(total, 4)
+
+
+def _strip_notes(item: str) -> tuple[str, str]:
+    """(item without parenthetical notes, the text after its first comma):
+    "garlic cloves (, thinly sliced)" -> ("garlic cloves", "");
+    "onion, finely chopped" -> ("onion", "finely chopped")."""
+    prev = None
+    while prev != item:                          # innermost groups first
+        prev, item = item, re.sub(r"\([^()]*\)", " ", item)
+    item = item.replace("(", " ").replace(")", " ")
+    head, _, rest = item.partition(",")
+    return " ".join(head.split()), " ".join(rest.split())
 
 
 def parse_recipe(text_input: str, *, model: str | None = None) -> ParsedInput:
     """Regex recipe parse: title, servings, '- qty unit name' ingredient
     lines, and budget / distance / dietary constraints from a Notes line.
-    Same failure contract as the real parser: empty parse, never raises."""
+    Same failure contract as the real parser: empty parse, never raises.
+
+    Consistent with the live parser on what to buy: parenthetical notes and
+    the text after a comma are dropped, prep words go to `prep`, a leading
+    purchase form goes to `form`, and purchase descriptors stay in the name."""
     lines = [ln.strip() for ln in text_input.splitlines() if ln.strip()]
     title = lines[0].split("(")[0].strip() if lines else "Pasted recipe"
     m = re.search(r"serves\s+(\d+)", text_input, re.IGNORECASE)
@@ -50,21 +99,28 @@ def parse_recipe(text_input: str, *, model: str | None = None) -> ParsedInput:
             continue
         if not ln.startswith(("-", "*", "•")):
             continue
-        item = ln.lstrip("-*• ").strip()
+        raw = ln.lstrip("-*• ").strip()
+        item, after_comma = _strip_notes(raw)
         qty = unit = None
         if qm := _QTY.match(item):
-            qty = float(qm.group(1))
-            unit = (qm.group(2) or "each").lower()
+            qty = _amount(qm.group(1))
+            unit = (qm.group(2) or "each").lower().rstrip(".")
             item = item[qm.end():]
-        words = [w for w in item.lower().split() if w not in {"of", "fresh"}]
+            if not item.strip() and qm.group(2):     # "2 cloves": the unit IS the item
+                item, unit = qm.group(2), "each"
+        words = [w for w in item.lower().split() if w != "of"]
+        prep = [w for w in words if w in _PREP] + ([after_comma] if after_comma else [])
+        words = [w for w in words if w not in _PREP]
+        if unit == "each" and len(words) > 1 and words[-1] in _TRAILING_COUNT:
+            unit = words.pop()
         form = None
         if words and words[0] in _FORMS:
             form = words.pop(0)
         if unit and unit.startswith("can"):
             form, unit = "canned", "can"
-        name = " ".join(words).strip() or item
-        ingredients.append(IngredientSpec(name=name, form=form,
-                                          quantity=qty, unit=unit))
+        name = " ".join(words).strip() or item.strip() or raw
+        ingredients.append(IngredientSpec(name=name, form=form, quantity=qty, unit=unit,
+                                          prep=" ".join(prep) or None))
 
     cons = Constraints()
     scope = notes or text_input
@@ -91,11 +147,16 @@ def select_products(ingredients: list[RecipeIngredient],
                     constraints: dict | None = None,
                     origins_by_id: dict | None = None,
                     preference: list[str] | None = None) -> SelectorResult:
-    """Token-overlap, then origin preference, then offer price; direct
-    matches before t4 substitutes. Confidence is fixed at 0.9 — above the
-    cascade threshold, so demo mode never triggers a (would-be) escalation.
+    """Token-overlap, then "fresh" when the ingredient says it, then head
+    noun, then origin preference, then offer price; direct matches before
+    t4 substitutes. Confidence is fixed at 0.9
+    — above the cascade threshold, so demo mode never triggers a (would-be)
+    escalation.
 
-    Preference applies strictly AFTER semantic match (token overlap), the
+    The head-noun key breaks overlap ties the way a shopper would: for
+    "flour", All-Purpose Flour (about flour) beats Flour Tortillas (about
+    tortillas, though cheaper); for "mustard", Dijon Mustard beats Black
+    Mustard Seeds. Preference applies strictly AFTER semantic match, the
     same priority the live selector prompt gives it: it only breaks ties
     between equally-good matches, never trades correctness for origin."""
     origins_by_id = origins_by_id or {}
@@ -103,18 +164,24 @@ def select_products(ingredients: list[RecipeIngredient],
     selections: list[Selection] = []
     for ing in ingredients:
         toks = set(tokens(ing.name))
+        want = tokens(ing.name)[-1] if tokens(ing.name) else None
+        # "fresh" is a tokenizer stopword (half the catalog says it), yet
+        # "fresh coriander" is cilantro, not ground coriander: read it raw.
+        fresh = "fresh" in ing.name.lower().split()
         pool = [p for p in products if not p.substitute] or products
         if not pool:
             continue
         pick = min(pool, key=lambda p: (
-            -len(toks & set(tokens(f"{p.name} {p.description}"))),
+            -len(toks & set(tokens(index_text(p.name, p.description)))),
+            0 if not fresh or "fresh" in f"{p.name} {p.description}".lower() else 1,
+            0 if want is not None and head_noun(p.name) == want else 1,
             _preference_rank(origins_by_id.get(p.id), preference),
             p.store_price if p.store_price is not None else p.price,
             p.id))
-        why = "demo mode: highest token overlap, then cheapest offer"
+        why = "demo mode: highest token overlap, then head noun, then cheapest offer"
         if preference:
-            why = ("demo mode: highest token overlap, then origin preference "
-                   f"({', '.join(preference)}), then cheapest offer")
+            why = ("demo mode: highest token overlap, then head noun, then origin "
+                   f"preference ({', '.join(preference)}), then cheapest offer")
         selections.append(Selection(
             line_no=ing.line_no, product_id=pick.id, confidence=0.9,
             reasoning=why))

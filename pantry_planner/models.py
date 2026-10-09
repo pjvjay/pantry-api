@@ -4,9 +4,11 @@ API boundary; plain dataclasses inside would also work.
 """
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
-from .nlsearch.plan import StepResult  # import-safe: plan.py is pydantic-only
+from .nlsearch.plan import StepPhase, StepResult  # import-safe: plan.py is pydantic-only
 
 # ─── Domain models ────────────────────────────────────────────
 
@@ -209,6 +211,21 @@ class SelectorResult(BaseModel):
     output_tokens: int = 0
     latency_ms: int = 0
     cost_usd: float = 0.0
+    # One httptrace record per LLM call behind this result (Gemini only): where the time went.
+    http: list[dict] = Field(default_factory=list)
+
+
+class LlmCallTrace(BaseModel):
+    """One LLM call's time, phase by phase (httptrace.py). `server_ms` is the provider's own
+    processing time as its front end reports it (Google's server-timing header), when it
+    does: `waiting for Google` far above it was spent before the request reached Google."""
+    step: str
+    model: str
+    total_ms: int
+    attempts: int = 1
+    status: int | None = None
+    server_ms: int | None = None
+    phases: list[StepPhase] = Field(default_factory=list)
 
 
 # ─── Router I/O ───────────────────────────────────────────────
@@ -280,13 +297,38 @@ class TripOption(BaseModel):
 
 # ─── Final plan ───────────────────────────────────────────────
 
+# How retrieval matched a line's ingredient to the catalog:
+#   exact   — every word of the ingredient as written (the purchase form
+#             included); always the case on the classic seeded-recipe path,
+#             whose ingredient names are used verbatim
+#   form    — only after dropping the purchase form ("powdered tomato" ->
+#             tomato products)
+#   generic — only after dropping descriptor words (units.DESCRIPTORS:
+#             light/dark/toasted/ground/...): "light brown sugar" -> Brown Sugar.
+#             On the week path, a line rescued by the head-noun fallback.
+MatchLevel = Literal["exact", "form", "generic"]
+
+
+class DroppedIngredient(BaseModel):
+    """An ingredient a partial plan (allow_partial) left out instead of
+    aborting: what it was, why, and what to try instead."""
+    ingredient: str
+    reason: str
+    suggestions: list[str] = Field(default_factory=list)
+
+
 class PlanLineItem(BaseModel):
+    """One PURCHASE. Recipe lines that resolve to the same product are one
+    purchase: `line_no` is the first of them, `also_lines` the rest,
+    `ingredient_name` names every one ("ground Sichuan peppercorn + Sichuan
+    peppercorn"), and `packs` is how many packs their summed need takes
+    (1 unless the need is known in the pack's unit and one pack is short)."""
     line_no: int
     ingredient_name: str
     product_id: int
     product_name: str
     product_description: str
-    price: float                       # the charged price (store offer when known)
+    price: float                       # the charged price: store offer x packs
     confidence: float
     reasoning: str
     model_used: str
@@ -295,6 +337,9 @@ class PlanLineItem(BaseModel):
     store_price: float | None = None
     # Provenance of this line, when origin evidence exists for it
     origin: OriginReceipt | None = None
+    match: MatchLevel = "exact"        # the loosest level among the lines it covers
+    also_lines: list[int] = Field(default_factory=list)
+    packs: int = 1
 
 
 class ShoppingPlan(BaseModel):
@@ -311,6 +356,10 @@ class ShoppingPlan(BaseModel):
     interpretation: list[str] = Field(default_factory=list)
     plan_trace: list[StepResult] = Field(default_factory=list)
     candidate_count: int = 0
+    # Every LLM call the plan made, phase by phase (both paths; empty in demo mode).
+    llm_calls: list[LlmCallTrace] = Field(default_factory=list)
+    # The Burr run that traced this plan, step by step (its app id in the Burr UI).
+    burr_run: str = ""
     # Split-trip optimizer: stops-vs-cost frontier for the chosen basket
     trip_options: list[TripOption] = Field(default_factory=list)
     # Provenance of the basket as a whole. Only computed when the caller
@@ -321,6 +370,20 @@ class ShoppingPlan(BaseModel):
     # describing a basket as clean. "unverified" means coverage is below the
     # floor, not that anything excluded shipped.
     origin_status: str = "not_requested"
+    # Partial plans (NL path, allow_partial=True): ingredients left out
+    # instead of aborting. not_stocked = the catalog has no match at all (t1);
+    # out_of_range = stocked, but no offer within the distance/price/diet
+    # constraints (t2). skipped = never planned, whatever allow_partial says:
+    # water and ice (never bought), lines past the 40-ingredient cap, and
+    # lines the selector returned no valid product for. total_cost,
+    # origin_coverage and trip_options cover the planned line_items only.
+    # ingredient_count is how many ingredients the recipe asked for, before
+    # anything was dropped: the lines covered by line_items (line_no plus
+    # also_lines) + not_stocked + out_of_range + skipped == ingredient_count.
+    not_stocked: list[DroppedIngredient] = Field(default_factory=list)
+    out_of_range: list[DroppedIngredient] = Field(default_factory=list)
+    skipped: list[DroppedIngredient] = Field(default_factory=list)
+    ingredient_count: int = 0
 
 
 # ─── Weekly menu optimizer (5A) ───────────────────────────────
