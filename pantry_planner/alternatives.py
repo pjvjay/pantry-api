@@ -134,12 +134,25 @@ class ValidPin(NamedTuple):
 # ─── Checks ──────────────────────────────────────────────────
 
 def check_basis(basis: PlanBasis) -> None:
-    """Bounds on a client-supplied basis, so no query is built from an outsized one."""
+    """Bounds on a client-supplied basis, so no query is built from an outsized one, and no
+    infinite, NaN or out-of-range number reaches the pack and trip arithmetic (math.ceil of
+    an infinite need raises) or a distance query (a NaN latitude finds no store and would
+    blame the catalog)."""
     from .origins import validate_countries
 
     def short(value: str | None, what: str, limit: int = MAX_TEXT) -> None:
         if value is not None and len(value) > limit:
             raise BasisError(f"{what} is longer than {limit} characters")
+
+    def number(value: float | None, what: str, low: float, high: float = math.inf, *,
+               above: bool = False) -> None:
+        if value is None:
+            return
+        if not (math.isfinite(value) and (value > low if above else value >= low)
+                and value <= high):
+            span = (f"above {low:g}" if above else f"{low:g} or more") if high == math.inf \
+                else f"from {low:g} to {high:g}"
+            raise BasisError(f"{what} must be a finite number {span}, got {value!r}")
 
     if len(basis.lines) > MAX_BASIS_LINES:
         raise BasisError(f"a basis has at most {MAX_BASIS_LINES} lines, got {len(basis.lines)}")
@@ -150,8 +163,17 @@ def check_basis(basis: PlanBasis) -> None:
         for value, what in ((ln.name, "a line name"), (ln.form, "a line form"),
                             (ln.prep, "a line prep"), (ln.unit, "a line unit")):
             short(value, what)
+        number(ln.quantity, f"line {ln.line_no}'s quantity", 0)
     short(basis.recipe_slug, "recipe_slug")
     short(basis.recipe_name, "recipe_name")
+    number(basis.lat, "lat", -90, 90)
+    number(basis.lon, "lon", -180, 180)
+    number(basis.max_km, "max_km", 0, above=True)
+    c = basis.constraints
+    for value, what in ((c.max_item_price, "constraints.max_item_price"),
+                        (c.max_total_budget, "constraints.max_total_budget"),
+                        (c.max_distance_km, "constraints.max_distance_km")):
+        number(value, what, 0)
     if len(basis.pins) > MAX_PINS:
         raise BasisError(f"at most {MAX_PINS} pins, got {len(basis.pins)}")
     lists = (basis.exclude_origin, basis.preference, basis.interpretation,

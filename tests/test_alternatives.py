@@ -679,6 +679,46 @@ def test_rest_twins_answer_bad_input_with_a_code_and_the_reason():
         assert resp.status_code == 409 and resp.json()["detail"]["error"] == "stale_basis"
 
 
+def test_rest_twins_refuse_a_basis_whose_numbers_are_not_finite_or_out_of_range():
+    import json
+
+    from pantry_planner import flow
+
+    plan = flow.run_nl("P\n- 500g penne\n- 2 cloves garlic\n", lat=49.28, lon=-123.12, max_km=10)
+    basis = plan.basis.model_dump(mode="json")
+    first = basis["lines"][0]["line_no"]
+
+    def line(**over):
+        return {**basis, "lines": [{**ln, **over} if ln["line_no"] == first else ln
+                                   for ln in basis["lines"]]}
+
+    bad = {
+        "an infinite quantity": line(quantity=float("inf")),
+        "a NaN quantity": line(quantity=float("nan")),
+        "a negative quantity": line(quantity=-5),
+        "a NaN latitude": {**basis, "lat": float("nan")},
+        "a latitude off the globe": {**basis, "lat": 1e308},
+        "a longitude off the globe": {**basis, "lon": 200.0},
+        "no distance at all": {**basis, "max_km": 0},
+        "an infinite distance": {**basis, "max_km": float("inf")},
+        "a NaN price cap": {**basis, "constraints": {**basis["constraints"],
+                                                     "max_item_price": float("nan")}},
+    }
+    c = _client()
+    for what, b in bad.items():
+        for path, body in (("/plan/alternatives", {"basis": b, "line_no": first}),
+                           ("/plan/reprice", {"basis": b})):
+            # JSON has no Infinity or NaN, but Python's parser reads them: send them as written
+            resp = c.post(path, content=json.dumps(body), headers={"content-type":
+                                                                    "application/json"})
+            assert resp.status_code == 422, (what, path, resp.text)
+            assert resp.json()["detail"]["error"] == "invalid_basis", (what, path)
+            assert "must be a finite number" in resp.json()["detail"]["detail"], (what, path)
+    # a quantity of 0 is a reviewed recipe's own amount (RecipeDoc allows it), not an error
+    assert c.post("/plan/alternatives", json={"basis": line(quantity=0),
+                                              "line_no": first}).status_code == 200
+
+
 def test_rest_twins_have_their_own_sixty_a_minute_buckets(monkeypatch):
     from pantry_planner import flow, limits
 
