@@ -6,8 +6,10 @@ engine never rewrites it. On every schedule call the trip is recomputed, and:
 - the fingerprint is sha256 of the date and the sorted (product_id, packs, storage) lines.
   Price is not in it, so a price change never moves a trip out of approved;
 - a different fingerprint makes the trip needs_review, with the diff against the snapshot;
-- each line's price_delta is its price now minus price_at_approval (demo prices), shown on
-  the line and summed on the trip;
+- each line's price_delta is (unit price now - unit price at approval) x packs now (demo
+  prices), shown on the line and summed on the trip. The snapshot keeps the line's price for
+  all its packs, so the unit price at approval is price_at_approval / packs: a changed pack
+  count is a diff, never a price change;
 - a line whose product has no offer in range any more makes the trip needs_review whatever
   the fingerprint says (no_longer_stocked).
 """
@@ -64,16 +66,24 @@ def diff(approved: ApprovedTrip, lines: list[TripLine], names: dict[int, str]) -
 
 def apply_prices(approved: ApprovedTrip, lines: list[TripLine]) -> float | None:
     """Set price_at_approval and price_delta on each line the snapshot priced; return the
-    trip's summed delta (None when no line has both prices)."""
-    priced = {(s.product_id, s.storage): s.price_at_approval for s in approved.snapshot}
+    trip's summed delta (None when no line has one).
+
+    price_at_approval is the line's price for all its packs then, so the unit price then is
+    price_at_approval / packs then, and the delta is price now - unit then x packs now:
+    (unit now - unit then) x packs now. Buying more or fewer packs at the same prices is no
+    price change. A line whose packs are unknown or 0, then or now, has no delta."""
+    snap = {(s.product_id, s.storage): s for s in approved.snapshot}
     total, any_delta = 0.0, False
     for ln in lines:
-        then = priced.get((ln.product.id, ln.storage))
-        ln.price_at_approval = then
-        if then is not None and ln.price is not None:
-            ln.price_delta = round(ln.price - then, 2) + 0.0
-            total += ln.price_delta
-            any_delta = True
+        s = snap.get((ln.product.id, ln.storage))
+        ln.price_at_approval = None if s is None else s.price_at_approval
+        if s is None or s.price_at_approval is None or not s.packs or ln.price is None \
+                or not ln.packs:
+            continue
+        unit_then = s.price_at_approval / s.packs
+        ln.price_delta = round(ln.price - unit_then * ln.packs, 2) + 0.0
+        total += ln.price_delta
+        any_delta = True
     return round(total, 2) + 0.0 if any_delta else None
 
 

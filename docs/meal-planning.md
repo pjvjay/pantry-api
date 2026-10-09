@@ -238,7 +238,10 @@ rewrites it:
   offering to re-approve;
 - a **price change** never changes the status: each line shows `price_at_approval` and
   `price_delta`, the trip its summed delta, and a note says "Price changed since you approved
-  ...: +$1.20 (demo prices)";
+  ...: +$1.20 (demo prices)". `price_at_approval` is the line's price for all its packs, so
+  the delta compares unit prices: (unit price now − `price_at_approval` / packs at approval)
+  × packs now. A changed pack count is a diff, not a price change, and a line whose packs are
+  unknown or 0 on either side has no delta;
 - a product with **no offer in range any more** is `stocked: false`, the trip becomes
   `needs_review`, and a must-fix `no_longer_stocked` warning offers Options for that line or
   dropping it.

@@ -256,6 +256,59 @@ def test_a_price_change_after_approval_is_a_delta_and_the_status_stays(example, 
     assert notes and "(demo prices)" in notes[0]["message"] and notes[0]["level"] == "note"
 
 
+def test_a_pack_count_changed_after_approval_is_a_diff_not_a_price_change(example):
+    """The snapshot keeps each line's price for all its packs. Comparing line totals read
+    two more packs at the same prices as "Price changed since you approved: +$X"."""
+    sched = schedule(example)
+    approved = _approve(sched, days=[1])
+    ((trip, before),) = lines_of(sched, "fresh", THIGHS)[:1]
+    assert index(trip["date"]) == 1 and before["packs"] >= 1
+    key = f'{trip["date"]}:{THIGHS}'
+    after = schedule({**example, "trips": approved,
+                      "packs_override": {key: before["packs"] + 2}})
+    t1 = _trip(after, "fresh", 1)
+    line = next(ln for ln in t1["lines"] if ln["product"]["id"] == THIGHS)
+    assert line["packs"] == before["packs"] + 2
+    assert line["price"] != before["price"]                 # more packs cost more ...
+    assert line["price_at_approval"] == before["price"]
+    assert line["price_delta"] == 0 and t1["price_delta"] == 0   # ... at the same prices
+    assert not [w for w in after["warnings"] if w["code"] == "price_changed"]
+    # The fingerprint holds the packs: the trip needs review, with the change in its diff.
+    assert t1["status"] == "needs_review"
+    assert t1["diff"]["changed"] == [{
+        "product_id": THIGHS, "name": PRODUCTS[THIGHS]["name"], "packs_before": before["packs"],
+        "packs_after": before["packs"] + 2, "storage": before["storage"]}]
+    assert any(w["code"] == "needs_review" and w["trip_date"] == trip["date"]
+               for w in after["warnings"])
+
+
+def test_a_unit_price_change_with_changed_packs_is_counted_on_the_packs_bought_now(
+        example, reseed):
+    sched = schedule(example)
+    approved = _approve(sched, days=[1])
+    ((trip, before),) = lines_of(sched, "fresh", THIGHS)[:1]
+    packs_now = before["packs"] + 3
+    _sql("UPDATE store_products SET price = price + 1.2 WHERE product_id = :p", p=THIGHS)
+    after = schedule({**example, "trips": approved,
+                      "packs_override": {f'{trip["date"]}:{THIGHS}': packs_now}})
+    t1 = _trip(after, "fresh", 1)
+    line = next(ln for ln in t1["lines"] if ln["product"]["id"] == THIGHS)
+    # (unit now - unit then) x packs now, the unit then being the approved line price over
+    # the approved packs; read from the database, not from the engine
+    store_price = _sql("SELECT sp.price AS price FROM store_products sp JOIN stores s ON "
+                       "s.id = sp.store_id WHERE s.name = :n AND sp.product_id = :p",
+                       n=line["store"], p=THIGHS)[0]["price"]
+    unit_then = before["price"] / before["packs"]
+    assert line["price"] == round(store_price * packs_now, 2)
+    assert line["price_delta"] == pytest.approx(round((store_price - unit_then) * packs_now, 2))
+    assert line["price_delta"] == pytest.approx(1.2 * packs_now)
+    others = [ln["price_delta"] for ln in t1["lines"] if ln["product"]["id"] != THIGHS]
+    assert t1["price_delta"] == pytest.approx(line["price_delta"] + sum(others))
+    assert all(d == 0 for d in others)
+    (note,) = [w for w in after["warnings"] if w["code"] == "price_changed"]
+    assert f"+${1.2 * packs_now:.2f} (demo prices)" in note["message"]
+
+
 def test_an_offer_removed_after_approval_is_no_longer_stocked(example, reseed):
     sched = schedule(example)
     approved = _approve(sched, days=[1])
