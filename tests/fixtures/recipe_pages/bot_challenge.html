@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<!-- SYNTHETIC test page, written for pantry-api's extractor tests. It imitates
+     the interstitial a bot-protection service serves instead of the recipe: a
+     WebSite block, a script that would write the page, and no Recipe in JSON-LD
+     or microdata. No text is copied from any site. -->
+<html lang="en-US">
+<head>
+<meta charset="UTF-8">
+<title>Just a moment...</title>
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "WebSite", "name": "Example Kitchen"}</script>
+</head>
+<body>
+<div class="challenge">
+  <h1>Checking your browser before accessing example.com</h1>
+  <noscript>Enable JavaScript and cookies to continue.</noscript>
+</div>
+<script>
+  document.write('<li itemprop="recipeIngredient">1 cup flour</li>');
+</script>
+</body>
+</html>

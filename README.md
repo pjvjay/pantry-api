@@ -654,6 +654,11 @@ server only ever receives ingredient text and never fetches a URL.
    recipe_text, omitted}` and exits 2 when the page has no structured
    recipe (the skill then reads the page with WebFetch and copies the lines
    verbatim) or 1 when the fetch fails. It never runs page scripts.
+   A YouTube link has no structured recipe. The skill reads the video's
+   description, through the user's own YouTube Data API key
+   (`YOUTUBE_API_KEY`) or pasted by the user. Failing that, it reads the
+   one recipe page the description links, and failing that it asks for a
+   paste. It never reads the watch page, captions or a transcript.
 2. Claude calls `plan_from_text` once with `allow_partial: true`, plus
    `lat`/`lon` and `max_km` when the user gave a place or a distance.
 3. It reports every line (generic matches flagged as substitutions, a

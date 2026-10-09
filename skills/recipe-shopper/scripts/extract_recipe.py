@@ -51,6 +51,15 @@ import zlib
 from html.parser import HTMLParser
 from typing import Any
 
+# demo-hub's link import loads this file by path and takes these three names
+# and extract() from it, so the hub and this script read pages the same way:
+# the hub's 413 and its fetch deadline are MAX_BYTES and TIMEOUT_S, defined
+# here and nowhere else. __version__ goes into an imported recipe's
+# source.extractor, so a recipe says which reading of its page produced its
+# lines. Bump the patch for a fix to what is read, the minor for a new key in
+# extract()'s result or a changed limit, and the major for a key removed or
+# renamed.
+__version__ = "1.0.0"
 MAX_BYTES = 5 * 1024 * 1024          # read at most 5 MB of page
 TIMEOUT_S = 20                       # the whole fetch, not one read
 CHUNK = 64 * 1024
@@ -203,7 +212,7 @@ def recipes_from_jsonld(blocks: list[str]) -> list[dict]:
         ingredients = _ingredient_lines(node.get("recipeIngredient", node.get("ingredients")))
         out.append({"name": _first_text(node.get("name")) or _first_text(node.get("headline")),
                     "yield": _yield_text(node.get("recipeYield", node.get("yield"))),
-                    "ingredients": ingredients})
+                    "ingredients": ingredients, "method": "jsonld"})
     return out
 
 
@@ -356,18 +365,23 @@ def recipes_from_microdata(parser: _PageParser) -> list[dict]:
         lines = scope.props.get("recipeIngredient") or scope.props.get("ingredients") or []
         out.append({"name": (scope.props.get("name") or [""])[0],
                     "yield": (scope.props.get("recipeYield") or [""])[0],
-                    "ingredients": [ln for ln in lines if ln]})
+                    "ingredients": [ln for ln in lines if ln], "method": "microdata"})
     if not any(r["ingredients"] for r in out):
         # itemprop="recipeIngredient" with no typed Recipe scope around it
         loose = [ln for s in parser.scopes for ln in s.props.get("recipeIngredient", []) if ln]
         if loose:
-            out.append({"name": clean(parser.title), "yield": "", "ingredients": loose})
+            out.append({"name": clean(parser.title), "yield": "", "ingredients": loose,
+                        "method": "microdata"})
     return out
 
 
 def extract(page: str) -> dict | None:
     """The first recipe with ingredient lines: JSON-LD first, then
-    microdata. None when the page has neither."""
+    microdata. None when the page has neither.
+
+    Returns {"name", "yield", "ingredients", "method"}. `method` is "jsonld"
+    or "microdata", whichever markup held the recipe: an importer records it
+    as the recipe's source, and only this function knows which one it read."""
     parser = _PageParser()
     parser.feed(page)
     parser.close()
@@ -499,8 +513,9 @@ def fetch(url: str) -> tuple[str, str]:
     except (OSError, http.client.HTTPException, ValueError) as e:
         raise FetchError(f"could not fetch {url}: {e}") from e
     if len(body) > MAX_BYTES:
-        print(f"warning: page is larger than {MAX_BYTES // (1024 * 1024)} MB; "
-              "only the first 5 MB were read", file=sys.stderr)
+        limit = f"{MAX_BYTES // (1024 * 1024)} MB"
+        print(f"warning: page is larger than {limit}; only the first {limit} were read",
+              file=sys.stderr)
         body = body[:MAX_BYTES]
     return final_url, _decode(_decompress(body, encoding), charset)
 
