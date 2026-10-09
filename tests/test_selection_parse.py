@@ -308,8 +308,11 @@ def test_within_distance_is_the_distance_up_to_the_bound():
 
 
 def _timed_parse(text: str, recipes: list[dict]) -> tuple[float, dict]:
+    """The request's time, not the app's: a test run on its own (-k) would otherwise time
+    the first import of the API and its first request too, about a second."""
     import time
 
+    _parse("pepperoni pizza", recipes=recipes)
     t0 = time.perf_counter()
     out = _parse(text, recipes=recipes)
     return time.perf_counter() - t0, out
