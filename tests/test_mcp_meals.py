@@ -1,4 +1,4 @@
-"""plan_meals (MCP): counted dishes drafted into a meal plan.
+"""plan_meals (MCP) and POST /mealplan/plan: counted dishes drafted into a meal plan.
 
 Demo mode, no LLM. Expected values come from the seed files (the starters, the library), the
 user's sentence and plain counting, and the schedule the returned draft gets from
@@ -281,3 +281,22 @@ async def test_verbose_attaches_the_schedule(server):
 async def test_what_it_refuses(server, args, match):
     with pytest.raises(ToolError, match=match):
         await server.call_tool("plan_meals", args)
+
+
+# ─── REST ────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_the_rest_twin_answers_as_the_tool_does(server):
+    tool = await plan(server, **EXAMPLE)
+    r = client().post("/mealplan/plan", json=EXAMPLE)
+    assert r.status_code == 200, r.text
+    assert r.json()["summary"] == tool["summary"]
+
+
+def test_the_rest_twin_is_rate_limited_and_refuses_clearly():
+    c = client()
+    body = {"dishes": [{"recipe": "Pepperoni Pizza", "count": 1}],
+            "start_date": START.isoformat()}
+    assert c.post("/mealplan/plan", json={}).json()["detail"]["error"] == "plan_meals"
+    codes = [c.post("/mealplan/plan", json=body).status_code for _ in range(4)]
+    assert codes[:2] == [200, 200] and codes[-1] == 429

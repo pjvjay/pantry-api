@@ -27,6 +27,7 @@ from .config import (
     validate_model_spec,
 )
 from .llm import LLMError
+from .mealplan.assistant import DishIn, MealPlanContext, MealPlanResult, ProposedDish
 from .mealplan.models import (
     MealPlanDraft,
     MealSchedule,
@@ -883,6 +884,43 @@ def mealplan_suggest_cook_days(draft: MealPlanDraft) -> dict:
         return freshness_layout(draft, compute(draft))
     except MealPlanError as e:
         raise _meal_plan_error(e) from e
+
+
+class MealPlanRequest(BaseModel):
+    """plan_meals as REST: counted dishes drafted into a meal plan (mealplan/assistant.py).
+    Bounded like a draft (256 KB); resolves new recipes, so it is limited like resolve."""
+
+    dishes: list[DishIn] = Field(default_factory=list, max_length=12)
+    proposed: list[ProposedDish] = Field(default_factory=list, max_length=12)
+    days: int | None = Field(default=None, ge=1, le=14)
+    start_date: dt.date | None = None
+    current: MealPlanContext | None = None
+    my_recipe_docs: list[RecipeDoc] = Field(default_factory=list, max_length=12)
+    household_servings: int | None = Field(default=None, ge=1, le=20)
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+    max_km: float | None = Field(default=None, ge=0.5, le=100)
+    verbose: bool = False
+
+
+@app.post("/mealplan/plan", response_model=MealPlanResult,
+          dependencies=[Depends(_draft_size), Depends(limits.require_llm_budget),
+                        Depends(limits.rate_limit("/mealplan/plan"))])
+def mealplan_plan(req: MealPlanRequest) -> MealPlanResult:
+    """The MCP tool plan_meals over REST: counted dishes ("3 Pepperoni Pizza + 2 Chicken Fried
+    Rice") drafted into a plan, with only exact and plural matches placed and every other
+    match a proposal. Returns ops for a console to apply, the draft and its summary; nothing is
+    saved or approved. 422 {error: plan_meals, detail} for a request it cannot draft."""
+    from .mealplan.assistant import PlanMealsError, plan_meals
+
+    try:
+        return plan_meals(req.dishes, req.proposed, days=req.days, start_date=req.start_date,
+                          current=req.current, my_recipe_docs=req.my_recipe_docs,
+                          household_servings=req.household_servings, lat=req.lat,
+                          lon=req.lon, max_km=req.max_km, verbose=req.verbose)
+    except PlanMealsError as e:
+        raise HTTPException(status_code=422, detail={"error": "plan_meals",
+                                                     "detail": str(e)}) from e
 
 
 @app.get("/mealplan/starters")
