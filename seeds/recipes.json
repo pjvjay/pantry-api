@@ -6,15 +6,24 @@
     "ingredients": [
       {
         "name": "Peanut Butter and Jelly Jam",
-        "category": "spread"
+        "category": "spread",
+        "quantity": 40,
+        "unit": "g",
+        "note": ""
       },
       {
         "name": "Wheat Bread",
-        "category": "bread"
+        "category": "bread",
+        "quantity": 150,
+        "unit": "g",
+        "note": "about 4 slices"
       },
       {
         "name": "White Chocolate",
-        "category": "chocolate"
+        "category": "chocolate",
+        "quantity": 30,
+        "unit": "g",
+        "note": ""
       }
     ]
   },
@@ -25,31 +34,52 @@
     "ingredients": [
       {
         "name": "Spaghetti",
-        "category": "pantry"
+        "category": "pantry",
+        "quantity": 400,
+        "unit": "g",
+        "note": ""
       },
       {
         "name": "Ground Beef",
-        "category": "meat"
+        "category": "meat",
+        "quantity": 500,
+        "unit": "g",
+        "note": ""
       },
       {
         "name": "Yellow Onion",
-        "category": "produce"
+        "category": "produce",
+        "quantity": 150,
+        "unit": "g",
+        "note": "1 medium onion"
       },
       {
         "name": "Garlic",
-        "category": "produce"
+        "category": "produce",
+        "quantity": 10,
+        "unit": "g",
+        "note": "about 3 cloves"
       },
       {
         "name": "Canned Tomatoes",
-        "category": "pantry"
+        "category": "pantry",
+        "quantity": 796,
+        "unit": "ml",
+        "note": "one large can"
       },
       {
         "name": "Olive Oil",
-        "category": "oil"
+        "category": "oil",
+        "quantity": 30,
+        "unit": "ml",
+        "note": "2 tablespoons"
       },
       {
         "name": "Mozzarella",
-        "category": "dairy"
+        "category": "dairy",
+        "quantity": 100,
+        "unit": "g",
+        "note": ""
       }
     ]
   },
@@ -60,39 +90,66 @@
     "ingredients": [
       {
         "name": "Chicken Thighs",
-        "category": "meat"
+        "category": "meat",
+        "quantity": 700,
+        "unit": "g",
+        "note": ""
       },
       {
         "name": "Basmati Rice",
-        "category": "grain"
+        "category": "grain",
+        "quantity": 300,
+        "unit": "g",
+        "note": ""
       },
       {
         "name": "Yellow Onion",
-        "category": "produce"
+        "category": "produce",
+        "quantity": 200,
+        "unit": "g",
+        "note": "1 large onion"
       },
       {
         "name": "Garlic",
-        "category": "produce"
+        "category": "produce",
+        "quantity": 15,
+        "unit": "g",
+        "note": "about 4 cloves"
       },
       {
         "name": "Ginger",
-        "category": "produce"
+        "category": "produce",
+        "quantity": 20,
+        "unit": "g",
+        "note": "a thumb-sized piece"
       },
       {
         "name": "Garam Masala",
-        "category": "spice"
+        "category": "spice",
+        "quantity": 10,
+        "unit": "g",
+        "note": ""
       },
       {
         "name": "Turmeric",
-        "category": "spice"
+        "category": "spice",
+        "quantity": 3,
+        "unit": "g",
+        "note": ""
       },
       {
         "name": "Diced Tomatoes",
-        "category": "pantry"
+        "category": "pantry",
+        "quantity": 400,
+        "unit": "ml",
+        "note": "half a large can"
       },
       {
         "name": "Canola Oil",
-        "category": "oil"
+        "category": "oil",
+        "quantity": 30,
+        "unit": "ml",
+        "note": "2 tablespoons"
       }
     ]
   },
@@ -103,15 +160,24 @@
     "ingredients": [
       {
         "name": "Sliced Bread",
-        "category": "bread"
+        "category": "bread",
+        "quantity": 75,
+        "unit": "g",
+        "note": "2 slices"
       },
       {
         "name": "Cheddar Cheese",
-        "category": "dairy"
+        "category": "dairy",
+        "quantity": 60,
+        "unit": "g",
+        "note": ""
       },
       {
         "name": "Butter",
-        "category": "dairy"
+        "category": "dairy",
+        "quantity": 15,
+        "unit": "g",
+        "note": "1 tablespoon"
       }
     ]
   },
@@ -122,23 +188,38 @@
     "ingredients": [
       {
         "name": "Broccoli",
-        "category": "produce"
+        "category": "produce",
+        "quantity": 400,
+        "unit": "g",
+        "note": ""
       },
       {
         "name": "Basmati Rice",
-        "category": "grain"
+        "category": "grain",
+        "quantity": 150,
+        "unit": "g",
+        "note": ""
       },
       {
         "name": "Garlic",
-        "category": "produce"
+        "category": "produce",
+        "quantity": 10,
+        "unit": "g",
+        "note": "about 3 cloves"
       },
       {
         "name": "Ginger",
-        "category": "produce"
+        "category": "produce",
+        "quantity": 10,
+        "unit": "g",
+        "note": ""
       },
       {
         "name": "Canola Oil",
-        "category": "oil"
+        "category": "oil",
+        "quantity": 20,
+        "unit": "ml",
+        "note": "about 1 tablespoon"
       }
     ]
   },
@@ -149,23 +230,38 @@
     "ingredients": [
       {
         "name": "Ground Beef",
-        "category": "meat"
+        "category": "meat",
+        "quantity": 450,
+        "unit": "g",
+        "note": ""
       },
       {
         "name": "Basmati Rice",
-        "category": "grain"
+        "category": "grain",
+        "quantity": 225,
+        "unit": "g",
+        "note": ""
       },
       {
         "name": "Broccoli",
-        "category": "produce"
+        "category": "produce",
+        "quantity": 300,
+        "unit": "g",
+        "note": ""
       },
       {
         "name": "Garlic",
-        "category": "produce"
+        "category": "produce",
+        "quantity": 10,
+        "unit": "g",
+        "note": "about 3 cloves"
       },
       {
         "name": "Canola Oil",
-        "category": "oil"
+        "category": "oil",
+        "quantity": 20,
+        "unit": "ml",
+        "note": "about 1 tablespoon"
       }
     ]
   },
@@ -176,23 +272,38 @@
     "ingredients": [
       {
         "name": "Penne",
-        "category": "pantry"
+        "category": "pantry",
+        "quantity": 250,
+        "unit": "g",
+        "note": ""
       },
       {
         "name": "Canned Tomatoes",
-        "category": "pantry"
+        "category": "pantry",
+        "quantity": 400,
+        "unit": "ml",
+        "note": "half a large can"
       },
       {
         "name": "Garlic",
-        "category": "produce"
+        "category": "produce",
+        "quantity": 8,
+        "unit": "g",
+        "note": "about 2 cloves"
       },
       {
         "name": "Olive Oil",
-        "category": "oil"
+        "category": "oil",
+        "quantity": 20,
+        "unit": "ml",
+        "note": "about 1 tablespoon"
       },
       {
         "name": "Mozzarella",
-        "category": "dairy"
+        "category": "dairy",
+        "quantity": 80,
+        "unit": "g",
+        "note": ""
       }
     ]
   }

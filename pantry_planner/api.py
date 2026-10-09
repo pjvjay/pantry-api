@@ -7,14 +7,17 @@ web layer. Every route delegates to pantry_planner.flow or pantry_planner.db.
 from __future__ import annotations
 
 import contextlib
+import math
 import os
-from typing import Annotated
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from . import db, flow
+from . import db, flow, limits
 from .config import (
     RUNTIME_MODEL_FIELDS,
     set_runtime_overrides,
@@ -23,10 +26,15 @@ from .config import (
 )
 from .llm import LLMError
 from .models import (
+    MAX_DOC_LINES,
+    MAX_LINE_NAME,
+    MAX_LINE_QUANTITY,
+    MAX_SERVINGS,
     OriginRanking,
     Product,
     ProductOrigin,
     Recipe,
+    RecipeDoc,
     ShoppingPlan,
     WeekPlan,
 )
@@ -82,6 +90,36 @@ async def _llm_error(request: Request, exc: LLMError) -> JSONResponse:
         "detail": str(exc)})
 
 
+@app.exception_handler(limits.LimitError)
+async def _limit_refused(request: Request, exc: limits.LimitError) -> JSONResponse:
+    """A rate limit or the daily LLM ceiling, shaped like an LLM failure: `detail` is the
+    sentence to show. The console shows a string `detail` as it is and anything else as
+    "[object Object]", and these refusals now reach endpoints it already calls."""
+    return JSONResponse(status_code=exc.status, headers=exc.headers,
+                        content={"error": exc.error, "detail": exc.detail})
+
+
+def _json_safe(value: Any) -> Any:
+    """`value` with every float JSON cannot carry (inf, -inf, nan) written as its name."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def _invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """FastAPI's own 422, with the same body, made renderable for any input. Python's JSON
+    parser reads 1e309 as inf and accepts NaN, neither of which JSON can carry; the 422
+    echoes the rejected input back, so rendering it raised and the client got a 500 for
+    what was its own mistake."""
+    return JSONResponse(status_code=422,
+                        content={"detail": _json_safe(jsonable_encoder(exc.errors()))})
+
+
 def _check_countries(*lists: list[str] | None) -> None:
     """Reject unrecognised country names up front.
 
@@ -114,6 +152,8 @@ def health() -> dict:
         "confidence_threshold": cfg.confidence_threshold,
         "demo_mode": cfg.demo_mode,
         "gemini_key_configured": bool(cfg.gemini_api_key),
+        # Today's estimated LLM spend on this replica and the ceiling (None: no ceiling).
+        "llm_budget": limits.budget(),
     }
 
 
@@ -243,6 +283,126 @@ def get_recipe(slug: str) -> Recipe:
         raise HTTPException(status_code=404, detail=str(e))
 
 
+@app.get("/recipes/{slug}/doc", response_model=RecipeDoc)
+def get_recipe_doc(slug: str) -> RecipeDoc:
+    """A library recipe as a RecipeDoc with its demo house amounts (synthetic, labelled on
+    every line), to show line by line. Plan it by slug, POST /plan/{slug} (PLAN.md C4): that
+    path gives the selector each line's category, while POST /plan/spec first checks by name
+    alone that each line is stocked, as /plan/nl does, and a library name such as "Peanut
+    Butter and Jelly Jam" finds nothing that way (a 409). Before pantry-db migration 0007
+    the lines have no amounts and `warnings` says so."""
+    from .recipe_doc import library_doc
+
+    try:
+        recipe = db.load_recipe(slug)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    amounts = db.load_line_amounts([slug])
+    return library_doc(recipe, None if amounts is None else amounts.get(slug, {}))
+
+
+class ParseLinesRequest(BaseModel):
+    """Ingredient lines to read, with no LLM: a paste, or a page's ingredient list the hub
+    extracted (origin "page", whose amounts the source stated)."""
+
+    title: str | None = Field(default=None, max_length=200)
+    yield_text: str | None = Field(default=None, max_length=200)
+    lines: list[Annotated[str, Field(max_length=300)]] = Field(max_length=MAX_DOC_LINES)
+    origin: Literal["paste", "page"] = "paste"
+
+
+class ParsedLineOut(BaseModel):
+    line_no: int
+    text: str                   # the line as given, trimmed
+    name: str                   # what to buy, purchase form included ("ground beef")
+    quantity: float | None      # None: the line states no amount
+    unit: str                   # "" when there is no unit
+    note: str                   # prep and the text after the first comma
+    amount_basis: Literal["parsed_from_your_paste", "stated_by_source"]
+
+
+class ParsedLines(BaseModel):
+    servings: int | None        # None: nothing says how many it serves (never a guessed 1)
+    servings_stated: bool
+    lines: list[ParsedLineOut]
+    warnings: list[str]
+
+
+@app.post("/recipes/parse-lines", response_model=ParsedLines,
+          dependencies=[Depends(limits.rate_limit("/recipes/parse-lines"))])
+def parse_lines(req: ParseLinesRequest) -> ParsedLines:
+    """Read ingredient lines into the RecipeLine fields a shopper reviews before planning
+    (nlsearch.lineparse, the demo parser's line reading). Pure: no URL, no LLM, no database.
+    Blank lines, and bullets with nothing after them, are dropped and renumbered; a line
+    with no amount is kept and named in `warnings`, as is an unstated servings count.
+
+    The result stays inside RecipeDoc's bounds, so a client can post it to /plan/spec as it
+    stands, warnings included: a name longer than a RecipeLine holds is cut, and a servings
+    count over MAX_SERVINGS or an amount over MAX_LINE_QUANTITY comes back as not stated.
+    Each says so in `warnings`, which has one entry per kind of problem, naming its lines."""
+    from .nlsearch import lineparse
+
+    basis = "stated_by_source" if req.origin == "page" else "parsed_from_your_paste"
+    texts = [t.strip() for t in req.lines]
+    # A bullet on its own has nothing to buy: it would come back with an empty name,
+    # which no RecipeLine accepts.
+    kept = [t for t in texts if lineparse.without_bullet(t)]
+    out: list[ParsedLineOut] = []
+    # The lines with each problem, gathered into one warning per kind below. One warning per
+    # line would let a long paste with no amounts outgrow the MAX_DOC_WARNINGS a RecipeDoc
+    # holds, and the doc a client builds from this output would be a 422.
+    cut: list[str] = []
+    too_big: list[str] = []
+    unstated: list[str] = []
+    for t in kept:
+        p = lineparse.parse_line(t)
+        n, name = len(out) + 1, p.doc_name
+        if len(name) > MAX_LINE_NAME:
+            # Only a line whose text before its first comma runs past this gets here, which
+            # is a sentence rather than an ingredient; the shopper sees the cut name and the
+            # full text side by side.
+            name = name[:MAX_LINE_NAME].rstrip()
+            cut.append(str(n))
+        qty, unit = p.quantity, p.unit or ""
+        if qty is not None and qty > MAX_LINE_QUANTITY:
+            # As with a catering yield, clamping would plan an amount nobody wrote, so the
+            # line has no amount and the shopper says how much they need.
+            too_big.append(f"{n} ({name})")
+            qty, unit = None, ""
+        out.append(ParsedLineOut(line_no=n, text=t, name=name,
+                                 quantity=qty, unit=unit, note=p.prep or "",
+                                 amount_basis=basis))
+        if p.quantity is None:
+            unstated.append(f"{n} ({name})")
+    warnings: list[str] = []
+    stated = (lineparse.servings_from_yield(req.yield_text or "")
+              or lineparse.servings_from_yield(req.title or ""))
+    # Over the cap is a catering yield. Clamping it would plan a number nobody wrote, so it
+    # is not stated, and the shopper says how many they are cooking for.
+    servings = stated if stated is not None and stated <= MAX_SERVINGS else None
+    if stated is not None and servings is None:
+        warnings.append(f"servings stated as {stated}, more than the {MAX_SERVINGS} a plan "
+                        "takes: say how many you are cooking for")
+    elif servings is None:
+        warnings.append("servings not stated")
+    if blank := len(texts) - len(kept):
+        warnings.append(f"{blank} blank line(s) dropped")
+    if cut:
+        warnings.append(f"line {cut[0]}'s name was cut to {MAX_LINE_NAME} characters"
+                        if len(cut) == 1 else
+                        f"the names of lines {', '.join(cut)} were cut to {MAX_LINE_NAME} "
+                        "characters")
+    if too_big:
+        more = f"more than the {MAX_LINE_QUANTITY:,} a plan takes: say how much you need"
+        warnings.append(f"line {too_big[0]} states {more}" if len(too_big) == 1
+                        else f"lines {', '.join(too_big)} state {more}")
+    if unstated:
+        warnings.append(f"line {unstated[0]} states no amount" if len(unstated) == 1
+                        else f"lines {', '.join(unstated)} state no amount")
+    return ParsedLines(servings=servings, servings_stated=servings is not None,
+                       lines=out, warnings=warnings)
+
+
 @app.get("/products", response_model=list[Product])
 def list_products() -> list[Product]:
     return db.load_all_products()
@@ -268,7 +428,9 @@ class NLPlanRequest(BaseModel):
     allow_partial: bool = False
 
 
-@app.post("/plan/nl", response_model=ShoppingPlan)
+@app.post("/plan/nl", response_model=ShoppingPlan,
+          dependencies=[Depends(limits.require_llm_budget),
+                        Depends(limits.rate_limit("/plan/nl"))])
 def plan_nl(req: NLPlanRequest) -> ShoppingPlan:
     """NL2SQL path: parse a pasted recipe, execute the staged query plan
     (existence → options → brand stats → lookups), route, select. Returns
@@ -300,6 +462,58 @@ def plan_nl(req: NLPlanRequest) -> ShoppingPlan:
         raise HTTPException(status_code=409, detail=e.execution.model_dump(mode="json"))
 
 
+class SpecPlanRequest(BaseModel):
+    """A recipe the shopper reviewed (RecipeDoc), planned exactly as given: the same
+    location, origin and partial-plan knobs as /plan/nl, and no shopping notes (there is
+    no text to read them from)."""
+
+    doc: RecipeDoc
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+    max_km: float | None = Field(default=None, ge=0.5, le=100)
+    exclude_origin: list[str] = Field(default_factory=list, max_length=50)
+    preference: list[str] = Field(default_factory=list, max_length=50)
+    allow_partial: bool = False
+
+
+@app.post("/plan/spec", response_model=ShoppingPlan,
+          dependencies=[Depends(limits.require_llm_budget),
+                        Depends(limits.rate_limit("/plan/spec"))])
+def plan_spec(req: SpecPlanRequest) -> ShoppingPlan:
+    """Plan reviewed lines with no parse: what the shopper reviewed is what gets planned
+    (names, quantities and units byte for byte on `basis.lines`). The selector still picks
+    the products. 422 `unconfirmed_lines` names any line not confirmed yet; an unknown
+    country is a 422 and a gate abort a 409, as on /plan/nl."""
+    from . import metrics as m
+    from .nlsearch import PlanAborted, UnparseableRecipe
+    from .recipe_doc import UnconfirmedLines, to_recipe_text, to_spec
+
+    _check_countries(req.exclude_origin, req.preference)
+    try:
+        spec = to_spec(req.doc)
+    except UnconfirmedLines as e:
+        m.record_plan("spec", "unconfirmed")
+        raise HTTPException(status_code=422, detail={
+            "error": "unconfirmed_lines", "line_nos": e.line_nos, "detail": str(e)}) from e
+    try:
+        plan = flow.run_spec(spec, lat=req.lat, lon=req.lon, exclude=req.exclude_origin,
+                             preference=req.preference, max_km=req.max_km,
+                             allow_partial=req.allow_partial,
+                             display_text=to_recipe_text(req.doc))
+    except UnparseableRecipe as e:
+        m.record_plan("spec", "unparseable")
+        raise HTTPException(status_code=422, detail={
+            "error": "no_lines", "detail": "The recipe has no ingredient lines to plan."}) from e
+    except PlanAborted as e:
+        code = e.execution.aborted.code.value if e.execution.aborted else "unknown"
+        m.record_plan("spec", "gated", gate=code)
+        raise HTTPException(status_code=409,
+                            detail=e.execution.model_dump(mode="json")) from e
+    m.record_plan("spec", "ok")
+    m.record_coverage(plan.origin_coverage)
+    return plan
+
+
 class WeekPlanRequest(BaseModel):
     """Plan `days` dinners from the recipe library under an optional budget.
     Deterministic menu selection (marginal-cost greedy over one batched
@@ -315,7 +529,8 @@ class WeekPlanRequest(BaseModel):
     preference: list[str] = Field(default_factory=list, max_length=50)
 
 
-@app.post("/plan/week", response_model=WeekPlan)
+@app.post("/plan/week", response_model=WeekPlan,
+          dependencies=[Depends(limits.require_llm_budget)])
 def plan_week(req: WeekPlanRequest) -> WeekPlan:
     """5A: weekly menu optimizer. Rewards ingredient overlap exactly (a
     shared product costs $0 marginal), gates on the cheapest-basket floor
@@ -334,7 +549,8 @@ def plan_week(req: WeekPlanRequest) -> WeekPlan:
         raise HTTPException(status_code=409, detail=e.execution.model_dump(mode="json"))
 
 
-@app.post("/plan/{slug}", response_model=ShoppingPlan)
+@app.post("/plan/{slug}", response_model=ShoppingPlan,
+          dependencies=[Depends(limits.require_llm_budget)])
 def plan_recipe(slug: str,
                 exclude_origin: Annotated[list[str] | None, Query()] = None,
                 preference: Annotated[list[str] | None, Query()] = None,

@@ -30,8 +30,10 @@ from burr.core import Application, ApplicationBuilder, State, action, expr
 from . import db
 from .config import get_router, settings
 from .models import (
+    BasisLine,
     DroppedIngredient,
     EscalationDecision,
+    PlanBasis,
     PlanLineItem,
     PreselectResult,
     Product,
@@ -41,6 +43,7 @@ from .models import (
     SelectorResult,
     ShoppingPlan,
 )
+from .packs import pack_count
 from .selector import call_selector, merge_selections
 from .tracing import StepTimer, llm_call_trace, llm_span, llm_step, make_tracker
 
@@ -71,12 +74,9 @@ class Purchase:
 def _packs(product: Product, needs: list[tuple[float, str] | None]) -> int:
     """Packs a shared purchase takes: the summed need over the pack size,
     rounded up — or 1 when any line's need is unknown or in another unit
-    (a teaspoon of peppercorns against a 50 g bag says nothing about bags)."""
-    if (len(needs) < 2 or not product.unit_qty
-            or any(n is None or n[1] != product.unit_uom for n in needs)):
-        return 1
-    total = sum(n[0] for n in needs if n is not None)
-    return max(1, math.ceil(total / product.unit_qty - 1e-9))
+    (a teaspoon of peppercorns against a 50 g bag says nothing about bags),
+    and 1 for a single line, as chat plans have always bought."""
+    return pack_count(product.unit_qty, product.unit_uom, needs, min_lines=2) or 1
 
 
 def group_purchases(selections: list[Selection], products_by_id: dict[int, Product],
@@ -155,18 +155,19 @@ def _selector_constraints(parsed, brand_stats: dict | None = None,
 
 # ─── Actions ─────────────────────────────────────────────────
 
-@action(reads=[], writes=["recipe", "location"])
+@action(reads=[], writes=["recipe", "location", "plan_path"])
 def load_recipe(state: State, recipe_slug: str,
                 location: dict | None = None) -> tuple[dict, State]:
     """`location` ({lat, lon, max_km}) makes the plan store-aware: each chosen product is
     priced at its cheapest store in range and the trip optimizer splits the basket."""
     recipe = db.load_recipe(recipe_slug)
     result = {"ingredient_count": len(recipe.ingredients)}
-    return result, state.update(recipe=recipe, location=location)
+    return result, state.update(recipe=recipe, location=location, plan_path="library")
 
 
 @action(reads=["recipe"], writes=["recipe", "products", "origins", "origin_dropped", "preference",
-                                 "origin_requested", "out_of_range", "ingredient_count"])
+                                 "origin_requested", "out_of_range", "ingredient_count",
+                                 "exclude"])
 def load_products(state: State, exclude: list | None = None,
                   preference: list | None = None,
                   allow_partial: bool = False) -> tuple[dict, State]:
@@ -189,6 +190,7 @@ def load_products(state: State, exclude: list | None = None,
     return result, state.update(recipe=recipe, products=kept, origins=origins,
                                 origin_dropped=dropped,
                                 preference=list(preference or []),
+                                exclude=list(exclude or []),
                                 origin_requested=bool(exclude or preference),
                                 out_of_range=list(excluded.values()),
                                 ingredient_count=count)
@@ -199,21 +201,26 @@ def load_products(state: State, exclude: list | None = None,
                           "origins", "origin_dropped", "preference",
                           "origin_requested", "not_stocked", "out_of_range",
                           "skipped", "pool_hints", "match_levels",
-                          "ingredient_count"])
+                          "ingredient_count", "exclude", "plan_path"])
 def parse_and_retrieve(state: State, recipe_text: str,
                        lat: float | None = None,
                        lon: float | None = None,
                        exclude: list | None = None,
                        preference: list | None = None,
                        max_km: float | None = None,
-                       allow_partial: bool = False) -> tuple[dict, State]:
+                       allow_partial: bool = False,
+                       parsed=None) -> tuple[dict, State]:
     """NL2SQL entrypoint: pasted recipe text → query-plan execution
     (t1 existence → t2 options → t3 brand stats → t4 lookups) producing an
     ad-hoc Recipe + store-priced candidate pools. Replaces load_recipe +
     load_products on the NL path; downstream actions consume the same state
     keys. Gate aborts raise nlsearch.PlanAborted → API 409. `max_km`
     overrides the parsed distance; with `allow_partial` the recipe in state
-    holds only the ingredients still planned, and the drops ride along."""
+    holds only the ingredients still planned, and the drops ride along.
+
+    `parsed` (a ParsedInput) is a recipe the shopper already reviewed
+    (run_spec): it is planned as given, with no parse call of either kind,
+    and `recipe_text` is only what the trace and the plan display."""
     from . import nlsearch
 
     # With an exclusion active, retrieve wider than the usual cheapest-8 so
@@ -221,7 +228,7 @@ def parse_and_retrieve(state: State, recipe_text: str,
     # the pool is trimmed back to the normal size below.
     from .nlsearch.sql_builder import PER_INGREDIENT_LIMIT
     limit = 10_000 if exclude else PER_INGREDIENT_LIMIT
-    r = nlsearch.run_query_plan(recipe_text, lat=lat, lon=lon,
+    r = nlsearch.run_query_plan(recipe_text, parsed=parsed, lat=lat, lon=lon,
                                 per_ingredient_limit=limit, max_km=max_km,
                                 allow_partial=allow_partial)
     names = {i: ing.name for i, ing in enumerate(r.recipe.ingredients)}
@@ -261,10 +268,13 @@ def parse_and_retrieve(state: State, recipe_text: str,
     return result, state.update(
         recipe=recipe, products=kept, origins=origins,
         origin_dropped=dropped, preference=list(preference or []),
+        exclude=list(exclude or []), plan_path="nl" if parsed is None else "spec",
         origin_requested=bool(exclude or preference),
         parsed_input=r.parsed,
         location={"lat": r.lat, "lon": r.lon, "max_km": r.max_km},
-        plan_trace=[*_parse_step(r.parsed), *r.execution.steps], brand_stats=r.brand_stats,
+        plan_trace=[*(_parse_step(r.parsed) if parsed is None else [_reviewed_step(r.parsed)]),
+                    *r.execution.steps],
+        brand_stats=r.brand_stats,
         retrieval_stats=r.stats, not_stocked=r.not_stocked,
         out_of_range=[*r.out_of_range, *excluded.values()], skipped=r.skipped,
         pool_hints=pool_hints,
@@ -461,6 +471,16 @@ def _with_llm_step(state: State, span: dict) -> list:
     return trace + [llm_step(span)] if span.get("http") or span["latency_ms"] else trace
 
 
+def _reviewed_step(parsed):
+    """The trace's parse_input step for reviewed lines: no parse ran, and the trace says so
+    rather than leaving the reader to wonder where the interpretation came from."""
+    from .nlsearch.plan import StepKind, StepResult
+
+    n = len(parsed.recipe.ingredients) + len(parsed.over_cap)
+    return StepResult(step_id="parse_input", kind=StepKind.llm, outcome="skipped",
+                      label=f"skipped: reviewed lines ({n} planned as given, no parse)")
+
+
 def _parse_step(parsed) -> list:
     """The recipe parse's LLM call as the plan trace's first step (none in demo mode)."""
     if parsed is None or not parsed.http:
@@ -495,7 +515,8 @@ def _best_offers(rows, *, key) -> dict[int, dict]:
            "escalation_decision", "trip_options", "parsed_input", "origins",
            "origin_requested", "origin_dropped", "match_levels", "not_stocked",
            "out_of_range", "skipped", "pool_hints", "ingredient_count",
-           "plan_trace", "location", "store_offers", "nearest_offers"],
+           "plan_trace", "location", "store_offers", "nearest_offers", "exclude",
+           "preference", "plan_path"],
     writes=["plan"],
 )
 def build_plan(state: State) -> tuple[dict, State]:
@@ -523,8 +544,9 @@ def build_plan(state: State) -> tuple[dict, State]:
                                       "store_price": offers[pid]["price"]})
             if pid in offers else p
             for pid, p in products_by_id.items()}
+    needs = _needs(parsed)
     purchases, unselected = group_purchases(final.selections, products_by_id,
-                                            ingredients_by_line, _needs(parsed))
+                                            ingredients_by_line, needs)
     unreachable: list[DroppedIngredient] = []
     if parsed is None and location is not None:
         # Reported, never silently dropped: a chosen product no store in range sells leaves
@@ -580,6 +602,7 @@ def build_plan(state: State) -> tuple[dict, State]:
                       key=_MATCH_ORDER.__getitem__),
             also_lines=[sel.line_no for sel in others],
             packs=pu.packs,
+            **_need(needs, sels),
         ))
     total_cost = sum(li.price for li in line_items)
     # A line the selector left without a valid product is reported, never
@@ -626,9 +649,63 @@ def build_plan(state: State) -> tuple[dict, State]:
         out_of_range=list(state.get("out_of_range") or []) + unreachable,
         skipped=skipped,
         ingredient_count=state.get("ingredient_count") or len(recipe.ingredients),
+        servings=(recipe.servings if parsed is None
+                  else parsed.recipe.servings if parsed.recipe.servings_stated else None),
     )
+    plan.basis = _basis(state, plan, purchases)
     return {"total_cost": plan.total_cost, "n_line_items": len(plan.line_items)}, \
         state.update(plan=plan)
+
+
+def _need(needs: dict[int, tuple[float, str] | None], sels: list[Selection]) -> dict:
+    """need_qty/need_uom for a purchase: the summed need of its lines when every one is known
+    in the same canonical unit, else both None. A sum that is not a finite number (an inf
+    need, or two near 1e308) is no amount anyone can buy, so it is unknown too, as in
+    packs.pack_count."""
+    ns = [needs.get(sel.line_no) for sel in sels]
+    if not ns or any(n is None for n in ns) or len({n[1] for n in ns if n}) != 1:
+        return {"need_qty": None, "need_uom": None}
+    total = sum(n[0] for n in ns if n)
+    if not math.isfinite(total):
+        return {"need_qty": None, "need_uom": None}
+    return {"need_qty": round(total, 4), "need_uom": ns[0][1]}
+
+
+def _basis(state: State, plan: ShoppingPlan, purchases: list[Purchase]) -> PlanBasis:
+    """The plan's PlanBasis: its planned lines as the parse (or the reviewed recipe) gave
+    them, the product each one is bought as, and what it was planned under. A line whose
+    product left the basket (no valid selection, no offer in range) has product_id None."""
+    from .nlsearch.schemas import Constraints
+
+    parsed = state.get("parsed_input")
+    specs = parsed.recipe.ingredients if parsed is not None else []
+    levels = state.get("match_levels") or {}
+    bought = {li.product_id for li in plan.line_items}
+    chosen = {sel.line_no: (pu.product.id, sel.confidence)
+              for pu in purchases if pu.product.id in bought for sel, _ in pu.lines}
+    lines = []
+    for ing in state["recipe"].ingredients:
+        spec = specs[ing.line_no - 1] if 0 < ing.line_no <= len(specs) else None
+        product_id, confidence = chosen.get(ing.line_no, (None, None))
+        lines.append(BasisLine(
+            line_no=ing.line_no, name=spec.name if spec else ing.name,
+            form=spec.form if spec else None, prep=spec.prep if spec else None,
+            quantity=spec.quantity if spec else None, unit=spec.unit if spec else None,
+            level=levels.get(ing.line_no, "exact"),
+            product_id=product_id, confidence=confidence))
+    loc = state.get("location") or {}
+    return PlanBasis(
+        path=state.get("plan_path") or ("library" if parsed is None else "nl"),
+        recipe_slug=plan.recipe_slug, recipe_name=plan.recipe_name, lines=lines,
+        constraints=parsed.constraints if parsed is not None else Constraints(),
+        lat=loc.get("lat"), lon=loc.get("lon"), max_km=loc.get("max_km"),
+        exclude_origin=list(state.get("exclude") or []),
+        preference=list(state.get("preference") or []),
+        origin_requested=bool(state.get("origin_requested")),
+        origin_dropped=len(state.get("origin_dropped") or []),
+        interpretation=list(plan.interpretation),
+        not_stocked=list(plan.not_stocked), out_of_range=list(plan.out_of_range),
+        skipped=list(plan.skipped), ingredient_count=plan.ingredient_count)
 
 
 # ─── Application builder ─────────────────────────────────────
@@ -810,21 +887,26 @@ def build_application(recipe_slug: str | None = None,
                       preference: list | None = None,
                       max_km: float | None = None,
                       allow_partial: bool = False,
-                      hooks: list | None = None) -> Application:
+                      hooks: list | None = None,
+                      recipe_spec=None,
+                      display_text: str = "") -> Application:
     """Construct the Burr Application for one run (`hooks`: Burr lifecycle hooks, e.g. the
     StepTimer that times each action).
 
-    Two entry variants sharing the router/selector/plan tail:
+    Three entry variants sharing the router/selector/plan tail:
       * classic (recipe_slug): load_recipe → load_products → …
       * NL2SQL (recipe_text):  parse_and_retrieve → …  (recipe + narrowed
         products both come from the pasted text)
+      * reviewed (recipe_spec, a RecipeSpec): parse_and_retrieve with the
+        spec as the parse, so no parser runs; `display_text` is what the
+        trace shows as the recipe
 
     Conditional transitions:
       * check_escalation → escalate_if_needed  if escalation_decision.escalate
       * check_escalation → skip_escalation     otherwise
     """
-    if (recipe_slug is None) == (recipe_text is None):
-        raise ValueError("provide exactly one of recipe_slug / recipe_text")
+    if sum(x is not None for x in (recipe_slug, recipe_text, recipe_spec)) != 1:
+        raise ValueError("provide exactly one of recipe_slug / recipe_text / recipe_spec")
 
     shared_tail = [
         ("preselect_model", "select_products"),
@@ -847,20 +929,26 @@ def build_application(recipe_slug: str | None = None,
                       escalate_if_needed, skip_escalation, optimize_trips,
                       build_plan]
 
-    if recipe_text is not None:
+    if recipe_text is not None or recipe_spec is not None:
+        parsed = None
+        if recipe_spec is not None:
+            from .nlsearch.schemas import Constraints, ParsedInput
+
+            # A copy: validate_parsed clamps the parse in place, and the caller's spec is the
+            # shopper's reviewed recipe.
+            parsed = ParsedInput(recipe=recipe_spec.model_copy(deep=True),
+                                 constraints=Constraints())
         builder = (
             ApplicationBuilder()
-            .with_actions(parse_and_retrieve.bind(recipe_text=recipe_text,
-                                                  lat=lat, lon=lon,
-                                                  exclude=exclude,
-                                                  preference=preference,
-                                                  max_km=max_km,
-                                                  allow_partial=allow_partial),
+            .with_actions(parse_and_retrieve.bind(
+                              recipe_text=display_text if parsed is not None else recipe_text,
+                              lat=lat, lon=lon, exclude=exclude, preference=preference,
+                              max_km=max_km, allow_partial=allow_partial, parsed=parsed),
                           *common_actions)
             .with_transitions(("parse_and_retrieve", "preselect_model"),
                               *shared_tail)
             .with_entrypoint("parse_and_retrieve")
-            .with_identifiers(app_id=_run_id("nl"))
+            .with_identifiers(app_id=_run_id("nl" if parsed is None else "spec"))
         )
     else:
         # A store-aware classic plan when the caller gives any of lat/lon/max_km; lat/lon
@@ -932,6 +1020,24 @@ def run_nl(recipe_text: str, lat: float | None = None,
     """
     timer = StepTimer()
     app = build_application(recipe_text=recipe_text, lat=lat, lon=lon,
+                            exclude=exclude, preference=preference,
+                            max_km=max_km, allow_partial=allow_partial, hooks=[timer])
+    _action, _result, state = app.run(halt_after=["build_plan"])
+    return state["plan"].model_copy(update={"burr_run": app.uid, "pipeline": timer.steps})
+
+
+def run_spec(spec, *, lat: float | None = None, lon: float | None = None,
+             exclude: list | None = None, preference: list | None = None,
+             max_km: float | None = None, allow_partial: bool = False,
+             display_text: str = "") -> ShoppingPlan:
+    """Plan a recipe the shopper already reviewed (a RecipeSpec; recipe_doc.to_spec builds
+    one from a RecipeDoc) exactly as given: no parse call of either kind, so the planned
+    names, amounts and units are the reviewed ones. validate_parsed still runs, and anything
+    it drops (the 40-line cap) goes to `skipped`, named; the selector still picks products.
+    Same knobs, errors and result as run_nl; no shopping notes are read, so constraints come
+    only from the arguments. The trace's parse_input step reads "skipped: reviewed lines"."""
+    timer = StepTimer()
+    app = build_application(recipe_spec=spec, display_text=display_text, lat=lat, lon=lon,
                             exclude=exclude, preference=preference,
                             max_km=max_km, allow_partial=allow_partial, hooks=[timer])
     _action, _result, state = app.run(halt_after=["build_plan"])

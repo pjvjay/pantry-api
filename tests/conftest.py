@@ -12,7 +12,19 @@ documents the contract.
 import os
 import tempfile
 
+import pytest
+
 # Burr traces from the suite go to a throwaway folder, not the developer's .burr: every plan call
 # is its own Burr run, so one suite run would otherwise add a hundred runs to the Burr UI. Read by
 # tracing.py at import, which follows this file. An explicit BURR_TRACKING_DIR still wins.
 os.environ.setdefault("BURR_TRACKING_DIR", tempfile.mkdtemp(prefix="pantry-burr-tests-"))
+
+
+@pytest.fixture(autouse=True)
+def _fresh_limits():
+    """Every test starts with full rate-limit buckets and no LLM spend today: the limiter is
+    per process, and the suite calls the public endpoints far faster than any client may."""
+    from pantry_planner import limits
+
+    limits.reset()
+    yield

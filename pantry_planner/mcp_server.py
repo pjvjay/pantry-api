@@ -26,19 +26,26 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ResourceNotFoundError, ToolError
 from mcp.types import ToolAnnotations
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 
 from .llm import LLMError
 from .models import (
+    MAX_DOC_LINES,
+    MAX_LINE_QUANTITY,
+    MAX_SERVINGS,
+    AmountBasis,
     DroppedIngredient,
     LlmCallTrace,
     MatchLevel,
     OriginCoverage,
     OriginRanking,
+    PlanBasis,
     PlanLineItem,
     Product,
     ProductOrigin,
     Recipe,
+    RecipeLine,
+    RecipeSource,
     ShoppingPlan,
     TripOption,
     WeekPlan,
@@ -362,6 +369,17 @@ class PlanSummary(BaseModel):
     # trace views: an agent can ignore them.
     burr_run: str = ""
     pipeline: dict[str, float] = Field(default_factory=dict)
+    # Only with basis=true: what the plan was made from, for re-pricing and
+    # ranking alternatives without re-planning. Absent from the result
+    # otherwise, so a summary without it is byte for byte what it was.
+    basis: PlanBasis | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_basis(self, handler):
+        data = handler(self)
+        if self.basis is None:
+            data.pop("basis", None)
+        return data
 
 
 class PlanResult(BaseModel):
@@ -487,6 +505,14 @@ def _gate_message(e, allow_partial: bool = False) -> str:
     return (f"Plan aborted before product selection — {code}: {msg}{_affected(alert)}"
             f"{_partial_hint(alert, allow_partial)}"
             + (f" Steps: {steps}." if steps else ""))
+
+
+def _check_llm_budget() -> None:
+    """The REST daily LLM ceiling holds here too: /mcp is as public as the REST API."""
+    from . import limits
+
+    if limits.llm_paused():
+        raise ToolError(limits.PAUSED + " Today's LLM budget on this server is spent.")
 
 
 def _llm_message(e: LLMError) -> str:
@@ -637,7 +663,7 @@ def _floor_note(c: OriginCoverage | None) -> list[str]:
             "basket clean"]
 
 
-def _summarize_plan(plan: ShoppingPlan) -> PlanSummary:
+def _summarize_plan(plan: ShoppingPlan, basis: bool = False) -> PlanSummary:
     products = _products_by_id({li.product_id for li in plan.line_items})
     notes = (list(plan.interpretation)
              + _partial_note(plan)
@@ -662,7 +688,8 @@ def _summarize_plan(plan: ShoppingPlan) -> PlanSummary:
         skipped=list(plan.skipped),
         llm_cost_usd=plan.total_llm_cost_usd, latency_ms=plan.total_latency_ms,
         llm_calls=plan.llm_calls, burr_run=plan.burr_run,
-        pipeline={s["step"]: s["ms"] for s in plan.pipeline if s.get("ms") is not None})
+        pipeline={s["step"]: s["ms"] for s in plan.pipeline if s.get("ms") is not None},
+        basis=plan.basis if basis else None)
 
 
 def _summarize_week(plan: WeekPlan) -> WeekSummary:
@@ -927,7 +954,8 @@ def plan_recipe(slug: str,
                 lat: Annotated[float | None, Field(ge=-90, le=90)] = None,
                 lon: Annotated[float | None, Field(ge=-180, le=180)] = None,
                 max_km: Annotated[float | None, Field(ge=0.5, le=100)] = None,
-                allow_partial: bool = False) -> PlanResult:
+                allow_partial: bool = False,
+                basis: bool = False) -> PlanResult:
     """Run the full shopping-plan pipeline for a seeded recipe: an LLM
     matches every ingredient to the best-value product, with a model
     router escalating hard cases. SLOW (10-60s) and costs LLM API credits
@@ -954,7 +982,11 @@ def plan_recipe(slug: str,
     because unverified lines are not verified-clean lines; `summary.notes`
     carries substitutions and the coverage warning. `summary` is the
     token-lean result; `verbose=True` also attaches `full` (the complete
-    ShoppingPlan with per-line reasoning and every trip option)."""
+    ShoppingPlan with per-line reasoning and every trip option).
+    `basis=true` adds `summary.basis`, what the plan was made from, for a
+    client that re-prices or ranks alternatives later; an agent never needs
+    it."""
+    _check_llm_budget()
     from . import flow
     from .nlsearch import PlanAborted
 
@@ -962,7 +994,8 @@ def plan_recipe(slug: str,
     try:
         plan = flow.run(slug, exclude=exclude_origin, preference=preference,
                         lat=lat, lon=lon, max_km=max_km, allow_partial=allow_partial)
-        return PlanResult(summary=_summarize_plan(plan), full=plan if verbose else None)
+        return PlanResult(summary=_summarize_plan(plan, basis),
+                          full=plan if verbose else None)
     except ValueError as e:
         raise ToolError(f"{e}. Call list_recipes for valid slugs.") from e
     except PlanAborted as e:
@@ -978,7 +1011,8 @@ def plan_from_text(recipe_text: Annotated[str, Field(max_length=MAX_TEXT)],
                    preference: Annotated[list[str] | None, Field(max_length=MAX_LIST)] = None,
                    verbose: bool = False,
                    max_km: Annotated[float | None, Field(ge=0.5, le=100)] = None,
-                   allow_partial: bool = False) -> PlanResult:
+                   allow_partial: bool = False,
+                   basis: bool = False) -> PlanResult:
     """Plan a shopping basket from PASTED RECIPE TEXT — include the full
     ingredient list (quantities optional) and any shopping notes
     (budget, dietary exclusions). Parses the text, runs a staged SQL
@@ -1012,7 +1046,9 @@ def plan_from_text(recipe_text: Annotated[str, Field(max_length=MAX_TEXT)],
     the same product are one purchase (`also_lines`, `packs`), priced once.
     `summary.notes` starts with how the text was interpreted; `trip` is the
     recommended store split. `verbose=True` attaches `full` with the
-    retrieval `plan_trace` and every trip option."""
+    retrieval `plan_trace` and every trip option. `basis=true` adds
+    `summary.basis` (see plan_recipe); an agent never needs it."""
+    _check_llm_budget()
     _check_countries(exclude_origin, preference)
     from . import flow
     from .nlsearch import PlanAborted, UnparseableRecipe
@@ -1021,7 +1057,8 @@ def plan_from_text(recipe_text: Annotated[str, Field(max_length=MAX_TEXT)],
         plan = flow.run_nl(recipe_text, lat=lat, lon=lon,
                            exclude=exclude_origin, preference=preference,
                            max_km=max_km, allow_partial=allow_partial)
-        return PlanResult(summary=_summarize_plan(plan), full=plan if verbose else None)
+        return PlanResult(summary=_summarize_plan(plan, basis),
+                          full=plan if verbose else None)
     except UnparseableRecipe as e:
         raise ToolError(
             "Couldn't find an ingredient list in that text. Paste a recipe "
@@ -1038,6 +1075,84 @@ def plan_from_text(recipe_text: Annotated[str, Field(max_length=MAX_TEXT)],
             f"{alert.code.value if alert else 'gate'}: "
             f"{(alert.message if alert else 'constraint infeasible').rstrip('.')}."
             f"{_affected(alert)}{_partial_hint(alert, allow_partial)} (steps: {steps})") from e
+    except LLMError as e:
+        raise ToolError(_llm_message(e)) from e
+
+
+class LineIn(BaseModel):
+    """One reviewed ingredient line for plan_from_lines: planned exactly as given."""
+    name: Annotated[str, Field(min_length=1, max_length=MAX_SEARCH)]
+    # RecipeLine's bound, checked here so a bad amount is named as this tool's argument
+    quantity: Annotated[float | None,
+                        Field(ge=0, le=MAX_LINE_QUANTITY, allow_inf_nan=False)] = None
+    unit: Annotated[str, Field(max_length=40)] = ""
+    note: Annotated[str, Field(max_length=300)] = ""
+    text: Annotated[str, Field(max_length=300)] = ""
+    confirmed: bool = True
+    # Who stated the amount; the hub passes the reviewed doc's own. A client
+    # writing lines itself is an assistant writing them.
+    amount_basis: AmountBasis = "written_by_assistant"
+
+
+@server.tool(title="Plan from reviewed lines", annotations=_PLAN)
+def plan_from_lines(doc_key: Annotated[str, Field(min_length=1, max_length=100)],
+                    lines: Annotated[list[LineIn] | None,
+                                     Field(max_length=MAX_DOC_LINES)] = None,
+                    title: Annotated[str | None, Field(max_length=200)] = None,
+                    servings: Annotated[int | None, Field(ge=1, le=MAX_SERVINGS)] = None,
+                    lat: Annotated[float | None, Field(ge=-90, le=90)] = None,
+                    lon: Annotated[float | None, Field(ge=-180, le=180)] = None,
+                    max_km: Annotated[float | None, Field(ge=0.5, le=100)] = None,
+                    exclude_origin: Annotated[list[str] | None,
+                                              Field(max_length=MAX_LIST)] = None,
+                    preference: Annotated[list[str] | None, Field(max_length=MAX_LIST)] = None,
+                    allow_partial: bool = False,
+                    basis: bool = False,
+                    verbose: bool = False) -> PlanResult:
+    """Plan a recipe the shopper has already reviewed, line by line, exactly as
+    reviewed: each line's name, quantity and unit are planned as given, with no
+    re-reading of the recipe. Name the recipe by `doc_key` (for example
+    "imp:1", the key of a recipe the shopper imported); the app fills in its
+    reviewed lines. A client without such an app passes `lines` itself (at
+    most 60, each {name, quantity, unit, note}), with `title` and `servings`
+    when known. The selector still picks the products, so this is SLOW and
+    costs LLM credits unless the server runs in demo mode.
+
+    Location, origin and allow_partial work as in plan_from_text. Every line
+    must be confirmed; an unconfirmed one is an error naming it. The result
+    is shaped like plan_from_text's: read `summary.notes` and the left-out
+    lists the same way."""
+    _check_llm_budget()
+    from . import flow
+    from .models import RecipeDoc
+    from .nlsearch import PlanAborted, UnparseableRecipe
+    from .recipe_doc import UnconfirmedLines, to_recipe_text, to_spec
+
+    if not lines:
+        raise ToolError(f"No lines for {doc_key!r}: plan_from_lines plans reviewed lines, "
+                        "which the app fills in for a doc_key it holds. Without it, pass "
+                        "`lines` (at most 60) or use plan_from_text for recipe text.")
+    _check_countries(exclude_origin, preference)
+    doc = RecipeDoc(
+        key=doc_key, title=title or doc_key, servings=servings,
+        servings_stated=servings is not None,
+        lines=[RecipeLine(line_no=i, text=ln.text or ln.name, name=ln.name,
+                          quantity=ln.quantity, unit=ln.unit, note=ln.note,
+                          confirmed=ln.confirmed, amount_basis=ln.amount_basis)
+               for i, ln in enumerate(lines, start=1)],
+        source=RecipeSource(kind="assistant", method="agent_written"))
+    try:
+        plan = flow.run_spec(to_spec(doc), lat=lat, lon=lon, exclude=exclude_origin,
+                             preference=preference, max_km=max_km,
+                             allow_partial=allow_partial, display_text=to_recipe_text(doc))
+        return PlanResult(summary=_summarize_plan(plan, basis),
+                          full=plan if verbose else None)
+    except UnconfirmedLines as e:
+        raise ToolError(f"{e}.") from e
+    except UnparseableRecipe as e:
+        raise ToolError("Nothing to plan: every line was empty.") from e
+    except PlanAborted as e:
+        raise ToolError(_gate_message(e, allow_partial)) from e
     except LLMError as e:
         raise ToolError(_llm_message(e)) from e
 
@@ -1060,6 +1175,7 @@ def plan_week(days: Annotated[int, Field(ge=1, le=14)] = 5,
     ["dairy", "gluten"]). `verbose=True` attaches `full` with the retrieval
     trace and every trip option. SLOW (runs the LLM selector per day) and
     costs real Claude API credits — roughly one plan_recipe per day."""
+    _check_llm_budget()
     _check_countries(exclude_origin, preference)
     from . import weekplan
     from .nlsearch import PlanAborted

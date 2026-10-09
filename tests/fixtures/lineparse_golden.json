@@ -1,0 +1,1782 @@
+{
+ "source": "demomode.parse_recipe before the lift into nlsearch/lineparse.py",
+ "lines": [
+  {
+   "line": "1 can crushed tomatoes",
+   "parsed": {
+    "name": "crushed tomatoes",
+    "form": "canned",
+    "quantity": 1.0,
+    "unit": "can",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 cup chickpeas",
+   "parsed": {
+    "name": "chickpeas",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "cup",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 cup flour",
+   "parsed": {
+    "name": "flour",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "cup",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 cup milk",
+   "parsed": {
+    "name": "milk",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "cup",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 lb boneless skinless chicken thighs, cubed",
+   "parsed": {
+    "name": "boneless skinless chicken thighs",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "lb",
+    "prep": "cubed"
+   }
+  },
+  {
+   "line": "1 tbsp olive oil",
+   "parsed": {
+    "name": "olive oil",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "tbsp",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 tsp ground Sichuan peppercorns",
+   "parsed": {
+    "name": "sichuan peppercorns",
+    "form": "ground",
+    "quantity": 1.0,
+    "unit": "tsp",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 yellow onion",
+   "parsed": {
+    "name": "yellow onion",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "each",
+    "prep": null
+   }
+  },
+  {
+   "line": "10g saffron",
+   "parsed": {
+    "name": "saffron",
+    "form": null,
+    "quantity": 10.0,
+    "unit": "g",
+    "prep": null
+   }
+  },
+  {
+   "line": "10g salt",
+   "parsed": {
+    "name": "salt",
+    "form": null,
+    "quantity": 10.0,
+    "unit": "g",
+    "prep": null
+   }
+  },
+  {
+   "line": "15ml olive oil",
+   "parsed": {
+    "name": "olive oil",
+    "form": null,
+    "quantity": 15.0,
+    "unit": "ml",
+    "prep": null
+   }
+  },
+  {
+   "line": "1g saffron",
+   "parsed": {
+    "name": "saffron",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "g",
+    "prep": null
+   }
+  },
+  {
+   "line": "1½ cups water",
+   "parsed": {
+    "name": "water",
+    "form": null,
+    "quantity": 1.5,
+    "unit": "cups",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 cloves",
+   "parsed": {
+    "name": "cloves",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "each",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 cloves garlic",
+   "parsed": {
+    "name": "garlic",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "cloves",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 eggs",
+   "parsed": {
+    "name": "eggs",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "each",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 tbsp butter",
+   "parsed": {
+    "name": "butter",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "tbsp",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 tsp Sichuan peppercorns",
+   "parsed": {
+    "name": "sichuan peppercorns",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "tsp",
+    "prep": null
+   }
+  },
+  {
+   "line": "200g spaghetti",
+   "parsed": {
+    "name": "spaghetti",
+    "form": null,
+    "quantity": 200.0,
+    "unit": "g",
+    "prep": null
+   }
+  },
+  {
+   "line": "3 cloves garlic",
+   "parsed": {
+    "name": "garlic",
+    "form": null,
+    "quantity": 3.0,
+    "unit": "cloves",
+    "prep": null
+   }
+  },
+  {
+   "line": "3/4 cup water",
+   "parsed": {
+    "name": "water",
+    "form": null,
+    "quantity": 0.75,
+    "unit": "cup",
+    "prep": null
+   }
+  },
+  {
+   "line": "3/4 teaspoon salt",
+   "parsed": {
+    "name": "salt",
+    "form": null,
+    "quantity": 0.75,
+    "unit": "teaspoon",
+    "prep": null
+   }
+  },
+  {
+   "line": "350ml water",
+   "parsed": {
+    "name": "water",
+    "form": null,
+    "quantity": 350.0,
+    "unit": "ml",
+    "prep": null
+   }
+  },
+  {
+   "line": "400g spaghetti",
+   "parsed": {
+    "name": "spaghetti",
+    "form": null,
+    "quantity": 400.0,
+    "unit": "g",
+    "prep": null
+   }
+  },
+  {
+   "line": "500g flour",
+   "parsed": {
+    "name": "flour",
+    "form": null,
+    "quantity": 500.0,
+    "unit": "g",
+    "prep": null
+   }
+  },
+  {
+   "line": "500g ground beef",
+   "parsed": {
+    "name": "beef",
+    "form": "ground",
+    "quantity": 500.0,
+    "unit": "g",
+    "prep": null
+   }
+  },
+  {
+   "line": "500g penne",
+   "parsed": {
+    "name": "penne",
+    "form": null,
+    "quantity": 500.0,
+    "unit": "g",
+    "prep": null
+   }
+  },
+  {
+   "line": "5g potato starch",
+   "parsed": {
+    "name": "potato starch",
+    "form": null,
+    "quantity": 5.0,
+    "unit": "g",
+    "prep": null
+   }
+  },
+  {
+   "line": "8 oz spaghetti",
+   "parsed": {
+    "name": "spaghetti",
+    "form": null,
+    "quantity": 8.0,
+    "unit": "oz",
+    "prep": null
+   }
+  },
+  {
+   "line": "olive oil",
+   "parsed": {
+    "name": "olive oil",
+    "form": null,
+    "quantity": null,
+    "unit": null,
+    "prep": null
+   }
+  },
+  {
+   "line": "450g boneless skinless chicken thigh",
+   "parsed": {
+    "name": "boneless skinless chicken thigh",
+    "form": null,
+    "quantity": 450.0,
+    "unit": "g",
+    "prep": null
+   }
+  },
+  {
+   "line": "15ml light soy sauce",
+   "parsed": {
+    "name": "light soy sauce",
+    "form": null,
+    "quantity": 15.0,
+    "unit": "ml",
+    "prep": null
+   }
+  },
+  {
+   "line": "10g light brown sugar",
+   "parsed": {
+    "name": "light brown sugar",
+    "form": null,
+    "quantity": 10.0,
+    "unit": "g",
+    "prep": null
+   }
+  },
+  {
+   "line": "80ml canola oil",
+   "parsed": {
+    "name": "canola oil",
+    "form": null,
+    "quantity": 80.0,
+    "unit": "ml",
+    "prep": null
+   }
+  },
+  {
+   "line": "2g msg",
+   "parsed": {
+    "name": "msg",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "g",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 lb boneless skinless chicken thigh (or breast) (, cut into 1” (2.5 cm) cubes )",
+   "parsed": {
+    "name": "boneless skinless chicken thigh",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "lb",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 teaspoon ground Sichuan peppercorns ((*Footnote 3))",
+   "parsed": {
+    "name": "sichuan peppercorns",
+    "form": "ground",
+    "quantity": 1.0,
+    "unit": "teaspoon",
+    "prep": null
+   }
+  },
+  {
+   "line": "1/4 to 1/3 cup peanut oil ((or vegetable oil))",
+   "parsed": {
+    "name": "peanut oil",
+    "form": null,
+    "quantity": 0.25,
+    "unit": "cup",
+    "prep": null
+   }
+  },
+  {
+   "line": "5 garlic cloves (, thinly sliced)",
+   "parsed": {
+    "name": "garlic",
+    "form": null,
+    "quantity": 5.0,
+    "unit": "cloves",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 cup chopped cilantro (, and more for garnish)",
+   "parsed": {
+    "name": "cilantro",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "cup",
+    "prep": "chopped"
+   }
+  },
+  {
+   "line": "1 1/2 cups basmati rice",
+   "parsed": {
+    "name": "basmati rice",
+    "form": null,
+    "quantity": 1.5,
+    "unit": "cups",
+    "prep": null
+   }
+  },
+  {
+   "line": "1½ cups basmati rice",
+   "parsed": {
+    "name": "basmati rice",
+    "form": null,
+    "quantity": 1.5,
+    "unit": "cups",
+    "prep": null
+   }
+  },
+  {
+   "line": "¾ cup sugar",
+   "parsed": {
+    "name": "sugar",
+    "form": null,
+    "quantity": 0.75,
+    "unit": "cup",
+    "prep": null
+   }
+  },
+  {
+   "line": "½ tsp turmeric",
+   "parsed": {
+    "name": "turmeric",
+    "form": null,
+    "quantity": 0.5,
+    "unit": "tsp",
+    "prep": null
+   }
+  },
+  {
+   "line": "1.5 kg chicken thighs",
+   "parsed": {
+    "name": "chicken thighs",
+    "form": null,
+    "quantity": 1.5,
+    "unit": "kg",
+    "prep": null
+   }
+  },
+  {
+   "line": "2-3 tbsp canola oil",
+   "parsed": {
+    "name": "canola oil",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "tbsp",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 – 3 tbsp canola oil",
+   "parsed": {
+    "name": "canola oil",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "tbsp",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 to 2 tsp salt",
+   "parsed": {
+    "name": "salt",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "tsp",
+    "prep": null
+   }
+  },
+  {
+   "line": "1/0 cup water",
+   "parsed": {
+    "name": "water",
+    "form": null,
+    "quantity": 0.0,
+    "unit": "cup",
+    "prep": null
+   }
+  },
+  {
+   "line": "0.5 l milk",
+   "parsed": {
+    "name": "milk",
+    "form": null,
+    "quantity": 0.5,
+    "unit": "l",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 L stock",
+   "parsed": {
+    "name": "stock",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "l",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 litre milk",
+   "parsed": {
+    "name": "milk",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "litre",
+    "prep": null
+   }
+  },
+  {
+   "line": "250 millilitres cream",
+   "parsed": {
+    "name": "cream",
+    "form": null,
+    "quantity": 250.0,
+    "unit": "millilitres",
+    "prep": null
+   }
+  },
+  {
+   "line": "3 lbs ground beef",
+   "parsed": {
+    "name": "beef",
+    "form": "ground",
+    "quantity": 3.0,
+    "unit": "lbs",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 pounds potatoes",
+   "parsed": {
+    "name": "potatoes",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "pounds",
+    "prep": null
+   }
+  },
+  {
+   "line": "12 ounces pasta",
+   "parsed": {
+    "name": "pasta",
+    "form": null,
+    "quantity": 12.0,
+    "unit": "ounces",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 dozen eggs",
+   "parsed": {
+    "name": "eggs",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "dozen",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 cans chickpeas",
+   "parsed": {
+    "name": "chickpeas",
+    "form": "canned",
+    "quantity": 2.0,
+    "unit": "can",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 can coconut milk",
+   "parsed": {
+    "name": "coconut milk",
+    "form": "canned",
+    "quantity": 1.0,
+    "unit": "can",
+    "prep": null
+   }
+  },
+  {
+   "line": "28 oz can diced tomatoes",
+   "parsed": {
+    "name": "can tomatoes",
+    "form": null,
+    "quantity": 28.0,
+    "unit": "oz",
+    "prep": "diced"
+   }
+  },
+  {
+   "line": "2 x 400g cans tomatoes",
+   "parsed": {
+    "name": "x 400g cans tomatoes",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "each",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 inch ginger",
+   "parsed": {
+    "name": "ginger",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "inch",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 thumbs ginger",
+   "parsed": {
+    "name": "ginger",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "thumbs",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 pinch salt",
+   "parsed": {
+    "name": "salt",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "pinch",
+    "prep": null
+   }
+  },
+  {
+   "line": "a pinch of salt",
+   "parsed": {
+    "name": "a pinch salt",
+    "form": null,
+    "quantity": null,
+    "unit": null,
+    "prep": null
+   }
+  },
+  {
+   "line": "1 bunch cilantro",
+   "parsed": {
+    "name": "cilantro",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "bunch",
+    "prep": null
+   }
+  },
+  {
+   "line": "3 sprigs thyme",
+   "parsed": {
+    "name": "thyme",
+    "form": null,
+    "quantity": 3.0,
+    "unit": "sprigs",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 thyme sprigs",
+   "parsed": {
+    "name": "thyme",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "sprigs",
+    "prep": null
+   }
+  },
+  {
+   "line": "4 slices bread",
+   "parsed": {
+    "name": "bread",
+    "form": null,
+    "quantity": 4.0,
+    "unit": "slices",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 pieces chicken",
+   "parsed": {
+    "name": "chicken",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "pieces",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 head garlic",
+   "parsed": {
+    "name": "garlic",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "head",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 stalks celery",
+   "parsed": {
+    "name": "celery",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "stalks",
+    "prep": null
+   }
+  },
+  {
+   "line": "3 celery stalks",
+   "parsed": {
+    "name": "celery",
+    "form": null,
+    "quantity": 3.0,
+    "unit": "stalks",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 handful spinach",
+   "parsed": {
+    "name": "spinach",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "handful",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 tbsps oil",
+   "parsed": {
+    "name": "oil",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "tbsps",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 Tbsp. oil",
+   "parsed": {
+    "name": "oil",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "tbsp",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 tsp. cumin",
+   "parsed": {
+    "name": "cumin",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "tsp",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 cup. flour",
+   "parsed": {
+    "name": "flour",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "cup",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 Cups flour",
+   "parsed": {
+    "name": "flour",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "cups",
+    "prep": null
+   }
+  },
+  {
+   "line": "100 G butter",
+   "parsed": {
+    "name": "butter",
+    "form": null,
+    "quantity": 100.0,
+    "unit": "g",
+    "prep": null
+   }
+  },
+  {
+   "line": "1kg flour",
+   "parsed": {
+    "name": "flour",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "kg",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 kilogram flour",
+   "parsed": {
+    "name": "flour",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "kilogram",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 grams yeast",
+   "parsed": {
+    "name": "yeast",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "grams",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 gram salt",
+   "parsed": {
+    "name": "salt",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "gram",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 can black beans, drained and rinsed",
+   "parsed": {
+    "name": "black beans",
+    "form": "canned",
+    "quantity": 1.0,
+    "unit": "can",
+    "prep": "drained and rinsed"
+   }
+  },
+  {
+   "line": "frozen peas",
+   "parsed": {
+    "name": "peas",
+    "form": "frozen",
+    "quantity": null,
+    "unit": null,
+    "prep": null
+   }
+  },
+  {
+   "line": "2 cups frozen peas",
+   "parsed": {
+    "name": "peas",
+    "form": "frozen",
+    "quantity": 2.0,
+    "unit": "cups",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 tbsp dried oregano",
+   "parsed": {
+    "name": "oregano",
+    "form": "dried",
+    "quantity": 1.0,
+    "unit": "tbsp",
+    "prep": null
+   }
+  },
+  {
+   "line": "smoked paprika",
+   "parsed": {
+    "name": "paprika",
+    "form": "smoked",
+    "quantity": null,
+    "unit": null,
+    "prep": null
+   }
+  },
+  {
+   "line": "1 tsp powdered ginger",
+   "parsed": {
+    "name": "ginger",
+    "form": "powdered",
+    "quantity": 1.0,
+    "unit": "tsp",
+    "prep": null
+   }
+  },
+  {
+   "line": "pickled jalapenos",
+   "parsed": {
+    "name": "jalapenos",
+    "form": "pickled",
+    "quantity": null,
+    "unit": null,
+    "prep": null
+   }
+  },
+  {
+   "line": "1 cup canned tomatoes",
+   "parsed": {
+    "name": "tomatoes",
+    "form": "canned",
+    "quantity": 1.0,
+    "unit": "cup",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 cups shredded cheddar",
+   "parsed": {
+    "name": "cheddar",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "cups",
+    "prep": "shredded"
+   }
+  },
+  {
+   "line": "1 onion, finely chopped",
+   "parsed": {
+    "name": "onion",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "each",
+    "prep": "finely chopped"
+   }
+  },
+  {
+   "line": "3 garlic cloves, minced",
+   "parsed": {
+    "name": "garlic",
+    "form": null,
+    "quantity": 3.0,
+    "unit": "cloves",
+    "prep": "minced"
+   }
+  },
+  {
+   "line": "1 cup diced tomatoes",
+   "parsed": {
+    "name": "tomatoes",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "cup",
+    "prep": "diced"
+   }
+  },
+  {
+   "line": "2 cups grated parmesan",
+   "parsed": {
+    "name": "parmesan",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "cups",
+    "prep": "grated"
+   }
+  },
+  {
+   "line": "1 cup roughly chopped parsley",
+   "parsed": {
+    "name": "parsley",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "cup",
+    "prep": "roughly chopped"
+   }
+  },
+  {
+   "line": "freshly ground black pepper",
+   "parsed": {
+    "name": "black pepper",
+    "form": "ground",
+    "quantity": null,
+    "unit": null,
+    "prep": "freshly"
+   }
+  },
+  {
+   "line": "fine sea salt",
+   "parsed": {
+    "name": "sea salt",
+    "form": null,
+    "quantity": null,
+    "unit": null,
+    "prep": "fine"
+   }
+  },
+  {
+   "line": "1 cup of rice",
+   "parsed": {
+    "name": "rice",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "cup",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 cups of water",
+   "parsed": {
+    "name": "water",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "cups",
+    "prep": null
+   }
+  },
+  {
+   "line": "salt and pepper to taste",
+   "parsed": {
+    "name": "salt and pepper to taste",
+    "form": null,
+    "quantity": null,
+    "unit": null,
+    "prep": null
+   }
+  },
+  {
+   "line": "salt",
+   "parsed": {
+    "name": "salt",
+    "form": null,
+    "quantity": null,
+    "unit": null,
+    "prep": null
+   }
+  },
+  {
+   "line": "Salt, to taste",
+   "parsed": {
+    "name": "salt",
+    "form": null,
+    "quantity": null,
+    "unit": null,
+    "prep": "to taste"
+   }
+  },
+  {
+   "line": "fresh coriander",
+   "parsed": {
+    "name": "fresh coriander",
+    "form": null,
+    "quantity": null,
+    "unit": null,
+    "prep": null
+   }
+  },
+  {
+   "line": "1 bunch fresh coriander leaves",
+   "parsed": {
+    "name": "fresh coriander leaves",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "bunch",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 large eggs",
+   "parsed": {
+    "name": "large eggs",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "each",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 medium onion",
+   "parsed": {
+    "name": "medium onion",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "each",
+    "prep": null
+   }
+  },
+  {
+   "line": "4 boneless, skinless chicken breasts",
+   "parsed": {
+    "name": "boneless",
+    "form": null,
+    "quantity": 4.0,
+    "unit": "each",
+    "prep": "skinless chicken breasts"
+   }
+  },
+  {
+   "line": "1 (14 oz) can diced tomatoes",
+   "parsed": {
+    "name": "tomatoes",
+    "form": "canned",
+    "quantity": 1.0,
+    "unit": "can",
+    "prep": "diced"
+   }
+  },
+  {
+   "line": "1 (400 g) tin chickpeas",
+   "parsed": {
+    "name": "tin chickpeas",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "each",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 cups (500 ml) chicken stock",
+   "parsed": {
+    "name": "chicken stock",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "cups",
+    "prep": null
+   }
+  },
+  {
+   "line": "(optional) chili flakes",
+   "parsed": {
+    "name": "chili flakes",
+    "form": null,
+    "quantity": null,
+    "unit": null,
+    "prep": null
+   }
+  },
+  {
+   "line": "juice of 1 lemon",
+   "parsed": {
+    "name": "juice 1 lemon",
+    "form": null,
+    "quantity": null,
+    "unit": null,
+    "prep": null
+   }
+  },
+  {
+   "line": "zest of 1 orange",
+   "parsed": {
+    "name": "zest 1 orange",
+    "form": null,
+    "quantity": null,
+    "unit": null,
+    "prep": null
+   }
+  },
+  {
+   "line": "ice cubes",
+   "parsed": {
+    "name": "ice cubes",
+    "form": null,
+    "quantity": null,
+    "unit": null,
+    "prep": null
+   }
+  },
+  {
+   "line": "1 cup ice",
+   "parsed": {
+    "name": "ice",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "cup",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 cups hot water",
+   "parsed": {
+    "name": "hot water",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "cups",
+    "prep": null
+   }
+  },
+  {
+   "line": "chicken thighs bone-in",
+   "parsed": {
+    "name": "chicken thighs bone-in",
+    "form": null,
+    "quantity": null,
+    "unit": null,
+    "prep": null
+   }
+  },
+  {
+   "line": "1 lb ground pork (or beef)",
+   "parsed": {
+    "name": "pork",
+    "form": "ground",
+    "quantity": 1.0,
+    "unit": "lb",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 tbsp low-sodium soy sauce",
+   "parsed": {
+    "name": "low-sodium soy sauce",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "tbsp",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 tsp kashmiri chili powder",
+   "parsed": {
+    "name": "kashmiri chili powder",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "tsp",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 cup extra-virgin olive oil",
+   "parsed": {
+    "name": "extra-virgin olive oil",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "cup",
+    "prep": null
+   }
+  },
+  {
+   "line": "2",
+   "parsed": {
+    "name": "2",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "each",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 cups",
+   "parsed": {
+    "name": "cups",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "each",
+    "prep": null
+   }
+  },
+  {
+   "line": "cloves",
+   "parsed": {
+    "name": "cloves",
+    "form": null,
+    "quantity": null,
+    "unit": null,
+    "prep": null
+   }
+  },
+  {
+   "line": "  - 2 eggs  ",
+   "parsed": {
+    "name": "eggs",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "each",
+    "prep": null
+   }
+  },
+  {
+   "line": "* 1 cup rice",
+   "parsed": {
+    "name": "rice",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "cup",
+    "prep": null
+   }
+  },
+  {
+   "line": "• 2 tbsp butter",
+   "parsed": {
+    "name": "butter",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "tbsp",
+    "prep": null
+   }
+  },
+  {
+   "line": "-- 1 cup sugar",
+   "parsed": {
+    "name": "sugar",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "cup",
+    "prep": null
+   }
+  },
+  {
+   "line": "1/2",
+   "parsed": {
+    "name": "1/2",
+    "form": null,
+    "quantity": 0.5,
+    "unit": "each",
+    "prep": null
+   }
+  },
+  {
+   "line": "½",
+   "parsed": {
+    "name": "½",
+    "form": null,
+    "quantity": 0.5,
+    "unit": "each",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 garlic",
+   "parsed": {
+    "name": "garlic",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "each",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 clove",
+   "parsed": {
+    "name": "clove",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "each",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 cloves garlic",
+   "parsed": {
+    "name": "garlic",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "cloves",
+    "prep": null
+   }
+  },
+  {
+   "line": "6 each eggs",
+   "parsed": {
+    "name": "each eggs",
+    "form": null,
+    "quantity": 6.0,
+    "unit": "each",
+    "prep": null
+   }
+  },
+  {
+   "line": "3 whole cloves",
+   "parsed": {
+    "name": "whole",
+    "form": null,
+    "quantity": 3.0,
+    "unit": "cloves",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 tbsp ghee (clarified butter)",
+   "parsed": {
+    "name": "ghee",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "tbsp",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 cup yogurt ((plain))",
+   "parsed": {
+    "name": "yogurt",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "cup",
+    "prep": null
+   }
+  },
+  {
+   "line": "2 cups flour (all-purpose",
+   "parsed": {
+    "name": "flour all-purpose",
+    "form": null,
+    "quantity": 2.0,
+    "unit": "cups",
+    "prep": null
+   }
+  },
+  {
+   "line": "1 cup sugar)",
+   "parsed": {
+    "name": "sugar",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "cup",
+    "prep": null
+   }
+  },
+  {
+   "line": "200g dark chocolate, 70%",
+   "parsed": {
+    "name": "dark chocolate",
+    "form": null,
+    "quantity": 200.0,
+    "unit": "g",
+    "prep": "70%"
+   }
+  },
+  {
+   "line": "1 tsp vanilla extract, pure",
+   "parsed": {
+    "name": "vanilla extract",
+    "form": null,
+    "quantity": 1.0,
+    "unit": "tsp",
+    "prep": "pure"
+   }
+  }
+ ],
+ "recipes": [
+  {
+   "text": "Spaghetti Bolognese (serves 4)\n- 400g spaghetti\n- 500g ground beef\n- 1 can crushed tomatoes\nNotes: under $30, no dairy, only stores within 10km\n",
+   "parsed": {
+    "title": "Spaghetti Bolognese",
+    "servings": 4,
+    "ingredients": [
+     {
+      "name": "spaghetti",
+      "form": null,
+      "quantity": 400.0,
+      "unit": "g",
+      "prep": null
+     },
+     {
+      "name": "beef",
+      "form": "ground",
+      "quantity": 500.0,
+      "unit": "g",
+      "prep": null
+     },
+     {
+      "name": "crushed tomatoes",
+      "form": "canned",
+      "quantity": 1.0,
+      "unit": "can",
+      "prep": null
+     }
+    ],
+    "constraints": {
+     "max_item_price": null,
+     "max_total_budget": 30.0,
+     "max_distance_km": 10.0,
+     "exclude_tags": [
+      "dairy"
+     ],
+     "require_tags": [],
+     "categories": [],
+     "exclude_categories": [],
+     "subcategories": [],
+     "exclude_subcategories": [],
+     "soft_text": ""
+    }
+   }
+  },
+  {
+   "text": "Garlic Pasta (serves 2)\n- 500g penne\n- 2 cloves garlic\n- 1 can crushed tomatoes\n",
+   "parsed": {
+    "title": "Garlic Pasta",
+    "servings": 2,
+    "ingredients": [
+     {
+      "name": "penne",
+      "form": null,
+      "quantity": 500.0,
+      "unit": "g",
+      "prep": null
+     },
+     {
+      "name": "garlic",
+      "form": null,
+      "quantity": 2.0,
+      "unit": "cloves",
+      "prep": null
+     },
+     {
+      "name": "crushed tomatoes",
+      "form": "canned",
+      "quantity": 1.0,
+      "unit": "can",
+      "prep": null
+     }
+    ],
+    "constraints": {
+     "max_item_price": null,
+     "max_total_budget": null,
+     "max_distance_km": null,
+     "exclude_tags": [],
+     "require_tags": [],
+     "categories": [],
+     "exclude_categories": [],
+     "subcategories": [],
+     "exclude_subcategories": [],
+     "soft_text": ""
+    }
+   }
+  },
+  {
+   "text": "Mala Chicken (serves 4)\n- 450g boneless skinless chicken thigh\n- 15ml light soy sauce\n- 10g light brown sugar\n- 80ml canola oil\n- 5g potato starch\n- 2g msg\n",
+   "parsed": {
+    "title": "Mala Chicken",
+    "servings": 4,
+    "ingredients": [
+     {
+      "name": "boneless skinless chicken thigh",
+      "form": null,
+      "quantity": 450.0,
+      "unit": "g",
+      "prep": null
+     },
+     {
+      "name": "light soy sauce",
+      "form": null,
+      "quantity": 15.0,
+      "unit": "ml",
+      "prep": null
+     },
+     {
+      "name": "light brown sugar",
+      "form": null,
+      "quantity": 10.0,
+      "unit": "g",
+      "prep": null
+     },
+     {
+      "name": "canola oil",
+      "form": null,
+      "quantity": 80.0,
+      "unit": "ml",
+      "prep": null
+     },
+     {
+      "name": "potato starch",
+      "form": null,
+      "quantity": 5.0,
+      "unit": "g",
+      "prep": null
+     },
+     {
+      "name": "msg",
+      "form": null,
+      "quantity": 2.0,
+      "unit": "g",
+      "prep": null
+     }
+    ],
+    "constraints": {
+     "max_item_price": null,
+     "max_total_budget": null,
+     "max_distance_km": null,
+     "exclude_tags": [],
+     "require_tags": [],
+     "categories": [],
+     "exclude_categories": [],
+     "subcategories": [],
+     "exclude_subcategories": [],
+     "soft_text": ""
+    }
+   }
+  },
+  {
+   "text": "Exotic\n- 10g saffron\n- 200g spaghetti",
+   "parsed": {
+    "title": "Exotic",
+    "servings": 1,
+    "ingredients": [
+     {
+      "name": "saffron",
+      "form": null,
+      "quantity": 10.0,
+      "unit": "g",
+      "prep": null
+     },
+     {
+      "name": "spaghetti",
+      "form": null,
+      "quantity": 200.0,
+      "unit": "g",
+      "prep": null
+     }
+    ],
+    "constraints": {
+     "max_item_price": null,
+     "max_total_budget": null,
+     "max_distance_km": null,
+     "exclude_tags": [],
+     "require_tags": [],
+     "categories": [],
+     "exclude_categories": [],
+     "subcategories": [],
+     "exclude_subcategories": [],
+     "soft_text": ""
+    }
+   }
+  },
+  {
+   "text": "Quick dinner\nSERVES 6\nIngredients\n- 2 eggs\nsome prose line\n* 1 cup rice\n• 2 tbsp butter\nNote: gluten-free please, no nuts, within 5 km, under $ 12.50\n",
+   "parsed": {
+    "title": "Quick dinner",
+    "servings": 6,
+    "ingredients": [
+     {
+      "name": "eggs",
+      "form": null,
+      "quantity": 2.0,
+      "unit": "each",
+      "prep": null
+     },
+     {
+      "name": "rice",
+      "form": null,
+      "quantity": 1.0,
+      "unit": "cup",
+      "prep": null
+     },
+     {
+      "name": "butter",
+      "form": null,
+      "quantity": 2.0,
+      "unit": "tbsp",
+      "prep": null
+     }
+    ],
+    "constraints": {
+     "max_item_price": null,
+     "max_total_budget": 12.5,
+     "max_distance_km": 5.0,
+     "exclude_tags": [
+      "gluten",
+      "nuts"
+     ],
+     "require_tags": [],
+     "categories": [],
+     "exclude_categories": [],
+     "subcategories": [],
+     "exclude_subcategories": [],
+     "soft_text": ""
+    }
+   }
+  },
+  {
+   "text": "No title bullets\n1 cup rice\n2 eggs\n",
+   "parsed": {
+    "title": "No title bullets",
+    "servings": 1,
+    "ingredients": [],
+    "constraints": {
+     "max_item_price": null,
+     "max_total_budget": null,
+     "max_distance_km": null,
+     "exclude_tags": [],
+     "require_tags": [],
+     "categories": [],
+     "exclude_categories": [],
+     "subcategories": [],
+     "exclude_subcategories": [],
+     "soft_text": ""
+    }
+   }
+  },
+  {
+   "text": "",
+   "parsed": {
+    "title": "Pasted recipe",
+    "servings": 1,
+    "ingredients": [],
+    "constraints": {
+     "max_item_price": null,
+     "max_total_budget": null,
+     "max_distance_km": null,
+     "exclude_tags": [],
+     "require_tags": [],
+     "categories": [],
+     "exclude_categories": [],
+     "subcategories": [],
+     "exclude_subcategories": [],
+     "soft_text": ""
+    }
+   }
+  },
+  {
+   "text": "   \n\n",
+   "parsed": {
+    "title": "Pasted recipe",
+    "servings": 1,
+    "ingredients": [],
+    "constraints": {
+     "max_item_price": null,
+     "max_total_budget": null,
+     "max_distance_km": null,
+     "exclude_tags": [],
+     "require_tags": [],
+     "categories": [],
+     "exclude_categories": [],
+     "subcategories": [],
+     "exclude_subcategories": [],
+     "soft_text": ""
+    }
+   }
+  },
+  {
+   "text": "Soup (Serves 3)\n- water\n- ice\n- 1 onion\nnotes: egg free, soy-free, no meat",
+   "parsed": {
+    "title": "Soup",
+    "servings": 3,
+    "ingredients": [
+     {
+      "name": "water",
+      "form": null,
+      "quantity": null,
+      "unit": null,
+      "prep": null
+     },
+     {
+      "name": "ice",
+      "form": null,
+      "quantity": null,
+      "unit": null,
+      "prep": null
+     },
+     {
+      "name": "onion",
+      "form": null,
+      "quantity": 1.0,
+      "unit": "each",
+      "prep": null
+     }
+    ],
+    "constraints": {
+     "max_item_price": null,
+     "max_total_budget": null,
+     "max_distance_km": null,
+     "exclude_tags": [
+      "meat",
+      "egg",
+      "soy"
+     ],
+     "require_tags": [],
+     "categories": [],
+     "exclude_categories": [],
+     "subcategories": [],
+     "exclude_subcategories": [],
+     "soft_text": ""
+    }
+   }
+  }
+ ]
+}

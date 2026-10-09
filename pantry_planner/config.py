@@ -210,6 +210,14 @@ class Settings:
     # on a public deployment it would let anyone turn real LLM spend on.
     runtime_settings_enabled: bool = False
 
+    # Public endpoint limits (limits.py). TRUSTED_PROXY_HOPS: how many proxies
+    # in front of the API append to X-Forwarded-For (gitops sets the ingress
+    # depth); 0 means the header is client input and is ignored.
+    trusted_proxy_hops: int = 0
+    # LLM_DAILY_COST_CAP_USD: estimated LLM spend per replica per UTC day above
+    # which LLM-calling endpoints answer 503. None (unset) means no ceiling.
+    llm_daily_cost_cap_usd: float | None = None
+
     @staticmethod
     def from_env() -> Settings:
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -250,7 +258,34 @@ class Settings:
             runtime_settings_enabled=(
                 os.environ.get("RUNTIME_SETTINGS_ENABLED", "").lower()
                 in {"1", "true", "yes"}),
+            trusted_proxy_hops=_proxy_hops(os.environ.get("TRUSTED_PROXY_HOPS", "")),
+            llm_daily_cost_cap_usd=_cost_cap(os.environ.get("LLM_DAILY_COST_CAP_USD", "")),
         )
+
+
+def _proxy_hops(raw: str) -> int:
+    """TRUSTED_PROXY_HOPS as a count of proxies, 0 when unset. A bad value stops the process
+    at startup: guessing would either trust a forged header or rate-limit the ingress."""
+    raw = raw.strip()
+    if not raw:
+        return 0
+    if not raw.isdigit():
+        raise ValueError(f"TRUSTED_PROXY_HOPS must be a whole number of proxies, got {raw!r}")
+    return int(raw)
+
+
+def _cost_cap(raw: str) -> float | None:
+    """LLM_DAILY_COST_CAP_USD in dollars, None when unset (no ceiling)."""
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        cap = float(raw)
+    except ValueError:
+        raise ValueError(f"LLM_DAILY_COST_CAP_USD must be a dollar amount, got {raw!r}") from None
+    if not cap >= 0:
+        raise ValueError(f"LLM_DAILY_COST_CAP_USD must be 0 or more, got {raw!r}")
+    return cap
 
 
 # ─── Effective settings = env (cached) + runtime overrides ───
@@ -353,6 +388,13 @@ COST_PER_MTOK: dict[str, tuple[float, float]] = {
     HAIKU: (1.00, 5.00),
     SONNET: (3.00, 15.00),
 }
+
+
+def is_priced(model: str) -> bool:
+    """Whether estimate_cost_usd knows what a call to `model` costs. Gemini's price is known:
+    $0, the free tier this deployment uses."""
+    provider, name = split_model_spec(model)
+    return provider == GEMINI or name in COST_PER_MTOK
 
 
 def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:

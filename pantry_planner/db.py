@@ -9,6 +9,7 @@ import functools
 import json
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 from sqlalchemy import Boolean, Column, Float, Integer, String, create_engine
 from sqlalchemy.orm import DeclarativeBase, Session
@@ -188,6 +189,26 @@ class RecipeIngredientRow(Base):
     category = Column(String, nullable=True)
 
 
+class RecipeLineAmountRow(Base):
+    """0007_recipe_line_amounts — how much of each library recipe line to buy.
+
+    A table of its own rather than columns on recipe_ingredients, so an API
+    that knows about amounts runs against a database that does not have them
+    yet (load_line_amounts returns None) and the classic plan path, which
+    reads recipe_ingredients only, is untouched. The library's amounts are
+    demo house amounts (synthetic, labelled), not a cookbook's. quantity NULL
+    means not stated, and then `note` says why. Columns mirror the migration
+    exactly; the foreign key to recipe_ingredients (ON DELETE CASCADE) lives
+    in SQL only, as for every other table here.
+    """
+    __tablename__ = "recipe_line_amounts"
+    recipe_slug = Column(String, primary_key=True)
+    line_no = Column(Integer, primary_key=True)
+    quantity = Column(Float, nullable=True)
+    unit = Column(String, nullable=False, default="", server_default="")
+    note = Column(String, nullable=False, default="", server_default="")
+
+
 # ─── Engine / session helpers ────────────────────────────────
 
 @functools.lru_cache(maxsize=8)
@@ -233,6 +254,46 @@ def load_recipe(slug: str) -> Recipe:
                 for i in ings
             ],
         )
+
+
+class LineAmount(NamedTuple):
+    quantity: float | None
+    unit: str
+    note: str
+
+
+def load_line_amounts(slugs: list[str]) -> dict[str, dict[int, LineAmount]] | None:
+    """slug -> line_no -> its amount, for the recipes that have amounts. None when the
+    recipe_line_amounts table is not deployed yet (pantry-db migration 0007): unknown,
+    which a caller must not read as "no amounts stated"."""
+    from sqlalchemy.exc import OperationalError, ProgrammingError
+
+    if not slugs:
+        return {}
+    try:
+        with Session(engine()) as s:
+            rows = (s.query(RecipeLineAmountRow)
+                    .filter(RecipeLineAmountRow.recipe_slug.in_(slugs))
+                    .order_by(RecipeLineAmountRow.recipe_slug, RecipeLineAmountRow.line_no)
+                    .all())
+            out: dict[str, dict[int, LineAmount]] = {}
+            for r in rows:
+                out.setdefault(str(r.recipe_slug), {})[int(r.line_no)] = LineAmount(
+                    None if r.quantity is None else float(r.quantity),
+                    str(r.unit or ""), str(r.note or ""))
+            return out
+    except (OperationalError, ProgrammingError) as e:
+        if _table_missing(e, RecipeLineAmountRow.__tablename__):
+            return None
+        raise
+
+
+def _table_missing(exc: BaseException, table: str) -> bool:
+    """True when a DB error means `table` does not exist: SQLite says "no such table",
+    Postgres raises UndefinedTable ("relation ... does not exist")."""
+    text = str(exc).lower()
+    return table in text and ("no such table" in text or "does not exist" in text
+                              or "undefinedtable" in text)
 
 
 def load_all_recipes() -> list[Recipe]:
@@ -379,7 +440,9 @@ def seed_from_json() -> None:
 
     init_schema()
     with Session(engine()) as s:
-        # Clear existing
+        # Clear existing (amounts before the lines they belong to: in Postgres they cascade
+        # from recipe_ingredients)
+        s.query(RecipeLineAmountRow).delete()
         s.query(RecipeIngredientRow).delete()
         s.query(RecipeRow).delete()
         s.query(OriginSubmissionRow).delete()
@@ -442,6 +505,12 @@ def seed_from_json() -> None:
                     name=ing["name"] if isinstance(ing, dict) else ing,
                     category=ing.get("category") if isinstance(ing, dict) else None,
                 ))
+                # A line with any of the three keys has an amount row; a bare line has none.
+                if isinstance(ing, dict) and {"quantity", "unit", "note"} & ing.keys():
+                    s.add(RecipeLineAmountRow(
+                        recipe_slug=r["slug"], line_no=i,
+                        quantity=None if ing.get("quantity") is None else float(ing["quantity"]),
+                        unit=ing.get("unit") or "", note=ing.get("note") or ""))
         s.commit()
     from .config import redact_db_url
     print(f"Seeded {len(products)} products, {len(recipes)} recipes into {redact_db_url(settings().db_url)}")

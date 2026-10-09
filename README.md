@@ -86,6 +86,8 @@ Everything's env-var driven. Defaults in `pantry_planner/config.py`.
 | `DEFAULT_LAT` / `DEFAULT_LON`| `49.28` / `-123.12`              | Shopping location when the request sends none |
 | `ORIGIN_MIN_COVERAGE`        | `0.6`                            | Spend-weighted origin coverage below which a basket is labelled UNVERIFIED |
 | `DB_HOST` (+ `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`) | *(unset)* | Composed into a Postgres URL when `DB_URL` is unset — the Kubernetes path, parts injected from the CNPG credential secret |
+| `TRUSTED_PROXY_HOPS`         | `0`                              | Proxies in front of the API that append to `X-Forwarded-For`; 0 = the header is ignored and the rate limit keys on the TCP peer |
+| `LLM_DAILY_COST_CAP_USD`     | *(unset: no ceiling)*            | Estimated LLM spend per replica per UTC day above which LLM-calling endpoints answer 503 |
 
 The four model settings are **specs**: `gemini:<model>` (e.g.
 `gemini:gemini-flash-latest`) routes that call to Google Gemini through its
@@ -102,6 +104,47 @@ which keys are configured. With `RUNTIME_SETTINGS_ENABLED=1`,
 "classifier": …, "nl2sql": …}}` applies to the next request — no restart;
 `/health` and the MCP `pipeline_status` tool reflect it. Leave it off on a
 public deployment: it lets any caller turn real LLM spend on.
+
+### Deployments and costs
+
+| Deployment | LLM | Why |
+| --- | --- | --- |
+| AKS (`pantry-gitops` `apps/pantry-api`) | **live** | `ANTHROPIC_API_KEY` is mounted and `DEMO_MODE` is not set |
+| Hugging Face Space / Render demo | none | `demo/Dockerfile` sets `DEMO_MODE=1`: deterministic stand-ins, $0 |
+| Local stack | as configured | whatever `.env` says |
+
+Every public endpoint is bounded (`pantry_planner/limits.py`), per replica and in process:
+
+- **A token bucket per client IP and endpoint**: `/plan/nl` and `/plan/spec` 10 a minute,
+  `/recipes/parse-lines` 60 a minute (more endpoints join as they land). Over the limit is a
+  429 `{"error": "rate_limited", "detail": "Too many requests to ...; retry in N s."}` with
+  `Retry-After`. The client is the TCP peer unless `TRUSTED_PROXY_HOPS` says how many
+  proxies append to `X-Forwarded-For`; a client-written header is never trusted.
+- **A daily LLM cost ceiling**: every LLM call adds its estimated cost (`forced_tool_call`),
+  reset at UTC midnight. The estimate prices the models in `config.COST_PER_MTOK` only: a
+  Gemini call counts $0 (the free tier), and so does any Anthropic model not listed there,
+  whose first call logs a warning while a ceiling is set. Add a model's rates before
+  pointing a capped deployment at it. Above `LLM_DAILY_COST_CAP_USD`, `/plan/nl`, `/plan/spec`,
+  `/plan/{slug}`, `/plan/week` and the MCP plan tools answer 503 / a tool error, "Live planning
+  is paused for today; the demo planner still works" (REST: `{"error":
+  "llm_budget_exhausted", "detail": "<that sentence>"}`). Endpoints that call no LLM, and demo
+  mode, keep working. `/health` reports `llm_budget {spent, cap}`.
+- Both refusals have the body an LLM failure already has: `error` is a code and `detail` the
+  sentence to show, so the console, which shows a string `detail` as it is, needs no change.
+
+The MCP endpoint's bearer tokens are unchanged; the buckets apply to REST only.
+
+**Behind a proxy, set `TRUSTED_PROXY_HOPS` before or with this version.** Without it the TCP
+peer is the proxy, so every visitor shares one bucket per endpoint: ten plans a minute for
+everyone together, not each. uvicorn rewrites the peer from `X-Forwarded-For` only for a proxy on
+loopback (its `FORWARDED_ALLOW_IPS` default), and neither deployment runs one there. The first
+forwarded request with no trusted proxies logs a warning from `pantry_planner.limits`.
+
+| Deployment | Proxy in front | Where `TRUSTED_PROXY_HOPS` is set |
+| --- | --- | --- |
+| AKS | ingress-nginx | `pantry-gitops` `apps/pantry-api/deployment.yaml` env, set to the ingress depth |
+| Hugging Face Space / Render demo | the platform's front end | `demo/Dockerfile` or the Space's settings, once the platform's hop count is known |
+| Local stack | none, or the frontend's nginx | not needed: every request is the same client |
 
 ## Try both routers side-by-side
 
@@ -142,12 +185,16 @@ pantry-planner/
 │   ├── origins.py         # provenance: evidence → resolve → rank
 │   ├── ingest.py          # loads claude-chrome-container output
 │   ├── metrics.py         # /metrics: LLM spend, gates, origin coverage
+│   ├── limits.py          # per-client token bucket + daily LLM cost ceiling
+│   ├── packs.py           # pack_count: packs a purchase takes (shared rule)
+│   ├── recipe_doc.py      # RecipeDoc -> RecipeSpec (no parse) / display text
 │   ├── demo.py            # CLI entrypoint
 │   ├── nlsearch/          # constrained NL2SQL: parse → query plan → gates
 │   │   ├── plan.py        # QueryPlan/StepResult/PlanAlert formalism
 │   │   ├── planner.py     # build_plan + execute_plan (t1..t4, abort gates)
 │   │   ├── sql_builder.py # named templates (single-pass retrieval, stats)
 │   │   ├── query_parser.py# multi-shot semantic parse (forced tool use)
+│   │   ├── lineparse.py   # deterministic ingredient-line reading (no LLM)
 │   │   ├── units.py       # unit normalization + tokenizer
 │   │   └── vocab.py       # live schema-linking vocabulary
 │   └── router/
@@ -240,6 +287,16 @@ there first, copy it here (`cmp` the two files), and the derived rows (terms,
 store prices, brands, reviews) come out the same on both sides because
 `storeseed.py` and pantry-db's `gen-seed-sql.py` share one algorithm.
 
+Recipes: 7 library recipes, 37 lines (`seeds/recipes.json`, also a byte-identical copy of
+pantry-db's). Every line has a `quantity`, `unit` and `note`, and these are **demo house
+amounts**: synthetic gram and millilitre amounts written for this demo ("700 g Chicken
+Thighs" for a curry that serves 4), not taken from any cookbook or site. They are labelled
+that way wherever they are shown (`amount_basis: "demo_house_amounts"` on every line of
+`GET /recipes/{slug}/doc`). A line whose amount is not stated has a null `quantity` and a
+`note` saying why. They live in their own table, `recipe_line_amounts` (pantry-db migration
+0007), so the classic `/plan/{slug}` path is unchanged and an API running against a database
+without the table still works: the doc's lines are then unquantified, with a warning.
+
 Store model: 4 seeded stores with lat/lon (one at ~14 km to demo the distance
 gate), per-store prices (±15% deterministic variance), and per-product reviews
 powering the brand stats. Per-ingredient pools feed **three retrieval-aware
@@ -274,6 +331,47 @@ The selector itself still ignores distance, so it can choose a product only sold
 while a nearer alternative exists; that product is then reported, not silently swapped.
 `tests/test_recipe_location.py` covers the unchanged default, the prices and trip, a product
 taken off the only nearby store's shelf, the no-store gate, and the REST and MCP parameters.
+
+## Reviewed recipes (`POST /plan/spec`, MCP `plan_from_lines`)
+
+A recipe the shopper has already reviewed line by line (a `RecipeDoc`: an imported or pasted
+ingredient list, a library recipe with its amounts, a dish the assistant wrote) is planned
+exactly as reviewed. `recipe_doc.to_spec` hands each line's name, quantity and unit to
+`flow.run_spec`, which runs the same retrieval, gates, selector and trip optimizer as
+`/plan/nl` but no parser of either kind: the trace's first step reads "skipped: reviewed
+lines". What the shopper reviewed is what gets planned, and `basis.lines` on the plan shows
+it, byte for byte (`tests/test_plan_spec.py`). Only the products are still chosen by the
+selector.
+
+- `POST /plan/spec` takes `{doc, lat?, lon?, max_km?, exclude_origin?, preference?,
+  allow_partial?}` and returns the same `ShoppingPlan` as `/plan/nl`. A line not confirmed yet
+  (a video transcription the shopper has not ticked) is a 422 `unconfirmed_lines` naming it;
+  an unknown country is a 422 and a gate abort a 409, as on `/plan/nl`. A line's `quantity`
+  is a finite number from 0 to 1,000,000 in its own unit (`models.MAX_LINE_QUANTITY`);
+  anything else, including JSON's `1e309`, which Python reads as infinity, is a 422 naming
+  the line.
+- The 40-line planning cap still applies: lines past it, and water or ice, are named on
+  `skipped`, never dropped silently.
+- `recipe_doc.to_recipe_text` renders a doc in the pasted format for traces and transcripts;
+  it is never a planning input.
+- `POST /recipes/parse-lines` reads up to 60 ingredient lines (`{title?, yield_text?, lines,
+  origin?}`) into the fields a shopper reviews (`line_no, text, name, quantity, unit, note,
+  amount_basis`), with `servings` null unless the title or yield states it. It uses the demo
+  parser's line reading (`nlsearch/lineparse.py`): no URL, no LLM, no database. Its output,
+  `warnings` included, is a valid RecipeDoc as it stands: a servings count or an amount
+  over the bounds comes back unstated, and the warnings come one per kind of problem,
+  naming its lines.
+- `GET /recipes/{slug}/doc` is a library recipe as a RecipeDoc, with its demo house amounts
+  (see the catalog notes above), to show line by line. Plan a library recipe by slug
+  (`POST /plan/{slug}`): that path gives the selector each line's category, while
+  `/plan/spec` first checks by name alone that each line is stocked, as `/plan/nl` does.
+  Six of the seven library docs plan through `/plan/spec` as well; `pbj_sandwich` is a 409
+  there, because "Peanut Butter and Jelly Jam" and "White Chocolate" find nothing by name.
+
+Every plan carries `basis` (what it was made from: the planned lines, the product chosen for
+each, the constraints and location), `servings` (None when the recipe does not say) and, per
+purchase, `need_qty`/`need_uom` when every line it covers states an amount in one unit. The MCP
+plan tools attach `summary.basis` only with `basis=true`; without it the summary is unchanged.
 
 ## Weekly menu optimizer (`POST /plan/week`)
 
@@ -335,6 +433,7 @@ nothing needs a token.
 | `origin_triage` | free | only when configured | products worth reading a label for (hints, never origins) |
 | `plan_recipe` | 1–3 LLM calls | only when configured | `PlanResult {summary, full}` for a seeded slug. Any of `lat`/`lon`/`max_km` makes it store-aware: each line at its cheapest store in range, `summary.trip` the recommended split, and a chosen product no store in range sells in `summary.out_of_range` (naming the nearest offer); without them, catalog prices and no stores |
 | `plan_from_text` | 2–4 Claude calls | only when configured | `PlanResult` for pasted recipe text (NL2SQL path). `lat`/`lon`/`max_km` define "nearby"; `allow_partial=true` plans what is stocked and in range and lists the rest in `summary.not_stocked` / `summary.out_of_range` |
+| `plan_from_lines` | 1–3 LLM calls (no parse) | only when configured | `PlanResult` for reviewed lines, planned exactly as given (no parse). The model names `doc_key`; the hub fills the reviewed `lines`, `title` and `servings`, and any other client may pass up to 60 `lines` itself |
 | `plan_week` | ~1 selector call per day | only when configured | `WeekResult {summary, full}` |
 | `submit_origin_evidence` | free | **always over HTTP** | `Submission` — a PENDING label reading, deduplicated |
 | `list_origin_submissions` | free | only when configured | `SubmissionPage` — the review queue, oldest first |

@@ -204,3 +204,25 @@ def head_noun(name: str) -> str | None:
             kept.append(toks[i])
         i += 1
     return kept[-1] if kept else None
+
+
+# ─── semantic closeness: the single ranking key ──────────────
+# How well a product answers an ingredient, before price or origin are
+# looked at. The demo-mode selector picks by it, and the alternatives
+# ranking orders a line's candidates by it, so the two can never disagree
+# about which product is the closer match.
+
+def semantic_key(ingredient: str, product) -> tuple[int, int, int]:
+    """(-shared tokens, fresh miss, head-noun miss) for `product` (anything
+    with .name and .description) against an ingredient name; lower is
+    closer. Token overlap is over the product's index_text. "fresh" is a
+    tokenizer stopword (half the catalog says it), yet "fresh coriander" is
+    cilantro, not ground coriander, so it is read raw. The head-noun key
+    breaks overlap ties the way a shopper would: for "flour", All-Purpose
+    Flour (about flour) beats Flour Tortillas (about tortillas)."""
+    toks = tokens(ingredient)
+    want = toks[-1] if toks else None
+    fresh = "fresh" in ingredient.lower().split()
+    return (-len(set(toks) & set(tokens(index_text(product.name, product.description)))),
+            0 if not fresh or "fresh" in f"{product.name} {product.description}".lower() else 1,
+            0 if want is not None and head_noun(product.name) == want else 1)
