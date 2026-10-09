@@ -263,7 +263,8 @@ async def test_mcp_plan_tools_honour_the_ceiling(env):
         for tool, args in (("plan_recipe", {"slug": "tomato_penne"}),
                            ("plan_from_text", {"recipe_text": "P\n- 500g penne"}),
                            ("plan_from_lines", {"doc_key": "k", "lines": [{"name": "penne"}]}),
-                           ("plan_week", {"days": 1})):
+                           ("plan_week", {"days": 1}),
+                           ("plan_meals", {"dishes": [{"recipe": "tomato_penne", "count": 1}]})):
             with pytest.raises(ToolError, match="paused for today"):
                 await server.call_tool(tool, args)
     finally:
