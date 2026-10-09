@@ -21,7 +21,7 @@ import json
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .. import db, nutrition, tripopt
+from .. import calendar_export, db, nutrition, tripopt
 from ..config import settings
 from ..db import SEEDS_DIR
 from ..models import MealNutrition, NutritionSource, PeriodNutrition, Product, RecipeDoc
@@ -577,7 +577,8 @@ def compute(draft: MealPlanDraft) -> MealSchedule:
         strategies=results, recommended_strategy=rec, warnings=warnings,
         days=days, period_nutrition=period, recipe_nutrition=per_recipe,
         coverage=coverage,
-        approved_schedule=_approved_schedule(draft, results, cook),
+        approved_schedule=calendar_export.approved_schedule(
+            draft, results, placed, docs, per_recipe, notice=SYNTHETIC_NOTICE),
         sources=_sources(nutrition_sources), synthetic_notice=SYNTHETIC_NOTICE)
 
 
@@ -666,30 +667,6 @@ def _coverage(needs: list[Need]) -> Coverage:
                     freshness_your_setting=len(setting),
                     freshness_unknown=len(pids) - len(cited) - len(setting),
                     needs=len(needs), amounts_known=sum(1 for n in needs if n.qty is not None))
-
-
-def _approved_schedule(draft: MealPlanDraft, results: list[StrategyResult],
-                       cook: dict) -> dict | None:
-    """The approved trips as the calendar export reads them, with their freeze, thaw and
-    cook actions. exportable is False while any of them needs review."""
-    if not draft.trips:
-        return None
-    by_name = {r.name: r for r in results}
-    trips_out, actions = [], []
-    for appr in sorted(draft.trips, key=lambda t: (t.date, t.strategy)):
-        res = by_name[appr.strategy]
-        trip = next((t for t in res.trips if t.date == appr.date), None)
-        if trip is None:
-            continue
-        trips_out.append({"id": trip.id, "strategy": res.name, "date": trip.date.isoformat(),
-                          "status": trip.status, "stores": trip.stores,
-                          "total_cost": trip.total_cost, "total_is_floor": trip.total_is_floor,
-                          "list_text": trip.list_text})
-        meals = {m.meal_id for ln in trip.lines for m in ln.for_meals}
-        actions += [a.model_dump(mode="json") for a in res.actions
-                    if a.trip_id == trip.id or (a.kind == "cook" and a.meal_id in meals)]
-    return {"trips": trips_out, "actions": actions,
-            "exportable": bool(trips_out) and all(t["status"] == "approved" for t in trips_out)}
 
 
 def _sources(nutrition_sources: list | None = None) -> list[dict]:
