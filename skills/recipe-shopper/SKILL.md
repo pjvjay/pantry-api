@@ -72,19 +72,25 @@ first that gives you the ingredient list:
    or `~/.pantry-secrets/youtube_api_key`, read the title, channel and
    description (one unit of the key's daily quota). The video id is the
    11 characters after `v=`, `youtu.be/`, `/shorts/` or `/live/`. Never
-   print the key or write it into a command; the command reads it:
+   print the key or write it into a command. The command reads it and
+   passes it to curl as a header on standard input, so it is in neither
+   the URL nor the command line:
 
    ```bash
    KEY="${YOUTUBE_API_KEY:-$(cat ~/.pantry-secrets/youtube_api_key 2>/dev/null)}"
    if [ -z "$KEY" ]; then echo "no YouTube API key"; else
-     curl -sG "https://www.googleapis.com/youtube/v3/videos" --data-urlencode "part=snippet" \
-       --data-urlencode "id=<video id>" --data-urlencode "key=$KEY"
+     printf 'x-goog-api-key: %s\n' "$KEY" |
+       curl -sG "https://www.googleapis.com/youtube/v3/videos" -H @- \
+         --data-urlencode "part=snippet" --data-urlencode "id=<video id>"
    fi
    ```
 
-   With no key, get the title and channel (this needs no key; an error
-   instead of JSON means YouTube will not describe this video), then ask
-   the user to paste the description from under the video:
+   If it prints "no YouTube API key", or YouTube answers with an error or
+   with no video in its items (the key is refused or over its quota, or
+   the video is private or deleted), carry on as with no key. With no key,
+   get the title and channel (this needs no key; an error instead of JSON
+   means YouTube will not describe this video), then ask the user to paste
+   the description from under the video:
 
    ```bash
    curl -sG "https://www.youtube.com/oembed" --data-urlencode "format=json" \
