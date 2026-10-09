@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime as dt
 import functools
 import json
+from dataclasses import dataclass
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -174,10 +175,13 @@ def _shelf_info(product: Product, w: trips.Window, storage: str, buy_ahead: int,
 # ─── One strategy ────────────────────────────────────────────
 
 class _Ctx:
-    """Everything one schedule call shares between the two strategies."""
+    """Everything one schedule call shares between the two strategies. `offers`: price-matrix
+    rows already read for a superset of the products (an Options list re-schedules once per
+    candidate); the rows for these needs are taken from it, in the query's own order."""
 
     def __init__(self, draft: MealPlanDraft, products: dict[int, Product],
-                 needs: list[Need], board: Board, cook: dict[str, tuple[int, str, str]]):
+                 needs: list[Need], board: Board, cook: dict[str, tuple[int, str, str]],
+                 offers: list[dict] | None = None):
         self.draft, self.products, self.needs, self.board, self.cook = (
             draft, products, needs, board, cook)
         self.prefs = draft.prefs
@@ -192,7 +196,9 @@ class _Ctx:
         self.lat, self.lon, self.max_km = _location(draft)
         ids = {n.product_id for n in needs} | {s.product_id for t in draft.trips
                                                for s in t.snapshot}
-        self.rows = _offers(sorted(ids & products.keys()), self.lat, self.lon, self.max_km)
+        ids &= products.keys()
+        self.rows = (_offers(sorted(ids), self.lat, self.lon, self.max_km) if offers is None
+                     else [r for r in offers if r["product_id"] in ids])
         self.stocked = {r["product_id"] for r in self.rows}
 
     def label(self, day: int) -> str:
@@ -515,15 +521,31 @@ def _stale_warning(ctx: _Ctx, name: str, need: Need, w: trips.Window, day: int,
 
 # ─── The schedule ────────────────────────────────────────────
 
-def compute(draft: MealPlanDraft) -> MealSchedule:
-    """The schedule for a draft. Raises MealPlanError (REST 422) for a draft it cannot be
-    computed for."""
+@dataclass
+class Prepared:
+    """A draft read and placed, before any trip: the catalog, each recipe, the product per
+    line (pins applied and checked), the meals where they sit and what each needs."""
+    products: dict[int, Product]
+    docs: dict[str, RecipeDoc]
+    chosen: dict[str, dict[int, int]]
+    placed: list[PlacedMeal]
+    needs: list[Need]
+    board: Board
+    cook: dict[str, tuple[int, str, str]]
+
+
+def prepare(draft: MealPlanDraft) -> Prepared:
+    """Read and place a draft. Raises MealPlanError (REST 422) for a draft no schedule can
+    be computed for, a pin alternatives.validate_pins refuses among them."""
+    from .pins import check_pins
+
     if draft.v != 1:
         raise MealPlanError("version", f"draft version {draft.v}; this server reads 1")
     _check_dates(draft)
     products = {p.id: p for p in db.load_all_products()}
     docs = {key: recipe_doc(dr.ref, dr.servings) for key, dr in sorted(draft.recipes.items())}
     chosen = {key: line_products(draft, key, docs[key], products) for key in docs}
+    check_pins(draft, docs, products)
     meals, days = place.place(draft)
 
     board = Board(days=draft.days, used={})
@@ -547,8 +569,16 @@ def compute(draft: MealPlanDraft) -> MealSchedule:
         if resolved is not None and resolved.status in USABLE:
             needs.extend(needs_for_meal(draft, m, day, slot, doc, chosen[m.recipe_key]))
     needs.sort(key=lambda n: (n.day, SLOTS.index(n.slot), n.meal_id, n.line_no))
+    return Prepared(products=products, docs=docs, chosen=chosen, placed=placed, needs=needs,
+                    board=board, cook=cook)
 
-    ctx = _Ctx(draft, products, needs, board, cook)
+
+def compute(draft: MealPlanDraft) -> MealSchedule:
+    """The schedule for a draft. Raises MealPlanError (REST 422) for a draft it cannot be
+    computed for."""
+    pre = prepare(draft)
+    products, docs, placed, needs = pre.products, pre.docs, pre.placed, pre.needs
+    ctx = _Ctx(draft, products, needs, pre.board, pre.cook)
     warnings = _plan_warnings(draft, placed, docs, needs)
     results = []
     for name in STRATEGIES:

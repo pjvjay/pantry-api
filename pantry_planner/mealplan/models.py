@@ -46,6 +46,13 @@ MAX_DRAFT_BYTES = 256 * 1024
 MAX_PACKS = 10_000_000_000
 # A line's price at approval: MAX_PACKS packs at $1,000 each. Finite, so the delta is too.
 MAX_LINE_PRICE = 1e13
+# Pins: at most this many lines of one recipe (alternatives.MAX_PINS, the chat cart's own
+# bound), each a line number of at most 4 digits and a product id that fits the database's
+# integer. A product id past that would fail the query, not the check.
+MAX_PINS_PER_RECIPE = 40
+MAX_PRODUCT_ID = 2**31 - 1
+# Origin rules for the plan: as many countries as /plan/spec and /mealplan/resolve take.
+MAX_COUNTRIES = 50
 
 
 class MealPlanError(ValueError):
@@ -187,20 +194,41 @@ class ApprovedTrip(BaseModel):
     snapshot: list[SnapshotLine] = Field(default_factory=list, max_length=200)
 
 
+Country = Annotated[str, Field(min_length=1, max_length=100)]
+LineNo = Annotated[str, Field(min_length=1, max_length=4)]
+ProductId = Annotated[int, Field(ge=1, le=MAX_PRODUCT_ID)]
+
+
 class PlanSettings(BaseModel):
     """Where the household shops: the stores in range and their prices. Defaults are the
-    server's reference point and every store."""
+    server's reference point and every store. exclude_origin and preference are the plan's
+    origin rules, as /mealplan/resolve takes them: the console resolves with them, and every
+    pin and every Options list is checked against them (a product evidenced as from an
+    excluded country is held back)."""
     lat: float | None = Field(default=None, ge=-90, le=90)
     lon: float | None = Field(default=None, ge=-180, le=180)
     max_km: float | None = Field(default=None, ge=0.5, le=100)
+    exclude_origin: list[Country] = Field(default_factory=list, max_length=MAX_COUNTRIES)
+    preference: list[Country] = Field(default_factory=list, max_length=MAX_COUNTRIES)
+
+    @model_validator(mode="after")
+    def _known_countries(self) -> PlanSettings:
+        from ..origins import validate_countries
+
+        unknown = validate_countries([*self.exclude_origin, *self.preference])
+        if unknown:
+            raise ValueError("unrecognised country name(s): "
+                             + ", ".join(repr(k) for k in unknown))
+        return self
 
 
 class MealPlanDraft(BaseModel):
     """The browser's plan (`pantry.mealplan.v1`), sent whole to /mealplan/schedule.
 
     pins: recipe_key -> {line_no (as a string): product_id}, the shopper's own product for a
-    line. packs_override: '<YYYY-MM-DD>:<product_id>' -> packs on that trip's line, 0 for a
-    line the shopper dismissed. storage_overrides: product_id (as a string) -> 'fridge' (never
+    line, checked on every call as a chat cart's swap is (pins.check_pins). packs_override:
+    '<YYYY-MM-DD>:<product_id>' -> packs on that trip's line, 0 for a line the shopper
+    dismissed. storage_overrides: product_id (as a string) -> 'fridge' (never
     freeze) or 'freezer' (freeze on arrival). dismissed_dates are never suggested as trips;
     fixed_dates always are. nutrition_targets are the shopper's own daily targets, kept in the
     browser: each day gets a verdict only where its totals prove one."""
@@ -213,7 +241,9 @@ class MealPlanDraft(BaseModel):
     recipes: dict[str, DraftRecipe] = Field(default_factory=dict, max_length=MAX_RECIPES)
     resolved: dict[str, ResolvedRecipe] = Field(default_factory=dict, max_length=MAX_RECIPES)
     meals: list[Meal] = Field(default_factory=list, max_length=MAX_MEALS)
-    pins: dict[str, dict[str, int]] = Field(default_factory=dict, max_length=MAX_RECIPES)
+    pins: dict[Annotated[str, Field(min_length=1, max_length=100)],
+               Annotated[dict[LineNo, ProductId], Field(max_length=MAX_PINS_PER_RECIPE)]] = \
+        Field(default_factory=dict, max_length=MAX_RECIPES)
     trips: list[ApprovedTrip] = Field(default_factory=list, max_length=MAX_DAYS)
     dismissed_dates: list[dt.date] = Field(default_factory=list, max_length=MAX_DAYS)
     fixed_dates: list[dt.date] = Field(default_factory=list, max_length=MAX_DAYS)
@@ -415,3 +445,4 @@ class MealSchedule(BaseModel):
     approved_schedule: dict | None
     sources: list[dict]
     synthetic_notice: str
+
