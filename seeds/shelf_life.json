@@ -1,11 +1,11 @@
 {
   "v": 1,
-  "about": "Cited home storage times for the meal planner. Fridge times are for safety and freezer times for quality, as the chart says. A product missing from `products` has an unknown storage time and the planner uses the shopper's buy-ahead setting, labelled as theirs. `verbatim`, `item`, `type` and the sources' `notes_verbatim` are the pages' words (whitespace normalised); `applies_to`, `category` and `note` are this file's own labels.",
+  "about": "Cited home storage times for the meal planner. The chart says its short fridge limits keep food from spoiling or becoming dangerous to eat, and that its freezer times are for quality only; `basis` (safety for fridge, quality for freezer) is this file's label for that. A product missing from `products` has an unknown storage time and the planner uses the shopper's buy-ahead setting, labelled as theirs. `verbatim`, `item`, `type` and the sources' `notes_verbatim` are the pages' words (whitespace normalised); `applies_to`, `category` and `note` are this file's own labels.",
   "rules_of_use": [
     "Plans use days_min; the UI shows the verbatim text.",
     "A stated time in months or years has days_min/days_max null: it only ever counts as longer than the plan horizon, never as a day count.",
     "Where a product cites more than one rule for the same storage, the shorter time is planned and every rule is cited.",
-    "Thaw lead in the fridge: at least 24 hours for small amounts; at least 24 hours per 5 lb for a large item (fsis-thaw-fridge-large). The remainder of a thawed pack is never planned for later."
+    "Thaw lead in the fridge: at least 24 hours for small amounts; at least 24 hours per 5 lb for a large item (fsis-thaw-fridge-large). The remainder of a thawed pack is never planned for later. That is the planner's own choice, stricter than FSIS, which allows a day or two more (3 to 5 days for red meat cuts) after fridge thawing and allows refreezing."
   ],
   "retrieved": "2026-10-08",
   "sources": [
@@ -555,7 +555,7 @@
     }
   ],
   "pantry_rules": [],
-  "pantry_rules_note": "Neither source states a room-temperature time for any product in the catalog. The chart's only one is for an unopened shelf-stable canned ham, which the catalog does not stock.",
+  "pantry_rules_note": "Neither source states a room-temperature storage time for any product in the catalog. The chart's only one is for an unopened shelf-stable canned ham, which the catalog does not stock. FSIS's two-hour room-temperature limit for perishable foods (fsis-never-counter) is a limit, not a storage time.",
   "products": [
     {
       "product_id": 10,
@@ -820,7 +820,7 @@
           "fsis-thaw-fridge-large"
         ]
       },
-      "note": "Bought frozen: the freezer row applies until thawed, then the FSIS after-thaw time; the chart's 3 - 5 Days row is for fresh shrimp.",
+      "note": "Bought frozen: the freezer row applies until thawed, then the FSIS after-thaw time (a day or two). The chart's fridge time for shrimp (3 - 5 Days) is not cited: the chart does not say whether it covers thawed shrimp, and the FSIS time is the shorter.",
       "synthetic_product": false
     },
     {
@@ -887,7 +887,7 @@
           "fsis-thaw-fridge-large"
         ]
       },
-      "note": "The bag names basa and cod. Cod is a lean fish on the chart; basa is a catfish and the chart lists catfish as fatty. Both rows are cited and the shorter freezer time is planned.",
+      "note": "The bag names basa and cod. Cod is a lean fish on the chart. The chart does not name basa; basa is a catfish (general knowledge, not from a cited source) and the chart lists catfish as fatty. Both rows are cited and the shorter freezer time is planned.",
       "synthetic_product": false
     }
   ],

@@ -108,9 +108,11 @@ Rules of use:
 - A time in months or years has no day count. It only ever counts as longer than the plan.
 - Where a product cites more than one row for one kind of storage, the shorter time is
   planned and every row is cited (the white fish bag cites both fish freezer rows).
-- **Safety versus quality.** The chart's fridge times are for safety and its freezer times
-  for quality ("frozen foods stored continuously at 0°F (-18°C) or below can be kept
-  indefinitely"). The plan freezes a product on arrival only when its cited freezer time is
+- **Safety versus quality.** The chart says its short fridge limits "will help keep them from
+  spoiling or becoming dangerous to eat", and that its freezer times "are for quality only"
+  ("frozen foods stored continuously at 0°F (-18°C) or below can be kept indefinitely").
+  `basis` (safety for fridge rows, quality for freezer rows) is the file's own label for
+  that; the console shows the verbatim text, not the label. The plan freezes a product on arrival only when its cited freezer time is
   longer than the plan and a cited thaw time exists; eggs ("Do not freeze in shell") are
   never frozen.
 - **Thawing.** In the fridge: a full day for a small amount; at least 24 hours per 5 lb for a

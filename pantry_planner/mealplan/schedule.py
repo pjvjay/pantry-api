@@ -139,8 +139,8 @@ def _shelf_info(product: Product, w: trips.Window, storage: str, buy_ahead: int,
         rules = [shelf.rule(r) for r in ids]
         first = shelf.source(rules[0]["source"])
         if storage == "freezer":
-            note = ("Frozen on arrival and thawed in the fridge for the meal; freezer times "
-                    "are for quality, fridge times for safety." if frozen_on_arrival
+            note = ("Frozen on arrival and thawed in the fridge for the meal; the chart "
+                    "gives its freezer times for quality only." if frozen_on_arrival
                     else "Bought frozen and thawed in the fridge for the meal.")
             days = None
         else:
