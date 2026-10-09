@@ -117,7 +117,7 @@
       "source": "cnf-api",
       "food_code": 110,
       "description": "Cheese, mozzarella, (52% water, 22.5% M.F.)",
-      "state_note": "regular mozzarella, 22.5% M.F.",
+      "state_note": "mozzarella, 52% water, 22.5% M.F.",
       "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=110&lang=en&type=json",
       "retrieved_at": "2026-10-08",
       "per_100g": {
@@ -257,7 +257,7 @@
       "source": "cnf-api",
       "food_code": 118,
       "description": "Butter, regular",
-      "state_note": "salted butter",
+      "state_note": "butter; CNF does not say salted or unsalted",
       "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=118&lang=en&type=json",
       "retrieved_at": "2026-10-08",
       "per_100g": {
@@ -397,7 +397,7 @@
       "source": "cnf-api",
       "food_code": 125,
       "description": "Egg, chicken, whole, fresh or frozen, raw",
-      "state_note": "whole egg, raw, without shell",
+      "state_note": "whole egg, raw",
       "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=125&lang=en&type=json",
       "retrieved_at": "2026-10-08",
       "per_100g": {
@@ -3370,8 +3370,8 @@
     {
       "ingredient_key": "butter",
       "ref_id": "cnf-api:118",
-      "match_kind": "generic",
-      "note": "Salted (regular) butter.",
+      "match_kind": "close",
+      "note": "The catalog's butter is salted; CNF 'Butter, regular' does not say whether it is salted.",
       "reviewed_at": "2026-10-08"
     },
     {
@@ -3546,7 +3546,7 @@
       "ingredient_key": "mozzarella",
       "ref_id": "cnf-api:110",
       "match_kind": "generic",
-      "note": "The product's fat level is not known; regular mozzarella is the reference.",
+      "note": "The product's fat level is not known; CNF mozzarella (52% water, 22.5% M.F.) is the reference.",
       "reviewed_at": "2026-10-08"
     },
     {
@@ -3623,7 +3623,7 @@
       "ingredient_key": "spaghetti",
       "ref_id": "cnf-api:4515",
       "match_kind": "generic",
-      "note": "Dry weight, as the recipe amounts are.",
+      "note": "Dry weight. The recipe line does not say dry or cooked; the catalog sells dry spaghetti, so the amount is read as dry.",
       "reviewed_at": "2026-10-08"
     },
     {
