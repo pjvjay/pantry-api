@@ -234,6 +234,24 @@ def test_a_pin_no_store_in_range_sells_is_refused(example, reseed):
     assert "the nearest offer is MegaSave Richmond" in detail["detail"]
 
 
+def test_a_pinned_substitute_no_store_sells_any_more_says_so(example, reseed):
+    """A same-aisle substitute is found among offers, so once no store sells it the pin is
+    refused for that reason, not because its words do not match the line."""
+    sched = schedule(example)
+    trip, _line = lines_of(sched, "fresh", THIGHS)[0]
+    opts = options(example, trip["date"], THIGHS, limit=25)
+    sub = next(it for it in opts["ranking"]["items"] if it["match"] == "substitute")
+    draft = pinned(example, opts, sub["product_id"])
+    assert schedule(draft)
+    _sql("DELETE FROM store_products WHERE product_id = :p", p=sub["product_id"])
+    r = client().post("/mealplan/schedule", json=draft)
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert (detail["error"], detail["line_no"]) == ("pin_invalid", 1)
+    assert detail["detail"].endswith("cannot be bought for line 1 (Chicken Thighs): no store "
+                                     "sells it"), detail["detail"]
+
+
 def test_a_pin_that_is_no_option_for_the_line_is_refused(example):
     mango = next(pid for pid, p in PRODUCTS.items() if p["name"].startswith("Frozen Mango"))
     r = client().post("/mealplan/schedule", json={**example, "pins": {BIRYANI: {"1": mango}}})

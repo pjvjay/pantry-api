@@ -434,6 +434,11 @@ def validate_pins(basis: PlanBasis, pins: list[Pin] | None = None, *,
             country, fld = g.held[pid]
             raise PinError(f"{product.name} is evidenced as {_where(country, fld)}, which "
                            "this plan excludes", line_no)
+        if match is None and not _available(basis, offers.get(pid)) and pid not in near:
+            # Not found because no store sells it at all (same-aisle substitutes are looked
+            # up among offers): that is the reason, not the words.
+            raise PinError(f"{product.name} cannot be bought for line {line_no} "
+                           f"({line.name}): {_unavailable(basis, None)}", line_no)
         if match is None:
             raise PinError(f"{product.name} is not an option for line {line_no} "
                            f"({line.name}): {_why_not(basis, line, product, near.get(pid))}",
@@ -475,12 +480,12 @@ def _why_not(basis: PlanBasis, line: BasisLine, product: Product, anywhere: dict
 
 
 def _unavailable(basis: PlanBasis, nearest: dict | None) -> str:
-    within = (f"within {basis.max_km:g} km" if basis.max_km is not None else "at any store")
+    within = f" within {basis.max_km:g} km" if basis.max_km is not None else ""
     cap = basis.constraints.max_item_price
     if nearest is None:
-        return f"no store {within} sells it" + (
+        return f"no store{within} sells it" + (
             f" at or under the ${cap:.2f} per-item price cap" if cap is not None else "")
-    return (f"no store {within} sells it"
+    return (f"no store{within} sells it"
             + (f" at or under the ${cap:.2f} per-item price cap" if cap is not None else "")
             + f"; the nearest offer is {nearest['store']}, {nearest['dist_km']:.1f} km away, "
               f"at ${nearest['price']:.2f}")
