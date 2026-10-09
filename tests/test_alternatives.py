@@ -132,6 +132,8 @@ def test_every_rows_trip_total_is_what_reprice_charges_to_the_cent():
                 elsewhere += buys.store != it.offer.store
                 if it.current:
                     assert it.trip.delta == 0.0 and it.trip.stops_delta == 0
+                    # every demo plan's pick is the ranking's first, located or not
+                    assert it.rank == 1, (where, it.rank_reason)
                 checked += 1
     assert checked > 100
     # the lowest price in range is often not where the best trip buys (the case to get right)
@@ -146,8 +148,11 @@ def test_the_cart_pick_is_always_listed_and_flagged():
         ranking = _rank(plan, ln.name, limit=1)
         current = [it for it in ranking.items if it.current]
         assert [it.product_id for it in current] == [ln.product_id]
-        # In demo mode the plan's pick is the ranking's first, or its row says why not.
-        assert current[0].rank == 1 or current[0].rank_reason.startswith("Below #")
+        # In demo mode the planner's pick and the ranking share semantic_key and its
+        # tie-breaks, so the pick is the ranking's first (the design allows a pick below #1
+        # only with a reason naming the key; demo mode never needs one).
+        assert current[0].rank == 1, (ln.name, current[0].rank_reason)
+        assert current[0].rank_reason == "Ranked first: nothing ranks above it."
 
 
 # ─── Order ───────────────────────────────────────────────────
