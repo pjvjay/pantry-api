@@ -41,11 +41,15 @@ milkshakes" is seven snack occasions at household servings.
 
 ## Quick add: matching names
 
-1. The period is read and cut out: "in 2 weeks", "for a fortnight", "10 days". The rest is
-   split on `+`, commas, semicolons, new lines, and "and" when a count follows it ("peanut
-   butter and jelly sandwich" stays whole).
+1. The period is read and cut out: "in 2 weeks", "for a fortnight", "10 days", or a leading
+   "10 days of" ("10 days of grilled cheese" is one grilled cheese over 10 days, not ten).
+   The rest is split on `+`, commas, semicolons, new lines, and "and" when a count follows
+   it ("peanut butter and jelly sandwich" stays whole).
 2. Counts: digits, number words, `2x`, `2 x`, `2 ×`, `×3`, `x3`. No count is one, with
-   `count_stated: false`. "for breakfast", "snacks" and the like become `slot_hint`.
+   `count_stated: false`. A slot word after for, as or at ("for breakfast", "as a snack")
+   becomes `slot_hint`. A bare one may be part of a title ("Breakfast Burrito", "Dinner
+   Rolls"), so the name is matched with it first and it becomes the hint only when that
+   finds nothing ("mango milkshakes breakfast").
 3. Names are normalised (NFKD, accents stripped, case-folded, punctuation and the stopwords
    of, the, a, an, and, with dropped) and each word singularised by rule (-ies → y, -oes → o,
    -es after s/x/z/ch/sh, a final -s on words over 3 letters, an exceptions list).

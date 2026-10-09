@@ -1,12 +1,14 @@
 """Quick add: "3 Pepperoni Pizza + 2 Chicken Fried Rice + 3 chicken briyani + 7 mango
 milkshakes in 2 weeks" read into counted recipe selections, with no LLM.
 
-1. The period ("in 2 weeks", "a fortnight", "10 days") is read and cut out. The rest is split
-   on '+', commas, semicolons, new lines, and 'and' when a count follows it, so "peanut
-   butter and jelly sandwich" stays whole.
+1. The period ("in 2 weeks", "a fortnight", "10 days", or a leading "10 days of") is read
+   and cut out. The rest is split on '+', commas, semicolons, new lines, and 'and' when a
+   count follows it, so "peanut butter and jelly sandwich" stays whole.
 2. Each item's count: digits, number words, "2x", "2 x", "2 ×", "×3" or "x3" (leading or
-   trailing). No count means one, flagged count_stated false. A slot word ("for breakfast",
-   "snacks") becomes the slot hint.
+   trailing). No count means one, flagged count_stated false. A slot word after for, as or
+   at ("for breakfast") becomes the slot hint. A bare one ("snacks") may be part of the
+   title ("Breakfast Burrito", "Dinner Rolls"), so the name is matched with it first, and
+   it becomes the hint only when that finds nothing.
 3. Names are normalised: NFKD, accents stripped, case-folded, punctuation dropped, stopwords
    (of, the, a, an, and, with) dropped. Each word is singularised by rule: -ies -> y, -oes ->
    o, -es after s/x/z/ch/sh, a final -s on words over 3 letters, plus an exceptions list.
@@ -63,7 +65,8 @@ _PERIOD = re.compile(
     r"|\b(?:a\s+)?fortnight\b"
     r"|\b(?:in|for|over|across|within)\s+(?:the\s+)?(?:next\s+)?(?P<n1>" + _NUM + r")\s+"
     r"(?P<u1>weeks?|days?)\b"
-    r"|\b(?P<n2>" + _NUM + r")\s+(?P<u2>weeks?|days?)\s*$)",
+    r"|\b(?P<n2>" + _NUM + r")\s+(?P<u2>weeks?|days?)\s*$"
+    r"|^\s*(?P<n3>" + _NUM + r")\s+(?P<u3>weeks?|days?)\s+of\b)",
     re.IGNORECASE)
 _SPLIT = re.compile(r"\s*(?:[+,;\n]|\band\b(?=\s*(?:\d|[x×]\s*\d|(?:"
                     + "|".join(w for w in NUMBER_WORDS if w not in {"a", "an"})
@@ -71,8 +74,9 @@ _SPLIT = re.compile(r"\s*(?:[+,;\n]|\band\b(?=\s*(?:\d|[x×]\s*\d|(?:"
 _LEAD = re.compile(r"^(?P<n>\d{1,3})\s*[x×](?=\s|[^\W\d_])\s*|^(?P<w>" + _NUM
                    + r")\s+(?:[x×]\s+)?|^[x×]\s*(?P<m>\d{1,3})\s+", re.IGNORECASE)
 _TRAIL = re.compile(r"\s+(?:[x×]\s*(?P<n>\d{1,3})|(?P<m>\d{1,3})\s*[x×])$", re.IGNORECASE)
-_SLOT = re.compile(r"\s*\b(?:for|as|at)?\s*\b(?P<s>" + "|".join(SLOT_WORDS) + r")\b\s*",
-                   re.IGNORECASE)
+_SLOT_AFTER = re.compile(r"\s*\b(?:for|as|at)\s+(?:(?:an?|the)\s+)?(?P<s>"
+                         + "|".join(SLOT_WORDS) + r")\b\s*", re.IGNORECASE)
+_SLOT_BARE = re.compile(r"\s*\b(?P<s>" + "|".join(SLOT_WORDS) + r")\b\s*", re.IGNORECASE)
 
 
 def _number(s: str) -> int:
@@ -245,17 +249,24 @@ def read_period(text: str) -> tuple[int | None, str]:
     m = _PERIOD.search(text)
     if not m:
         return None, text
-    if m.group("n1") or m.group("n2"):
-        n = _number(m.group("n1") or m.group("n2"))
-        unit = (m.group("u1") or m.group("u2")).lower()
+    if m.group("n1") or m.group("n2") or m.group("n3"):
+        n = _number(m.group("n1") or m.group("n2") or m.group("n3"))
+        unit = (m.group("u1") or m.group("u2") or m.group("u3")).lower()
         days = n * 7 if unit.startswith("week") else n
     else:
         days = 14
     return days, (text[:m.start()] + " " + text[m.end():]).strip()
 
 
-def read_item(raw: str) -> tuple[str, int, bool, str | None]:
-    """(name, count, count_stated, slot_hint) for one item."""
+def _lead_words(s: str) -> str:
+    # "a fortnight of grilled cheese" leaves "of grilled cheese": the name starts at a word.
+    return re.sub(r"^(?:(?:of|the)\s+)+", "", s.strip(), flags=re.IGNORECASE).strip()
+
+
+def read_item(raw: str) -> tuple[str, int, bool, str | None, str | None]:
+    """(name, count, count_stated, slot_hint, kept) for one item. kept is the name with a
+    bare slot word left in ("breakfast burrito"), for parse() to try first; None when the
+    slot word followed for, as or at, or there was none."""
     s = raw.strip()
     count, stated = 1, False
     m = _LEAD.match(s)
@@ -267,14 +278,16 @@ def read_item(raw: str) -> tuple[str, int, bool, str | None]:
         if m:
             count, stated = int(m.group("n") or m.group("m")), True
             s = s[:m.start()]
-    slot = None
-    m = _SLOT.search(s)
-    if m and words(s[:m.start()] + " " + s[m.end():]):
-        slot = SLOT_WORDS[m.group("s").lower()]
-        s = (s[:m.start()] + " " + s[m.end():]).strip()
-    # "a fortnight of grilled cheese" leaves "of grilled cheese": the name starts at a word.
-    s = re.sub(r"^(?:(?:of|the)\s+)+", "", s.strip(), flags=re.IGNORECASE)
-    return s.strip(), count, stated, slot
+    slot, kept = None, None
+    for pattern in (_SLOT_AFTER, _SLOT_BARE):
+        m = pattern.search(s)
+        if m and words(s[:m.start()] + " " + s[m.end():]):
+            if pattern is _SLOT_BARE:
+                kept = _lead_words(s)
+            slot = SLOT_WORDS[m.group("s").lower()]
+            s = (s[:m.start()] + " " + s[m.end():]).strip()
+            break
+    return _lead_words(s), count, stated, slot, kept
 
 
 def _plural_slot(slot: str, n: int) -> str:
@@ -293,13 +306,17 @@ def parse(text: str, cands: list[Candidate], household_servings: int = 2) -> dic
     for raw in _SPLIT.split(rest):
         if not raw.strip():
             continue
-        name, count, stated, slot_hint = read_item(raw)
+        name, count, stated, slot_hint, kept = read_item(raw)
         if not words(name):
             continue
         if count > MAX_COUNT:
             warnings.append(f"{raw.strip()!r}: {count} meals of one recipe is more than "
                             f"{MAX_COUNT}")
-        found, _how = match_name(name, cands)
+        found = match_name(kept, cands)[0] if kept is not None else []
+        if found:
+            name, slot_hint = kept, None          # the slot word is part of the title
+        else:
+            found, _how = match_name(name, cands)
         matched = found[0] if len(found) == 1 else None
         if matched is not None:
             listed = [matched.candidate]

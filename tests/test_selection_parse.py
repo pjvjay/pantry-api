@@ -98,6 +98,36 @@ def test_a_slot_word_is_a_hint():
     assert sel["meaning"] == "2 × Mango Milkshake = 2 breakfasts for 2 people"
 
 
+def test_a_slot_word_in_a_title_is_matched_as_written():
+    """A bare slot word is tried as part of the name first: "Breakfast Burrito" and "Dinner
+    Rolls" match as typed. After for, as or at it is always the hint."""
+    mine = [{"key": "my:b", "title": "Breakfast Burrito"},
+            {"key": "my:r", "title": "Dinner Rolls", "slot": "dinner"}]
+    sel = _one("Breakfast Burrito", recipes=mine)
+    assert (sel["status"], sel["matched_as"]["title"], sel["matched_as"]["how"],
+            sel["slot_hint"]) == ("matched", "Breakfast Burrito", "exact", None)
+    sel = _one("2 dinner rolls", recipes=mine)
+    assert (sel["count"], sel["matched_as"]["title"], sel["slot_hint"]) == \
+        (2, "Dinner Rolls", None)
+    sel = _one("2 dinner rolls for dinner", recipes=mine)
+    assert (sel["matched_as"]["title"], sel["slot_hint"]) == ("Dinner Rolls", "dinner")
+    sel = _one("breakfast burrito as a snack", recipes=mine)
+    assert (sel["matched_as"]["title"], sel["slot_hint"]) == ("Breakfast Burrito", "snack")
+    # a bare slot word that is not in a title is still the hint
+    sel = _one("2 mango milkshakes breakfast")
+    assert (sel["matched_as"]["title"], sel["slot_hint"]) == ("Mango Milkshake", "breakfast")
+
+
+def test_a_leading_days_of_is_the_period():
+    out = _parse("10 days of grilled cheese")
+    (sel,) = out["selections"]
+    assert out["period_days"] == 10
+    assert (sel["name"], sel["count"], sel["count_stated"], sel["status"]) == \
+        ("grilled cheese", 1, False, "matched")
+    assert _parse("two weeks of pepperoni pizza")["period_days"] == 14
+    assert _parse("grilled cheese for 10 days")["period_days"] == 10
+
+
 def test_fuzzy_matches_within_the_stated_distances_and_always_asks():
     sel = _one("chiken biryani")             # "chicken": 7 letters, one deletion
     assert (sel["matched_as"]["how"], sel["matched_as"]["distance"]) == ("fuzzy", 1)
