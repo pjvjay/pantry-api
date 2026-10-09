@@ -7,6 +7,7 @@ web layer. Every route delegates to pantry_planner.flow or pantry_planner.db.
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import math
 import os
 from typing import Annotated, Any, Literal
@@ -26,7 +27,13 @@ from .config import (
     validate_model_spec,
 )
 from .llm import LLMError
-from .mealplan.models import MealPlanDraft, MealSchedule, RecipeRef, ResolvedRecipe
+from .mealplan.models import (
+    MealPlanDraft,
+    MealSchedule,
+    RecipeRef,
+    ResolvedRecipe,
+    TripLineOptions,
+)
 from .models import (
     MAX_DOC_LINES,
     MAX_LINE_NAME,
@@ -757,13 +764,14 @@ def mealplan_resolve(req: MealPlanResolveRequest) -> MealPlanResolveResponse:
         latency_ms=int((time.perf_counter() - t0) * 1000))
 
 
-async def _draft_size(request: Request) -> None:
-    """A draft is at most 256 KB: 413 above it."""
+async def _draft_size(request: Request, slack: int = 0) -> None:
+    """A draft is at most 256 KB: 413 above it. `slack`: room for the fields a request
+    carries beside the draft."""
     from .mealplan.models import MAX_DRAFT_BYTES
 
     declared = request.headers.get("content-length", "")
     size = int(declared) if declared.isdigit() else len(await request.body())
-    if size > MAX_DRAFT_BYTES:
+    if size > MAX_DRAFT_BYTES + slack:
         raise HTTPException(status_code=413, detail={
             "error": "too_large", "detail": f"A meal plan is at most {MAX_DRAFT_BYTES} bytes."})
 
@@ -789,6 +797,42 @@ def mealplan_schedule(draft: MealPlanDraft) -> MealSchedule:
         return compute(draft)
     except MealPlanError as e:
         raise _meal_plan_error(e) from e
+
+
+class TripLineOptionsRequest(BaseModel):
+    """One trip line: the product bought on `trip_date` under `strategy` (the draft's own
+    when omitted), in the plan as `draft` holds it."""
+
+    draft: MealPlanDraft
+    trip_date: dt.date
+    product_id: int = Field(ge=1, le=2**31 - 1)
+    strategy: Literal["fresh", "fewest_trips"] | None = None
+    limit: int = Field(default=12, ge=1, le=25)
+
+
+async def _options_size(request: Request) -> None:
+    await _draft_size(request, slack=1024)
+
+
+@app.post("/mealplan/alternatives", response_model=TripLineOptions,
+          dependencies=[Depends(_options_size),
+                        Depends(limits.rate_limit("/mealplan/alternatives"))])
+def mealplan_alternatives(req: TripLineOptionsRequest) -> TripLineOptions:
+    """Options for one trip line: the chat cart's ranking (alternatives.rank_alternatives)
+    for every recipe line the purchase covers, under the plan's shopping point and origin
+    rules, each row's trip the plan re-scheduled with that product pinned (no LLM). The
+    console pins the chosen product on `lines`. 422 as /mealplan/schedule; 409 no_trip_line
+    when that trip buys no such product any more."""
+    from . import alternatives as alts
+    from .mealplan.models import MealPlanError
+    from .mealplan.options import NoTripLineError, options_error, trip_line_options
+
+    try:
+        return trip_line_options(req.draft, req.trip_date, req.product_id, req.strategy,
+                                 req.limit)
+    except (MealPlanError, NoTripLineError, alts.BasisError, alts.PinError) as e:
+        status, detail = options_error(e)
+        raise HTTPException(status_code=status, detail=detail) from e
 
 
 class MyRecipeName(BaseModel):

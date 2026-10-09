@@ -16,6 +16,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from ..models import (
+    AlternativeRanking,
     DayNutrition,
     DroppedIngredient,
     MatchLevel,
@@ -446,3 +447,40 @@ class MealSchedule(BaseModel):
     sources: list[dict]
     synthetic_notice: str
 
+
+# ─── Options for a trip line ─────────────────────────────────
+
+class CoveredLine(BaseModel):
+    """A recipe line a trip line's purchase is for. Choosing another product pins every one
+    of them (pins[recipe_key][line_no]); a pin equal to planner_product_id, the resolve's own
+    pick, is the same as no pin."""
+    recipe_key: str
+    title: str
+    line_no: int
+    ingredient: str
+    planner_product_id: int | None
+    pinned_product_id: int | None = None
+
+
+class TripLineOptions(BaseModel):
+    """POST /mealplan/alternatives: the products that could take the place of one trip
+    line's product, ranked by alternatives.rank_alternatives for every recipe line the
+    purchase covers, under the plan's shopping point and origin rules.
+
+    Each ranked row's trip is the plan re-scheduled with that product pinned, under the same
+    strategy and with no LLM: trip.total and trip.delta are the total of the strategy's
+    trips (as the Shop band sums them) and its change, trip.stores the stops of the trip
+    that buys it for these meals, trip.buys_at the store and pack price there; packs and
+    cost_for_need are what that trip line then buys and charges. stocked is False when no
+    store in range sells the line's product any more (it is then not among the rows)."""
+    v: Literal[1] = 1
+    rev: int
+    strategy: Strategy
+    trip_date: dt.date
+    product_id: int
+    product: str
+    stocked: bool
+    pinned: bool
+    lines: list[CoveredLine]
+    plan_total: float | None
+    ranking: AlternativeRanking
