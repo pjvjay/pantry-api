@@ -83,6 +83,9 @@ LIMITS: dict[str, Limit] = {
     "/mealplan/schedule": Limit(per_minute=120, burst=120),
     "/mealplan/selection/parse": Limit(per_minute=60, burst=60),
     "/mealplan/suggest-cook-days": Limit(per_minute=60, burst=60),
+    # Calendar export: pure, no LLM. The dialog previews, then downloads.
+    "/calendar/preview": Limit(per_minute=60, burst=60),
+    "/calendar/ics": Limit(per_minute=60, burst=60),
 }
 
 # Buckets idle this long are full again and can be forgotten.

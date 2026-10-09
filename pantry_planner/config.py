@@ -228,6 +228,10 @@ class Settings:
     # "(demo)" on ratings) says so. A deployment with real offers sets it
     # false; the data stays labelled until someone decides it is real.
     offers_synthetic: bool = True
+    # STORES_SYNTHETIC (default on): the catalog's stores are fictional, so a calendar export
+    # names each as "<store> (demo store)" and never gives its seeded street address. Off only
+    # for a deployment whose stores are real.
+    stores_synthetic: bool = True
 
     @staticmethod
     def from_env() -> Settings:
@@ -275,6 +279,8 @@ class Settings:
             llm_daily_cost_cap_usd=_cost_cap(os.environ.get("LLM_DAILY_COST_CAP_USD", "")),
             offers_synthetic=os.environ.get("OFFERS_SYNTHETIC", "true").strip().lower()
             not in {"0", "false", "no"},
+            stores_synthetic=os.environ.get("STORES_SYNTHETIC", "true").strip().lower()
+            not in {"0", "false", "no", "off"},
         )
 
 

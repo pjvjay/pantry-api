@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import db, flow, limits
+from .calendar_api import router as calendar_router
 from .config import (
     RUNTIME_MODEL_FIELDS,
     set_runtime_overrides,
@@ -877,6 +878,10 @@ def shelf_life(product_id: Annotated[list[int] | None, Query()] = None) -> dict:
     data = shelf.load()
     return {"sources": shelf.sources(), "rules_of_use": data["rules_of_use"],
             "products": out}
+
+
+# Calendar export: /calendar/preview and /calendar/ics (calendar_api.py).
+app.include_router(calendar_router)
 
 
 # ─── Provenance ──────────────────────────────────────────────
