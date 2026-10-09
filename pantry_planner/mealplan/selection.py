@@ -314,7 +314,8 @@ def parse(text: str, cands: list[Candidate], household_servings: int = 2) -> dic
         if matched is not None:
             slot = slot_hint or matched.candidate.slot
             meaning = (f"{count} × {matched.candidate.title} = {count} "
-                       f"{_plural_slot(slot, count)} for {household_servings} people")
+                       f"{_plural_slot(slot, count)} for {household_servings} "
+                       f"{'person' if household_servings == 1 else 'people'}")
         selections.append({
             "input": raw.strip(), "name": name, "count": count, "count_stated": stated,
             "slot_hint": slot_hint, "status": status,

@@ -115,6 +115,11 @@ def test_aliases_from_the_library_file_and_the_starters():
     assert (sel["matched_as"]["how"], sel["matched_as"]["kind"]) == ("alias", "starter")
 
 
+def test_a_household_of_one_is_one_person():
+    sel = _one("3 pepperoni pizza", household_servings=1)
+    assert sel["meaning"] == "3 × Pepperoni Pizza = 3 dinners for 1 person"
+
+
 def test_the_shoppers_own_recipes_are_matched_too():
     sel = _one("2 nan's dal", recipes=[{"key": "my:3", "title": "Nan's Dal", "slot": "lunch"}])
     assert (sel["matched_as"]["recipe_key"], sel["matched_as"]["kind"]) == ("my:3", "my")
