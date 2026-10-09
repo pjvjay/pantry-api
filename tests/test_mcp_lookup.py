@@ -355,7 +355,7 @@ READ_TOOLS = {
     "get_product_origins", "rank_products_by_origin", "origin_triage", "pipeline_status",
     "list_origin_submissions",
 }
-PLAN_TOOLS = {"plan_recipe", "plan_from_text", "plan_from_lines", "plan_week"}
+PLAN_TOOLS = {"plan_recipe", "plan_from_text", "plan_from_lines", "plan_week", "plan_meals"}
 # No LLM behind them: the same basis against the same catalog gives the same answer.
 FOLLOW_UP_TOOLS = {"rank_alternatives", "reprice_plan"}
 # Write tools add to a queue or copy into evidence; nothing is destroyed.

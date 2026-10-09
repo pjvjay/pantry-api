@@ -17,7 +17,7 @@ _TMP_DB = None
 EXPECTED_TOOLS = {
     "list_recipes", "get_recipe", "list_products",
     "find_product", "get_product",
-    "plan_recipe", "plan_from_text", "plan_from_lines", "plan_week",
+    "plan_recipe", "plan_from_text", "plan_from_lines", "plan_week", "plan_meals",
     "get_product_origins", "rank_products_by_origin", "origin_triage",
     "submit_origin_evidence", "list_origin_submissions", "review_origin_submission",
     "pipeline_status", "rank_alternatives", "reprice_plan",

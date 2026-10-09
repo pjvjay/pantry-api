@@ -132,6 +132,40 @@ def _row_to_product(row, *, substitute: bool = False) -> Product:
                    substitute=substitute)
 
 
+def union_of_pools(pools: list[list[Product]]) -> list[Product]:
+    """Every pool's products once, in first-seen order: the list the selector is shown.
+
+    `substitute` belongs to a (line, product) pair: a t4 substitute fetched for one line's thin
+    pool can be another line's direct candidate (Fresh Ginger is a same-aisle substitute for
+    garlic and the match for ginger). On this flat list the flag is kept only for a product
+    that is a substitute in every pool holding it; which lines a product substitutes for is
+    read from the pools (substitutes_by_line)."""
+    direct = {p.id for pool in pools for p in pool if not p.substitute}
+    seen: set[int] = set()
+    out: list[Product] = []
+    for pool in pools:
+        for p in pool:
+            if p.id in seen:
+                continue
+            seen.add(p.id)
+            out.append(p.model_copy(update={"substitute": False})
+                       if p.substitute and p.id in direct else p)
+    return out
+
+
+def substitutes_by_line(recipe: Recipe, pools: dict[int, list[Product]]) -> dict[int, list[int]]:
+    """recipe line_no -> the product ids its own pool holds only as t4 substitutes. `pools`
+    is keyed by position in `recipe.ingredients`, as PlanRunResult.pools is."""
+    out: dict[int, list[int]] = {}
+    for i, ing in enumerate(recipe.ingredients):
+        pool = pools.get(i, [])
+        direct = {p.id for p in pool if not p.substitute}
+        subs = sorted({p.id for p in pool if p.substitute} - direct)
+        if subs:
+            out[ing.line_no] = subs
+    return out
+
+
 def _value_disagreement(pools: dict[int, list[Product]]) -> float:
     """Per-pool: does the cheapest candidate differ from the best unit-value one?"""
     checked = disagreed = 0
@@ -512,9 +546,7 @@ def execute_plan(parsed: ParsedInput, plan: QueryPlan, *,
 
         catalog_size = s.execute(text("SELECT COUNT(*) FROM products")).scalar_one()
 
-    seen: set[int] = set()
-    products = [p for pool in pools.values() for p in pool
-                if p.id not in seen and not seen.add(p.id)]
+    products = union_of_pools(list(pools.values()))
     stats = RetrievalStats(
         pool_sizes=[len(pools.get(n, [])) for n in range(len(ingredients))],
         # every planned ingredient that needed a looser match than exact

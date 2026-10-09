@@ -97,12 +97,44 @@ def _week_coverage(shopping, origins_map, dropped):
         origins=origins_map or None, excluded_lines=dropped)
 
 
+def _attach_nutrition(day_plans: list[DayPlan], recipes: list[Recipe], notes: list[str],
+                      targets: dict | None) -> list:
+    """Each dinner's nutrition per serving, from the recipe's demo house amounts (never the
+    products or packs the selector chose), and a day total that counts dinner only. Returns
+    the sources behind the numbers. With the tables missing every day keeps nutrition None
+    and the plan says why."""
+    from . import nutrition
+
+    by_slug = {r.slug: r for r in recipes}
+    planned = [by_slug[dp.recipe_slug] for dp in day_plans]
+    if not planned:
+        return []
+    ref = nutrition.library_reference(planned)
+    if ref is None:
+        notes.append(nutrition.NOT_DEPLOYED)
+        return []
+    amounts = db.load_line_amounts([r.slug for r in planned])
+    cited: set[str] = set()
+    for i, (dp, recipe) in enumerate(zip(day_plans, planned, strict=True), start=1):
+        rn = nutrition.recipe_nutrition(
+            recipe, None if amounts is None else amounts.get(recipe.slug, {}), ref)
+        dp.nutrition = rn.nutrition
+        dp.day_totals = nutrition.day_totals(
+            [nutrition.day_meal(f"day{i}", f"lib:{recipe.slug}", recipe.name, "dinner",
+                                rn.nutrition)],
+            meals_counted=["dinner"], all_meals_planned=False, note=nutrition.DINNER_ONLY,
+            targets=targets)
+        cited.update(rn.nutrition.source_ids)
+    return nutrition.sources(ref, cited)
+
+
 def plan_week(*, days: int = 5, max_total_budget: float | None = None,
               exclude_tags: list[str] | None = None,
               lat: float | None = None, lon: float | None = None,
               max_distance_km: float | None = None,
               exclude_origin: list[str] | None = None,
-              preference: list[str] | None = None) -> WeekPlan:
+              preference: list[str] | None = None,
+              targets: dict | None = None) -> WeekPlan:
     cfg = settings()
     lat = lat if lat is not None else cfg.default_lat
     lon = lon if lon is not None else cfg.default_lon
@@ -353,6 +385,9 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
                                      line_items=items,
                                      day_cost=round(day_cost, 2)))
 
+        # ── nutrition per dinner (recipe amounts only: selection and prices untouched) ──
+        nutrition_sources = _attach_nutrition(day_plans, recipes, notes, targets)
+
         # ── merged shopping list (shared products counted once) ──
         merged: dict[int, WeekItem] = {}
         for dp in day_plans:
@@ -401,4 +436,5 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
                     budget=max_total_budget, notes=notes,
                     plan_trace=execution.steps, trip_options=trip_options,
                     origin_coverage=coverage, origin_status=origin_status,
-                    total_llm_cost_usd=round(llm_cost, 6))
+                    total_llm_cost_usd=round(llm_cost, 6),
+                    nutrition_sources=nutrition_sources)

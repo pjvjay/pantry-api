@@ -1,0 +1,23 @@
+{
+  "v": 1,
+  "about": "Other names shoppers type for recipes, used by the meal plan's Quick add (POST /mealplan/selection/parse) at its alias step. `recipes` maps a library slug to whole alternative names; `token_aliases` maps one recipe-title word to spellings of it and applies to every recipe the matcher knows (library, demo starters and the shopper's own). Written for this demo; an alias match is always shown to the shopper to confirm, never accepted on its own.",
+  "token_aliases": {
+    "biryani": ["briyani", "biriyani", "biriani", "beriani", "biryanee"],
+    "bolognese": ["bolognaise", "bolognase", "bolognes"],
+    "spaghetti": ["spagetti", "spagheti", "spagehtti"],
+    "stir": ["stirr"],
+    "pepperoni": ["peperoni", "pepperonni"],
+    "penne": ["pene"]
+  },
+  "recipes": {
+    "pbj_sandwich": ["pbj", "pb&j", "pb and j", "pbj sandwich", "pb&j sandwich",
+                     "peanut butter and jelly", "peanut butter jelly sandwich"],
+    "spaghetti_bolognese": ["spag bol", "spaghetti bolognaise", "spaghetti with meat sauce"],
+    "grilled_cheese": ["grilled cheese", "cheese toastie", "grilled cheese sandwiches"],
+    "veggie_stirfry": ["veggie stir fry", "veg stir fry", "vegetable stirfry",
+                       "vegetable stir-fry"],
+    "beef_rice_bowl": ["beef and broccoli", "beef broccoli bowl", "beef rice bowl",
+                       "beef and broccoli bowl"],
+    "tomato_penne": ["penne with tomato", "penne pomodoro", "tomato pasta"]
+  }
+}

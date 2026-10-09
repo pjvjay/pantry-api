@@ -7,6 +7,7 @@ web layer. Every route delegates to pantry_planner.flow or pantry_planner.db.
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import math
 import os
 from typing import Annotated, Any, Literal
@@ -18,6 +19,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import db, flow, limits
+from .calendar_api import router as calendar_router
 from .config import (
     RUNTIME_MODEL_FIELDS,
     set_runtime_overrides,
@@ -25,12 +27,22 @@ from .config import (
     validate_model_spec,
 )
 from .llm import LLMError
+from .mealplan.assistant import DishIn, MealPlanContext, MealPlanResult, ProposedDish
+from .mealplan.models import (
+    MealPlanDraft,
+    MealSchedule,
+    RecipeRef,
+    ResolvedRecipe,
+    TripLineOptions,
+)
 from .models import (
     MAX_DOC_LINES,
     MAX_LINE_NAME,
     MAX_LINE_QUANTITY,
     MAX_SERVINGS,
     AlternativeRanking,
+    NutritionRecipes,
+    NutritionTargets,
     OriginRanking,
     Pin,
     PlanBasis,
@@ -38,6 +50,7 @@ from .models import (
     ProductOrigin,
     Recipe,
     RecipeDoc,
+    RecipeNutrition,
     ShoppingPlan,
     WeekPlan,
 )
@@ -302,6 +315,44 @@ def get_recipe_doc(slug: str) -> RecipeDoc:
         raise HTTPException(status_code=404, detail=str(e)) from e
     amounts = db.load_line_amounts([slug])
     return library_doc(recipe, None if amounts is None else amounts.get(slug, {}))
+
+
+@app.get("/recipes/{slug}/nutrition", response_model=RecipeNutrition)
+def get_recipe_nutrition(
+        slug: str, portions: Annotated[float, Query(gt=0, le=MAX_SERVINGS)] = 1,
+) -> RecipeNutrition:
+    """Nutrition of `portions` servings of a library recipe, with every line's receipt: its
+    grams and how they were reached, its reference food (CNF description verbatim) and the
+    values it adds. Computed by code from the recipe's demo house amounts (labelled
+    demo_amounts) and published reference values for generic foods, never a product's label.
+    Unknown is never 0. nutrition is null, with a note, before pantry-db 0008."""
+    from . import nutrition
+
+    try:
+        recipe = db.load_recipe(slug)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    amounts = db.load_line_amounts([slug])
+    return nutrition.recipe_nutrition(
+        recipe, None if amounts is None else amounts.get(slug, {}),
+        nutrition.library_reference([recipe]), portions=portions, with_sources=True)
+
+
+@app.get("/nutrition/recipes", response_model=NutritionRecipes)
+def nutrition_recipes() -> NutritionRecipes:
+    """Every library recipe's nutrition per serving, and the sources behind the numbers. Its
+    own prefix, so the /recipes/{slug} routes can never shadow it."""
+    from . import nutrition
+
+    recipes = db.load_all_recipes()
+    ref = nutrition.library_reference(recipes)
+    amounts = db.load_line_amounts([r.slug for r in recipes])
+    items = [nutrition.recipe_nutrition(r, None if amounts is None else amounts.get(r.slug, {}),
+                                        ref) for r in recipes]
+    cited = {i for r in items if r.nutrition for i in r.nutrition.source_ids}
+    return NutritionRecipes(
+        sources=[] if ref is None else nutrition.sources(ref, cited), recipes=items,
+        note=nutrition.NOT_DEPLOYED if ref is None else nutrition.DISCLAIMER)
 
 
 class ParseLinesRequest(BaseModel):
@@ -596,6 +647,9 @@ class WeekPlanRequest(BaseModel):
     max_distance_km: float | None = None
     exclude_origin: list[str] = Field(default_factory=list, max_length=50)
     preference: list[str] = Field(default_factory=list, max_length=50)
+    # The shopper's own daily targets, kept in their browser: each day gets a verdict only
+    # where the data proves one (a dinner-only day never says 'within' or 'short').
+    targets: NutritionTargets = Field(default_factory=dict)
 
 
 @app.post("/plan/week", response_model=WeekPlan,
@@ -613,7 +667,8 @@ def plan_week(req: WeekPlanRequest) -> WeekPlan:
             days=req.days, max_total_budget=req.max_total_budget,
             exclude_tags=req.exclude_tags, lat=req.lat, lon=req.lon,
             max_distance_km=req.max_distance_km,
-            exclude_origin=req.exclude_origin, preference=req.preference)
+            exclude_origin=req.exclude_origin, preference=req.preference,
+            targets=req.targets or None)
     except PlanAborted as e:
         raise HTTPException(status_code=409, detail=e.execution.model_dump(mode="json"))
 
@@ -662,6 +717,253 @@ def plan_recipe(slug: str,
     m.record_plan("recipe", "ok")
     m.record_coverage(plan.origin_coverage)
     return plan
+
+
+# ─── Meal plan ───────────────────────────────────────────────
+# The plan lives in the browser (a MealPlanDraft); these endpoints are stateless. resolve is
+# the slow step, once per distinct recipe; schedule, selection parse and suggest-cook-days
+# are pure code with no LLM call, so they keep working above the daily LLM ceiling.
+
+class MealPlanResolveRequest(BaseModel):
+    """Recipes to resolve to products, each once: a library slug, a demo starter or a
+    RecipeDoc. The location and origin knobs are those of /plan/spec."""
+
+    recipes: list[RecipeRef] = Field(min_length=1, max_length=12)
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+    max_km: float | None = Field(default=None, ge=0.5, le=100)
+    exclude_origin: list[str] = Field(default_factory=list, max_length=50)
+    preference: list[str] = Field(default_factory=list, max_length=50)
+
+
+class MealPlanResolveResponse(BaseModel):
+    resolved: list[ResolvedRecipe]
+    llm_cost_usd: float          # this call's LLM spend; a cached recipe adds nothing
+    latency_ms: int
+
+
+@app.post("/mealplan/resolve", response_model=MealPlanResolveResponse,
+          dependencies=[Depends(limits.require_llm_budget),
+                        Depends(limits.rate_limit("/mealplan/resolve"))])
+def mealplan_resolve(req: MealPlanResolveRequest) -> MealPlanResolveResponse:
+    """Which products each recipe buys: library recipes through the classic pipeline, every
+    RecipeDoc through /plan/spec's path (reviewed lines planned as given). A recipe that
+    fails comes back with a status of its own (needs_servings, unconfirmed_lines, not_found,
+    unparseable, aborted, llm_error); the request does not fail. Slow when live, instant in
+    demo mode; results are cached per recipe and knobs."""
+    import time
+
+    from .mealplan.resolve import resolve_one
+
+    _check_countries(req.exclude_origin, req.preference)
+    t0 = time.perf_counter()
+    out = [resolve_one(ref, lat=req.lat, lon=req.lon, max_km=req.max_km,
+                       exclude=req.exclude_origin, preference=req.preference)
+           for ref in req.recipes]
+    return MealPlanResolveResponse(
+        resolved=out, llm_cost_usd=round(sum(r.llm_cost_usd for r in out if not r.cached), 6),
+        latency_ms=int((time.perf_counter() - t0) * 1000))
+
+
+async def _draft_size(request: Request, slack: int = 0) -> None:
+    """A draft is at most 256 KB: 413 above it. `slack`: room for the fields a request
+    carries beside the draft."""
+    from .mealplan.models import MAX_DRAFT_BYTES
+
+    declared = request.headers.get("content-length", "")
+    size = int(declared) if declared.isdigit() else len(await request.body())
+    if size > MAX_DRAFT_BYTES + slack:
+        raise HTTPException(status_code=413, detail={
+            "error": "too_large", "detail": f"A meal plan is at most {MAX_DRAFT_BYTES} bytes."})
+
+
+def _meal_plan_error(e) -> HTTPException:
+    return HTTPException(status_code=422, detail={"error": e.code, "detail": e.detail,
+                                                  **e.extra})
+
+
+@app.post("/mealplan/schedule", response_model=MealSchedule,
+          dependencies=[Depends(_draft_size),
+                        Depends(limits.rate_limit("/mealplan/schedule"))])
+def mealplan_schedule(draft: MealPlanDraft) -> MealSchedule:
+    """Where the meals sit, what each needs, the trips for both strategies (fresh and
+    fewest_trips), warnings with remedies, and each trip's shopping list. Pure: no LLM, no
+    writes, facts re-read by id; the same draft gives byte-identical JSON. 422 with
+    {error: slot_capacity | unknown_recipe_key | stale_product | invalid_dates | pin_invalid
+    | version}."""
+    from .mealplan.models import MealPlanError
+    from .mealplan.schedule import compute
+
+    try:
+        return compute(draft)
+    except MealPlanError as e:
+        raise _meal_plan_error(e) from e
+
+
+class TripLineOptionsRequest(BaseModel):
+    """One trip line: the product bought on `trip_date` under `strategy` (the draft's own
+    when omitted), in the plan as `draft` holds it."""
+
+    draft: MealPlanDraft
+    trip_date: dt.date
+    product_id: int = Field(ge=1, le=2**31 - 1)
+    strategy: Literal["fresh", "fewest_trips"] | None = None
+    limit: int = Field(default=12, ge=1, le=25)
+
+
+async def _options_size(request: Request) -> None:
+    await _draft_size(request, slack=1024)
+
+
+@app.post("/mealplan/alternatives", response_model=TripLineOptions,
+          dependencies=[Depends(_options_size),
+                        Depends(limits.rate_limit("/mealplan/alternatives"))])
+def mealplan_alternatives(req: TripLineOptionsRequest) -> TripLineOptions:
+    """Options for one trip line: the chat cart's ranking (alternatives.rank_alternatives)
+    for every recipe line the purchase covers, under the plan's shopping point and origin
+    rules, each row's trip the plan re-scheduled with that product pinned (no LLM). The
+    console pins the chosen product on `lines`. 422 as /mealplan/schedule; 409 no_trip_line
+    when that trip buys no such product any more."""
+    from . import alternatives as alts
+    from .mealplan.models import MealPlanError
+    from .mealplan.options import NoTripLineError, options_error, trip_line_options
+
+    try:
+        return trip_line_options(req.draft, req.trip_date, req.product_id, req.strategy,
+                                 req.limit)
+    except (MealPlanError, NoTripLineError, alts.BasisError, alts.PinError) as e:
+        status, detail = options_error(e)
+        raise HTTPException(status_code=status, detail=detail) from e
+
+
+class MyRecipeName(BaseModel):
+    """One of the shopper's own recipes, for Quick add to match against."""
+
+    key: str = Field(min_length=1, max_length=100)
+    title: str = Field(min_length=1, max_length=200)
+    slot: Literal["breakfast", "lunch", "dinner", "snack"] | None = None
+    aliases: list[Annotated[str, Field(max_length=200)]] = Field(default_factory=list,
+                                                                 max_length=10)
+
+
+class SelectionParseRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=8000)
+    recipes: list[MyRecipeName] = Field(default_factory=list, max_length=50)
+    household_servings: int = Field(default=2, ge=1, le=20)
+
+
+@app.post("/mealplan/selection/parse",
+          dependencies=[Depends(limits.rate_limit("/mealplan/selection/parse"))])
+def mealplan_selection_parse(req: SelectionParseRequest) -> dict:
+    """Quick add: "3 Pepperoni Pizza + 2 Chicken Fried Rice ... in 2 weeks" read into counted
+    selections matched against the library, the demo starters and the shopper's recipes
+    (exact, plural, alias, fuzzy), with no LLM. Only exact and plural matches may be
+    accepted without asking: alias and fuzzy come back with needs_confirmation true."""
+    from .mealplan import selection
+    from .mealplan.resolve import starters_file
+
+    cands = selection.candidates(
+        [(r.slug, r.name) for r in db.load_all_recipes()], starters_file()["starters"],
+        [r.model_dump() for r in req.recipes])
+    return selection.parse(req.text, cands, req.household_servings)
+
+
+@app.post("/mealplan/suggest-cook-days",
+          dependencies=[Depends(_draft_size),
+                        Depends(limits.rate_limit("/mealplan/suggest-cook-days"))])
+def mealplan_suggest_cook_days(draft: MealPlanDraft) -> dict:
+    """A freshness-aware layout of every unpinned meal, as a proposal: {rev, ops[{op:
+    move_meal, meal_id, from, to, reason}], meals, warnings_before, warnings_after}. Each
+    reason is built by code from the limiting product's cited row or the shopper's setting.
+    Nothing is applied; pinned meals never move."""
+    from .mealplan.models import MealPlanError
+    from .mealplan.place import freshness_layout
+    from .mealplan.schedule import compute
+
+    try:
+        return freshness_layout(draft, compute(draft))
+    except MealPlanError as e:
+        raise _meal_plan_error(e) from e
+
+
+class MealPlanRequest(BaseModel):
+    """plan_meals as REST: counted dishes drafted into a meal plan (mealplan/assistant.py).
+    Bounded like a draft (256 KB); resolves new recipes, so it is limited like resolve."""
+
+    dishes: list[DishIn] = Field(default_factory=list, max_length=12)
+    proposed: list[ProposedDish] = Field(default_factory=list, max_length=12)
+    days: int | None = Field(default=None, ge=1, le=14)
+    start_date: dt.date | None = None
+    current: MealPlanContext | None = None
+    my_recipe_docs: list[RecipeDoc] = Field(default_factory=list, max_length=12)
+    household_servings: int | None = Field(default=None, ge=1, le=20)
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+    max_km: float | None = Field(default=None, ge=0.5, le=100)
+    verbose: bool = False
+
+
+@app.post("/mealplan/plan", response_model=MealPlanResult,
+          dependencies=[Depends(_draft_size), Depends(limits.require_llm_budget),
+                        Depends(limits.rate_limit("/mealplan/plan"))])
+def mealplan_plan(req: MealPlanRequest) -> MealPlanResult:
+    """The MCP tool plan_meals over REST: counted dishes ("3 Pepperoni Pizza + 2 Chicken Fried
+    Rice") drafted into a plan, with only exact and plural matches placed and every other
+    match a proposal. Returns ops for a console to apply, the draft and its summary; nothing is
+    saved or approved. 422 {error: plan_meals, detail} for a request it cannot draft."""
+    from .mealplan.assistant import PlanMealsError, plan_meals
+
+    try:
+        return plan_meals(req.dishes, req.proposed, days=req.days, start_date=req.start_date,
+                          current=req.current, my_recipe_docs=req.my_recipe_docs,
+                          household_servings=req.household_servings, lat=req.lat,
+                          lon=req.lon, max_km=req.max_km, verbose=req.verbose)
+    except PlanMealsError as e:
+        raise HTTPException(status_code=422, detail={"error": "plan_meals",
+                                                     "detail": str(e)}) from e
+
+
+@app.get("/mealplan/starters")
+def mealplan_starters() -> list[dict]:
+    """The demo starter recipes (labelled "demo recipe", demo house amounts), each with its
+    RecipeDoc, default slot and the aliases Quick add matches."""
+    from .mealplan.resolve import starters
+
+    return starters()
+
+
+@app.get("/shelf-life")
+def shelf_life(product_id: Annotated[list[int] | None, Query()] = None) -> dict:
+    """Cited storage and thaw times per product (all products, or those named). A product
+    with no cited row has mapped false, status unknown, its reason, and no number.
+    synthetic_product marks the demo products (166-169)."""
+    from .mealplan import shelf
+
+    names = {p.id: p.name for p in db.load_all_products()}
+    wanted = sorted(set(product_id)) if product_id else sorted(names)
+    out = []
+    for pid in wanted:
+        if pid not in names:
+            continue
+        ps = shelf.for_product(pid)
+        rules = {}
+        if ps.mapped:
+            for kind, ids in (("fridge", ps.fridge), ("freezer", ps.freezer),
+                              ("after_thaw_fridge", ps.after_thaw), ("thaw", ps.thaw)):
+                if ids:
+                    rules[kind] = [shelf.rule(r) for r in ids]
+        out.append({"product_id": pid, "name": names[pid], "mapped": ps.mapped,
+                    "status": "cited" if ps.mapped else "unknown",
+                    "storage_class": ps.storage_class, "bought_state": ps.bought_state,
+                    "rules": rules, "note": ps.note, "reason": ps.reason,
+                    "synthetic_product": ps.synthetic_product})
+    data = shelf.load()
+    return {"sources": shelf.sources(), "rules_of_use": data["rules_of_use"],
+            "products": out}
+
+
+# Calendar export: /calendar/preview and /calendar/ics (calendar_api.py).
+app.include_router(calendar_router)
 
 
 # ─── Provenance ──────────────────────────────────────────────

@@ -1,0 +1,430 @@
+{
+  "v": 1,
+  "label": "demo recipe",
+  "synthetic": true,
+  "about": "Demo starter recipes for the example '3 Pepperoni Pizza + 2 Chicken Fried Rice + 3 chicken briyani + 7 mango milkshakes in 2 weeks'. Written for the demo: the quantities are demo house amounts, not from a published recipe, and every surface shows them as 'demo recipe'.",
+  "aliases_note": "`aliases` are whole alternative names matched at the alias step; `token_aliases` map one recipe-title token to misspellings of it. Plurals are also handled by the singularise rule; the plural aliases are listed so the alias step alone covers the example sentence.",
+  "needs_demo_products": {
+    "Instant Yeast": 169,
+    "Pepperoni": 167,
+    "Frozen Mango": 166
+  },
+  "starters": [
+    {
+      "key": "pepperoni_pizza",
+      "doc_key": "starter:pepperoni_pizza",
+      "title": "Pepperoni Pizza",
+      "servings": 2,
+      "slot": "dinner",
+      "label": "demo recipe",
+      "amounts_basis": "demo_house_amounts",
+      "aliases": [
+        "pepperoni pizzas",
+        "pizza pepperoni",
+        "pepperoni pie"
+      ],
+      "token_aliases": {
+        "pepperoni": [
+          "peperoni",
+          "pepperonni"
+        ]
+      },
+      "lines": [
+        {
+          "line_no": 1,
+          "text": "250 g All-Purpose Flour, for the dough",
+          "name": "All-Purpose Flour",
+          "quantity": 250,
+          "unit": "g",
+          "note": "for the dough",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 2,
+          "text": "4 g Instant Yeast, about 1 teaspoon",
+          "name": "Instant Yeast",
+          "quantity": 4,
+          "unit": "g",
+          "note": "about 1 teaspoon",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 3,
+          "text": "4 g Salt",
+          "name": "Salt",
+          "quantity": 4,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 4,
+          "text": "160 ml Water, lukewarm",
+          "name": "Water",
+          "quantity": 160,
+          "unit": "ml",
+          "note": "lukewarm",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 5,
+          "text": "15 ml Olive Oil, 1 tablespoon",
+          "name": "Olive Oil",
+          "quantity": 15,
+          "unit": "ml",
+          "note": "1 tablespoon",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 6,
+          "text": "120 ml Passata, for the sauce",
+          "name": "Passata",
+          "quantity": 120,
+          "unit": "ml",
+          "note": "for the sauce",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 7,
+          "text": "150 g Mozzarella",
+          "name": "Mozzarella",
+          "quantity": 150,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 8,
+          "text": "60 g Pepperoni, sliced",
+          "name": "Pepperoni",
+          "quantity": 60,
+          "unit": "g",
+          "note": "sliced",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 9,
+          "text": "1 g Dried Oregano",
+          "name": "Dried Oregano",
+          "quantity": 1,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        }
+      ],
+      "text": "Pepperoni Pizza (serves 2)\n- 250 g All-Purpose Flour, for the dough\n- 4 g Instant Yeast, about 1 teaspoon\n- 4 g Salt\n- 160 ml Water, lukewarm\n- 15 ml Olive Oil, 1 tablespoon\n- 120 ml Passata, for the sauce\n- 150 g Mozzarella\n- 60 g Pepperoni, sliced\n- 1 g Dried Oregano\n"
+    },
+    {
+      "key": "chicken_fried_rice",
+      "doc_key": "starter:chicken_fried_rice",
+      "title": "Chicken Fried Rice",
+      "servings": 4,
+      "slot": "dinner",
+      "label": "demo recipe",
+      "amounts_basis": "demo_house_amounts",
+      "aliases": [
+        "chicken fried rices",
+        "fried rice with chicken",
+        "chicken fried-rice"
+      ],
+      "token_aliases": {},
+      "lines": [
+        {
+          "line_no": 1,
+          "text": "300 g Jasmine Rice, cooked the day before and chilled",
+          "name": "Jasmine Rice",
+          "quantity": 300,
+          "unit": "g",
+          "note": "cooked the day before and chilled",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 2,
+          "text": "400 g Chicken Breast, diced",
+          "name": "Chicken Breast",
+          "quantity": 400,
+          "unit": "g",
+          "note": "diced",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 3,
+          "text": "3 each Eggs",
+          "name": "Eggs",
+          "quantity": 3,
+          "unit": "each",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 4,
+          "text": "100 g Carrots, diced",
+          "name": "Carrots",
+          "quantity": 100,
+          "unit": "g",
+          "note": "diced",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 5,
+          "text": "40 g Green Onions, about 4, sliced",
+          "name": "Green Onions",
+          "quantity": 40,
+          "unit": "g",
+          "note": "about 4, sliced",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 6,
+          "text": "8 g Garlic, about 2 cloves",
+          "name": "Garlic",
+          "quantity": 8,
+          "unit": "g",
+          "note": "about 2 cloves",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 7,
+          "text": "45 ml Soy Sauce, 3 tablespoons",
+          "name": "Soy Sauce",
+          "quantity": 45,
+          "unit": "ml",
+          "note": "3 tablespoons",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 8,
+          "text": "10 ml Sesame Oil, 2 teaspoons",
+          "name": "Sesame Oil",
+          "quantity": 10,
+          "unit": "ml",
+          "note": "2 teaspoons",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 9,
+          "text": "30 ml Canola Oil, 2 tablespoons",
+          "name": "Canola Oil",
+          "quantity": 30,
+          "unit": "ml",
+          "note": "2 tablespoons",
+          "amount_basis": "demo_house_amounts"
+        }
+      ],
+      "text": "Chicken Fried Rice (serves 4)\n- 300 g Jasmine Rice, cooked the day before and chilled\n- 400 g Chicken Breast, diced\n- 3 each Eggs\n- 100 g Carrots, diced\n- 40 g Green Onions, about 4, sliced\n- 8 g Garlic, about 2 cloves\n- 45 ml Soy Sauce, 3 tablespoons\n- 10 ml Sesame Oil, 2 teaspoons\n- 30 ml Canola Oil, 2 tablespoons\n"
+    },
+    {
+      "key": "chicken_biryani",
+      "doc_key": "starter:chicken_biryani",
+      "title": "Chicken Biryani",
+      "servings": 4,
+      "slot": "dinner",
+      "label": "demo recipe",
+      "amounts_basis": "demo_house_amounts",
+      "aliases": [
+        "chicken briyani",
+        "chicken biriyani",
+        "chicken biriani",
+        "chicken biryanis"
+      ],
+      "token_aliases": {
+        "biryani": [
+          "briyani",
+          "biriyani",
+          "biriani"
+        ]
+      },
+      "lines": [
+        {
+          "line_no": 1,
+          "text": "800 g Chicken Thighs",
+          "name": "Chicken Thighs",
+          "quantity": 800,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 2,
+          "text": "400 g Basmati Rice",
+          "name": "Basmati Rice",
+          "quantity": 400,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 3,
+          "text": "200 g Plain Yogurt, for the marinade",
+          "name": "Plain Yogurt",
+          "quantity": 200,
+          "unit": "g",
+          "note": "for the marinade",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 4,
+          "text": "300 g Yellow Onion, 2 medium, sliced",
+          "name": "Yellow Onion",
+          "quantity": 300,
+          "unit": "g",
+          "note": "2 medium, sliced",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 5,
+          "text": "15 g Garlic, about 4 cloves",
+          "name": "Garlic",
+          "quantity": 15,
+          "unit": "g",
+          "note": "about 4 cloves",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 6,
+          "text": "20 g Ginger, a thumb-sized piece",
+          "name": "Ginger",
+          "quantity": 20,
+          "unit": "g",
+          "note": "a thumb-sized piece",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 7,
+          "text": "10 g Green Chilies, 2, slit",
+          "name": "Green Chilies",
+          "quantity": 10,
+          "unit": "g",
+          "note": "2, slit",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 8,
+          "text": "10 g Garam Masala",
+          "name": "Garam Masala",
+          "quantity": 10,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 9,
+          "text": "3 g Turmeric",
+          "name": "Turmeric",
+          "quantity": 3,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 10,
+          "text": "5 g Chili Powder",
+          "name": "Chili Powder",
+          "quantity": 5,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 11,
+          "text": "40 g Ghee",
+          "name": "Ghee",
+          "quantity": 40,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 12,
+          "text": "10 g Fresh Mint, a handful of leaves",
+          "name": "Fresh Mint",
+          "quantity": 10,
+          "unit": "g",
+          "note": "a handful of leaves",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 13,
+          "text": "15 g Cilantro, a handful",
+          "name": "Cilantro",
+          "quantity": 15,
+          "unit": "g",
+          "note": "a handful",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 14,
+          "text": "3 g Green Cardamom Pods, about 6 pods",
+          "name": "Green Cardamom Pods",
+          "quantity": 3,
+          "unit": "g",
+          "note": "about 6 pods",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 15,
+          "text": "8 g Salt",
+          "name": "Salt",
+          "quantity": 8,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        }
+      ],
+      "text": "Chicken Biryani (serves 4)\n- 800 g Chicken Thighs\n- 400 g Basmati Rice\n- 200 g Plain Yogurt, for the marinade\n- 300 g Yellow Onion, 2 medium, sliced\n- 15 g Garlic, about 4 cloves\n- 20 g Ginger, a thumb-sized piece\n- 10 g Green Chilies, 2, slit\n- 10 g Garam Masala\n- 3 g Turmeric\n- 5 g Chili Powder\n- 40 g Ghee\n- 10 g Fresh Mint, a handful of leaves\n- 15 g Cilantro, a handful\n- 3 g Green Cardamom Pods, about 6 pods\n- 8 g Salt\n"
+    },
+    {
+      "key": "mango_milkshake",
+      "doc_key": "starter:mango_milkshake",
+      "title": "Mango Milkshake",
+      "servings": 2,
+      "slot": "snack",
+      "label": "demo recipe",
+      "amounts_basis": "demo_house_amounts",
+      "aliases": [
+        "mango milkshakes",
+        "mango milk shake",
+        "mango milk shakes",
+        "mango shake",
+        "mango shakes"
+      ],
+      "token_aliases": {
+        "milkshake": [
+          "milkshakes",
+          "milk shake",
+          "milk shakes"
+        ]
+      },
+      "lines": [
+        {
+          "line_no": 1,
+          "text": "250 g Frozen Mango",
+          "name": "Frozen Mango",
+          "quantity": 250,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 2,
+          "text": "500 ml Whole Milk, 2 cups",
+          "name": "Whole Milk",
+          "quantity": 500,
+          "unit": "ml",
+          "note": "2 cups",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 3,
+          "text": "20 g Granulated Sugar, to taste",
+          "name": "Granulated Sugar",
+          "quantity": 20,
+          "unit": "g",
+          "note": "to taste",
+          "amount_basis": "demo_house_amounts"
+        }
+      ],
+      "text": "Mango Milkshake (serves 2)\n- 250 g Frozen Mango\n- 500 ml Whole Milk, 2 cups\n- 20 g Granulated Sugar, to taste\n"
+    }
+  ]
+}

@@ -17,6 +17,7 @@ JSON-RPC stream lives there. The SDK logs to stderr.
 """
 from __future__ import annotations
 
+import datetime as dt
 import math
 import os
 from pathlib import Path
@@ -29,6 +30,8 @@ from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field, model_serializer
 
 from .llm import LLMError
+from .mealplan.assistant import DishIn as MealDish
+from .mealplan.assistant import MealPlanContext, MealPlanResult, ProposedDish
 from .models import (
     MAX_DOC_LINES,
     MAX_LINE_QUANTITY,
@@ -46,6 +49,7 @@ from .models import (
     Product,
     ProductOrigin,
     Recipe,
+    RecipeDoc,
     RecipeLine,
     RecipeSource,
     ShoppingPlan,
@@ -96,7 +100,9 @@ server = MCPServer(
         "Resources: pantry://countries lists the country spellings the "
         "server accepts, pantry://origins/coverage says how thin the "
         "evidence is, pantry://recipes and pantry://catalog/categories "
-        "are the library and the aisle list."
+        "are the library and the aisle list. plan_meals drafts one or two "
+        "weeks of counted dishes for the shopper's Meal plan; it saves and "
+        "approves nothing."
     ),
 )
 
@@ -1225,6 +1231,54 @@ def plan_week(days: Annotated[int, Field(ge=1, le=14)] = 5,
         raise ToolError(_llm_message(e)) from e
 
 
+@server.tool(title="Plan meals for one or two weeks", annotations=_PLAN)
+def plan_meals(dishes: Annotated[list[MealDish] | None, Field(max_length=12)] = None,
+               days: Annotated[int | None, Field(ge=1, le=14)] = None,
+               household_servings: Annotated[int | None, Field(ge=1, le=20)] = None,
+               proposed: Annotated[list[ProposedDish] | None, Field(max_length=12)] = None,
+               start_date: dt.date | None = None,
+               current: MealPlanContext | None = None,
+               my_recipe_docs: Annotated[list[RecipeDoc] | None, Field(max_length=12)] = None,
+               lat: Annotated[float | None, Field(ge=-90, le=90)] = None,
+               lon: Annotated[float | None, Field(ge=-180, le=180)] = None,
+               max_km: Annotated[float | None, Field(ge=0.5, le=100)] = None,
+               verbose: bool = False) -> MealPlanResult:
+    """Plan one or two weeks of meals from counted dishes, as in "3 Pepperoni Pizza + 2
+    Chicken Fried Rice + 7 mango milkshakes in 2 weeks": each count is that many meals, each
+    serving the household. `dishes` are [{recipe, count, slot?}], `recipe` a library slug, a
+    demo starter or a title; `days` is 1-14. Returns a draft for the shopper's Meal plan: the
+    meals by date, suggested trips with totals (demo prices), proposals the shopper must
+    confirm and names not found. It saves and approves nothing.
+
+    Only a dish whose title matches a recipe exactly (or as a plural) is placed. A misspelt or
+    other name ("chicken briyani") comes back in `summary.proposals` for the shopper to accept
+    and is never placed; a name that fits several recipes, or none, is in `summary.unmatched`
+    with the recipes it could be. A dish you write yourself takes `lines` (one ingredient with
+    its amount each) and `servings`. `proposed` (dishes an app read from the shopper's words
+    that need their yes), `current` (the shopper's plan), `start_date` and `my_recipe_docs`
+    are for an app to fill.
+
+    Report the meals and trips briefly, ask about every proposal and unmatched name, and
+    never state a storage time yourself: each trip's `reason` cites it. Quote nutrition only
+    as `summary.nutrition` words it, with "at least" where it says so and "(demo amounts)"
+    whenever it says demo amounts; never estimate a number. Only the shopper approves a
+    trip, in the Meal plan. SLOW when live (each new recipe is matched to products by the
+    LLM selector, once); instant in demo mode. `verbose=True` attaches `full`, the schedule."""
+    _check_llm_budget()
+    from .mealplan.assistant import PlanMealsError
+    from .mealplan.assistant import plan_meals as draft_meals
+
+    try:
+        return draft_meals(dishes, proposed, days=days, start_date=start_date,
+                           current=current, my_recipe_docs=my_recipe_docs,
+                           household_servings=household_servings, lat=lat, lon=lon,
+                           max_km=max_km, verbose=verbose)
+    except PlanMealsError as e:
+        raise ToolError(str(e)) from e
+    except LLMError as e:
+        raise ToolError(_llm_message(e)) from e
+
+
 # --- Provenance tools ----------------------------------------
 # Origin here is evidence, never inference. Records are ingested from the
 # companion claude-chrome-container tooling (Open Food Facts lookups and
@@ -1668,6 +1722,10 @@ def plan_dinner(recipe: str, exclude_origin: str = "", budget: str = "") -> str:
         "a line with no evidence is unknown, not foreign and not domestic.\n"
         "5. Name every entry in summary.notes (interpretation, substitutions, "
         "the coverage-floor warning) rather than summarising them away.\n"
+        "6. Nutrition: quote a figure only as the result words it, with \"at "
+        "least\" for an incomplete total, and say \"demo amounts\" whenever "
+        "its amounts are demo house amounts (demo_amounts true); never "
+        "estimate a nutrient yourself.\n"
         "If the tool returns an error about an origin gate, report the gate's "
         "message and the affected ingredients; do not retry with the exclusion "
         "silently dropped."
