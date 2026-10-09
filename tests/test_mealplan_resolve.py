@@ -71,6 +71,62 @@ def test_starters_resolve_through_run_spec_with_no_parse(monkeypatch):
             assert (ln["product_id"] is None) == (ln["name"] == "Water"), ln
 
 
+def _by_name(name: str) -> int:
+    from tests.mealplan_fixtures import PRODUCTS
+
+    (pid,) = [pid for pid, p in PRODUCTS.items() if p["name"] == name]
+    return pid
+
+
+def test_every_starter_line_buys_a_product_named_for_it_and_says_so_honestly():
+    """A t4 substitute fetched for one line's thin pool is no substitute for another line.
+    Fresh Ginger is a same-aisle substitute for garlic, and was flagged substitute on the one
+    product list the demo selector reads, so it was dropped from every line's choice:
+    Ginger and Cilantro bought Fresh Garlic, and Chicken Fried Rice's Garlic bought Green
+    Onions, each labelled 'exact'."""
+    from pantry_planner.nlsearch.units import tokens
+
+    out = {r["key"]: r for r in _resolve(*(_starter(k) for k in STARTERS))}
+    picks = {(key, ln["name"]): ln for key, r in out.items() for ln in r["lines"]}
+    assert picks["starter:chicken_biryani", "Ginger"]["product_id"] == _by_name("Fresh Ginger")
+    assert picks["starter:chicken_biryani", "Cilantro"]["product_id"] == _by_name("Cilantro")
+    assert picks["starter:chicken_biryani", "Garlic"]["product_id"] == _by_name("Fresh Garlic")
+    assert picks["starter:chicken_fried_rice", "Garlic"]["product_id"] == \
+        _by_name("Fresh Garlic")
+    for (key, name), ln in picks.items():
+        if ln["product_id"] is None:                   # water: never bought, never labelled
+            assert (name, ln["match"]) == ("Water", None)
+            continue
+        # The line's head noun is in the product's name, so 'exact' is a true label.
+        assert tokens(name)[-1] in tokens(ln["product_name"]), (key, name, ln["product_name"])
+        assert ln["match"] == "exact", (key, name)
+
+
+def test_a_substitute_for_one_line_is_still_the_match_for_another():
+    """Penne Rigate is fetched as a t4 substitute for spaghetti's thin pool and is penne's
+    direct match. The flat list kept it flagged, so penne bought Coconut Milk."""
+    from pantry_planner import flow
+    from pantry_planner.nlsearch.planner import run_query_plan, substitutes_by_line, union_of_pools
+
+    text = "X\n- 400g spaghetti\n- 400g penne\n- 1 cup milk"
+    penne = _by_name("Penne Rigate 500g")
+    r = run_query_plan(text)
+    spaghetti_pool, penne_pool = r.pools[0], r.pools[1]
+    assert any(p.id == penne and p.substitute for p in spaghetti_pool)
+    assert any(p.id == penne and not p.substitute for p in penne_pool)
+    # On the flat list it is a direct candidate; per line it substitutes for spaghetti only.
+    assert not next(p for p in union_of_pools(list(r.pools.values())) if p.id == penne).substitute
+    subs = substitutes_by_line(r.recipe, r.pools)
+    assert penne in subs[1] and penne not in subs.get(2, [])
+
+    plan = flow.run_nl(text)
+    got = {b.line_no: b.product_id for b in plan.basis.lines}
+    names = {li.product_id: li.product_name for li in plan.line_items}
+    assert got[1] == _by_name("Spaghetti Pasta 500g")
+    assert "penne" in names[got[2]].lower()
+    assert "milk" in names[got[3]].lower()
+
+
 def test_the_demo_products_let_the_example_resolve_in_stock():
     out = {r["key"]: r for r in _resolve(*(_starter(k) for k in STARTERS))}
     bought = {ln["product_id"] for r in out.values() for ln in r["lines"]}
