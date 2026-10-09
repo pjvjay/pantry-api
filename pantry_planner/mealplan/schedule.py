@@ -74,6 +74,15 @@ def _check_dates(draft: MealPlanDraft) -> None:
             if not 0 <= draft.index(d) < draft.days:
                 raise MealPlanError("invalid_dates", f"{label} {d.isoformat()} is outside the "
                                     f"plan ({draft.start_date.isoformat()}, {draft.days} days)")
+    # One shop a day: two approvals of one date (under either strategy) would be two lists
+    # for that shop, and the approved schedule would export both.
+    approved_under: dict[dt.date, str] = {}
+    for t in draft.trips:
+        if t.date in approved_under:
+            raise MealPlanError("invalid_dates", f"approved trip {t.date.isoformat()} is "
+                                f"approved twice ({approved_under[t.date]} and {t.strategy}); "
+                                "a day has one approved trip")
+        approved_under[t.date] = t.strategy
 
 
 def _packs_overrides(draft: MealPlanDraft, products: dict[int, Product]) -> dict:

@@ -229,6 +229,23 @@ def test_an_approved_trip_stays_approved_until_its_lines_change(example):
     assert moved["approved_schedule"]["exportable"] is False
 
 
+def test_two_approvals_of_one_date_are_refused(example):
+    """The console keeps one approval a day; a draft with two (under either strategy) would
+    put two lists for one shop in the approved schedule."""
+    sched = schedule(example)
+    (fresh,) = _approve(sched, "fresh", days=[1])
+    for other in ("fewest_trips", "fresh"):
+        twice = {**example, "trips": [fresh, {**fresh, "strategy": other}]}
+        for path in ("/mealplan/schedule", "/mealplan/suggest-cook-days"):
+            r = client().post(path, json=twice)
+            assert r.status_code == 422, (other, path)
+            detail = r.json()["detail"]
+            assert detail["error"] == "invalid_dates"
+            assert detail["detail"] == (f"approved trip {fresh['date']} is approved twice "
+                                        f"(fresh and {other}); a day has one approved trip")
+    assert schedule({**example, "trips": [fresh]})["approved_schedule"]["exportable"] is True
+
+
 def test_the_fingerprint_is_sha256_of_date_and_lines_without_price(example):
     import hashlib
 

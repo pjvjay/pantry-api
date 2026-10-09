@@ -25,7 +25,8 @@ products 166-169 are synthetic demo data, and say so.
 `schedule` and `suggest-cook-days` take the draft itself as the body (at most 256 KB; 413
 above). Their 422s are `{"detail": {"error": code, "detail": text}}` with code
 `slot_capacity`, `unknown_recipe_key`, `stale_product`, `invalid_dates`, `pin_invalid` or
-`version`. A draft whose numbers are out of range is a plain validation 422 naming the field:
+`version`. `invalid_dates` covers a date outside the plan and a date approved twice (one
+shop a day, under either strategy). A draft whose numbers are out of range is a plain validation 422 naming the field:
 a doc line's quantity is a finite number from 0 to 1,000,000 (`MAX_LINE_QUANTITY`), a pack
 count (`packs_override`, an approved snapshot) at most `MAX_PACKS` (10 billion, past
 anything the engine computes), and a price at approval finite and not negative.
