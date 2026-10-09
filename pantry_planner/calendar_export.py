@@ -134,7 +134,8 @@ class ScheduleTrip(BaseModel):
     reason: TripReason
     list_text: Text
     not_stocked: list[Short] = Field(default_factory=list, max_length=MAX_ITEMS)
-    total_cost: float
+    # None when the trip has lines and not one of them has a price (Trip.total_cost)
+    total_cost: float | None
     total_is_floor: bool
     price_delta: float | None = None
     fingerprint: str = Field(default="", max_length=64)

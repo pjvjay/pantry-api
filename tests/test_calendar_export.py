@@ -134,6 +134,16 @@ def test_rfc_5545_structure_of_an_all_day_calendar():
         assert props["TRANSP"] == "TRANSPARENT"
 
 
+def test_a_trip_with_no_priced_line_exports_with_its_total_unknown():
+    unpriced = trip(total_cost=None, total_is_floor=True,
+                    list_text="Shopping trip Sat 31 Oct 2026 (fresh)\n\nPantry Mart Downtown\n"
+                              "  - 1 x Crème fraîche 250ml: need 100 ml; price unknown\n\n"
+                              "Total unknown (no line has a price yet)\n")
+    text = "".join(unfold(ce.render_ics(ce.build_events(schedule(trips=[unpriced])), now=NOW)))
+    assert "Total unknown (no line has a price yet)" in text
+    assert "$0.00" not in text
+
+
 def _events(lines: list[str]) -> list[list[str]]:
     out, cur = [], None
     for ln in lines:
