@@ -252,8 +252,9 @@ rewrites it:
   dropping it.
 
 `approved_schedule` collects the approved trips with their lists and their shop, freeze, thaw
-and cook actions for the calendar export; `exportable` is false while any of them needs
-review.
+and cook actions for the calendar export, with a cook event for every placed meal;
+`exportable` is false while any of them needs review. Its shape and the export itself: the
+README's "Calendar export" section.
 
 ## Trip lists, and what "ordered" means
 

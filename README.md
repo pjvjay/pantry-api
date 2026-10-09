@@ -90,6 +90,7 @@ Everything's env-var driven. Defaults in `pantry_planner/config.py`.
 | `TRUSTED_PROXY_HOPS`         | `0`                              | Proxies in front of the API that append to `X-Forwarded-For`; 0 = the header is ignored and the rate limit keys on the TCP peer |
 | `LLM_DAILY_COST_CAP_USD`     | *(unset: no ceiling)*            | Estimated LLM spend per replica per UTC day above which LLM-calling endpoints answer 503 |
 | `OFFERS_SYNTHETIC`           | `true`                           | Store prices, stock and reviews are the seeded demo data; the alternatives ranking labels them so (`data_note`, "(demo)" ratings). Set false only for real offers |
+| `STORES_SYNTHETIC`           | `true`                           | The stores are fictional: a calendar export names each as "<store> (demo store)" and never gives its seeded address |
 
 The four model settings are **specs**: `gemini:<model>` (e.g.
 `gemini:gemini-flash-latest`) routes that call to Google Gemini through its
@@ -197,6 +198,8 @@ pantry-planner/
 │   ├── recipe_doc.py      # RecipeDoc -> RecipeSpec (no parse) / display text
 │   ├── alternatives.py    # rank a plan line's alternatives; pin checks for reprice
 │   ├── nutrition.py       # 8 nutrients per portion from recipe amounts + CNF reference foods
+│   ├── calendar_export.py # ApprovedSchedule -> all-day events, RFC 5545 .ics, Google links
+│   ├── calendar_api.py    # POST /calendar/preview and /calendar/ics
 │   ├── mealplan/          # meal plans: counts, cited storage times, trips (docs/meal-planning.md)
 │   │   ├── selection.py   # Quick add: counted dishes matched exact/plural/alias/fuzzy
 │   │   ├── resolve.py     # products per recipe, once (flow.run / flow.run_spec), demo starters
@@ -494,6 +497,57 @@ and one reference food per ingredient from Health Canada's Canadian Nutrient Fil
 Raw ingredients are summed and cooking losses are not counted. Not medical or dietary advice.
 Contains information licensed under the Open Government Licence – Canada. Details, shapes and
 targets: `docs/nutrition.md`.
+
+## Calendar export (`POST /calendar/preview`, `POST /calendar/ics`)
+
+An approved meal plan as calendar events, with no credentials: an `.ics` file to import, or
+one Google "add event" link per event. Code builds every event (`calendar_export.py`, one
+builder for both outlets); there is no LLM, no write, no outbound call, and no MCP tool, so
+nothing reaches a calendar except by the shopper's own click.
+
+- **ApprovedSchedule.** `/mealplan/schedule` returns it as `approved_schedule`: the trips the
+  shopper approved (each with its shopping list, status and a reason for its date), a cook
+  event for every meal placed on the board, and the freeze and thaw reminders of the approved
+  trips. `exportable` is false and `blocked` says why while a trip needs review. The console
+  posts it back unchanged as `{schedule, include?: ["trips", "cooks", "reminders"]}`;
+  `/calendar/preview` answers with the events (each with its Google link) and `/calendar/ics`
+  with `text/calendar` as an attachment.
+- **All-day events.** `DTSTART;VALUE=DATE` with no time and no zone, so an event lands on its
+  plan date in every time zone, on both sides of BC's 2026-11-01 change. Timed events are
+  decision D9. The file is RFC 5545: CRLF line endings, lines folded at 75 octets without
+  splitting a UTF-8 character, `TRANSP:TRANSPARENT`, no `VTIMEZONE`.
+- **Stable identity.** A UID is a hash of the plan id and the item (a trip's strategy and
+  date, a meal's id, a reminder's kind, meal or trip and product), so exporting again gives
+  the same UIDs, and a moved meal keeps its UID on its new date. `SEQUENCE` is the plan's
+  revision, which only counts up.
+- **Trip events.** The description is the trip's `list_text` (grouped by store, then aisle,
+  with packs, size, need and price), then "Store hours: unknown, check before you go.", the
+  cited reason for the date (the tightest storage time among the trip's lines, with its rule
+  id and page) and the demo-data line. A Google link carries at most 1,000 characters of it
+  and points to the `.ics` for the rest.
+- **Address policy.** The catalog's stores are fictional with real-looking seeded street
+  addresses, so `LOCATION` is "Pantry Mart Downtown (demo store)" and no address appears in
+  any output. `STORES_SYNTHETIC=false` (only for a deployment whose stores are real) gives
+  the store's address on file instead.
+- **Cook events.** The recipe's lines as written, how many the meal feeds and the share of
+  the recipe to cook, and nutrition per serving with "(demo amounts)" and its explanation
+  whenever the amounts are demo house amounts.
+- **Reminders need a source.** Each freeze or thaw reminder names the rows of
+  `seeds/shelf_life.json` it rests on (the export reads their words and page itself), or the
+  shopper's own setting. A reminder without one is a 422; a rule id the file does not have
+  is a 422 `unknown_rule`.
+- **Refusals.** 409 `needs_review` for a trip that changed since it was approved, 409
+  `no_longer_stocked` for one whose product has no offer in range any more, 409
+  `not_approved` for a suggested trip, 422 `nothing_to_export` from `/calendar/ics` when no
+  event is left, 413 above 512 KB.
+
+**Importing.** In Google Calendar on a computer, create a new calendar named "Pantry plan",
+then Settings → Import & export → Import, and choose the file and that calendar. Imported
+events do not stay in sync: to replace an export, delete the Pantry plan calendar and import
+the new file. Whether a re-import with the same UIDs updates or duplicates events in Google
+is not verified (the P7 smoke records it). A Google add-event link adds one event to the
+calendar you choose; it cannot set reminders or change the event later. Store hours are
+never known: check before you go.
 
 ## Demo mode
 
