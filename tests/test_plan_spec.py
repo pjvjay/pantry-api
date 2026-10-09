@@ -108,6 +108,31 @@ def test_nl_basis_carries_the_parse_and_the_constraints():
     assert b.interpretation == plan.interpretation
 
 
+def test_basis_carries_the_servings_and_which_picks_the_selector_called_substitutions(
+        monkeypatch):
+    """A re-price has no selector reasoning to read: the basis keeps the servings the plan
+    reported and whether each pick was called a substitution, so neither is lost later."""
+    from pantry_planner import demomode, flow
+
+    plan = flow.run_nl(PASTA)
+    assert plan.basis.servings == plan.servings == 2
+    assert not any(ln.substitution for ln in plan.basis.lines)
+    assert flow.run("tomato_penne").basis.servings == flow.run("tomato_penne").servings
+
+    real = demomode.select_products
+
+    def flagging(ingredients, products, **kw):
+        res = real(ingredients, products, **kw)
+        for sel in res.selections:
+            if sel.line_no == 2:
+                sel.reasoning = "Substitution: no fresh garlic in range"
+        return res
+
+    monkeypatch.setattr(demomode, "select_products", flagging)
+    b = flow.run_nl(PASTA).basis
+    assert [ln.line_no for ln in b.lines if ln.substitution] == [2]
+
+
 @pytest.mark.asyncio
 async def test_plan_tools_attach_the_basis_only_when_asked(server):
     for tool, args in (("plan_from_text", {"recipe_text": PASTA}),

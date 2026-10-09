@@ -218,6 +218,13 @@ class Settings:
     # which LLM-calling endpoints answer 503. None (unset) means no ceiling.
     llm_daily_cost_cap_usd: float | None = None
 
+    # OFFERS_SYNTHETIC (default true): store prices, stock (every product at
+    # every store) and reviews are storeseed's synthetic data, so anything
+    # that shows them to a shopper (the alternatives ranking's data_note,
+    # "(demo)" on ratings) says so. A deployment with real offers sets it
+    # false; the data stays labelled until someone decides it is real.
+    offers_synthetic: bool = True
+
     @staticmethod
     def from_env() -> Settings:
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -260,6 +267,8 @@ class Settings:
                 in {"1", "true", "yes"}),
             trusted_proxy_hops=_proxy_hops(os.environ.get("TRUSTED_PROXY_HOPS", "")),
             llm_daily_cost_cap_usd=_cost_cap(os.environ.get("LLM_DAILY_COST_CAP_USD", "")),
+            offers_synthetic=os.environ.get("OFFERS_SYNTHETIC", "true").strip().lower()
+            not in {"0", "false", "no"},
         )
 
 

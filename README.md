@@ -88,6 +88,7 @@ Everything's env-var driven. Defaults in `pantry_planner/config.py`.
 | `DB_HOST` (+ `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`) | *(unset)* | Composed into a Postgres URL when `DB_URL` is unset — the Kubernetes path, parts injected from the CNPG credential secret |
 | `TRUSTED_PROXY_HOPS`         | `0`                              | Proxies in front of the API that append to `X-Forwarded-For`; 0 = the header is ignored and the rate limit keys on the TCP peer |
 | `LLM_DAILY_COST_CAP_USD`     | *(unset: no ceiling)*            | Estimated LLM spend per replica per UTC day above which LLM-calling endpoints answer 503 |
+| `OFFERS_SYNTHETIC`           | `true`                           | Store prices, stock and reviews are the seeded demo data; the alternatives ranking labels them so (`data_note`, "(demo)" ratings). Set false only for real offers |
 
 The four model settings are **specs**: `gemini:<model>` (e.g.
 `gemini:gemini-flash-latest`) routes that call to Google Gemini through its
@@ -116,7 +117,8 @@ public deployment: it lets any caller turn real LLM spend on.
 Every public endpoint is bounded (`pantry_planner/limits.py`), per replica and in process:
 
 - **A token bucket per client IP and endpoint**: `/plan/nl` and `/plan/spec` 10 a minute,
-  `/recipes/parse-lines` 60 a minute (more endpoints join as they land). Over the limit is a
+  `/recipes/parse-lines`, `/plan/alternatives` and `/plan/reprice` 60 a minute (more endpoints
+  join as they land). Over the limit is a
   429 `{"error": "rate_limited", "detail": "Too many requests to ...; retry in N s."}` with
   `Retry-After`. The client is the TCP peer unless `TRUSTED_PROXY_HOPS` says how many
   proxies append to `X-Forwarded-For`; a client-written header is never trusted.
@@ -188,6 +190,7 @@ pantry-planner/
 │   ├── limits.py          # per-client token bucket + daily LLM cost ceiling
 │   ├── packs.py           # pack_count: packs a purchase takes (shared rule)
 │   ├── recipe_doc.py      # RecipeDoc -> RecipeSpec (no parse) / display text
+│   ├── alternatives.py    # rank a plan line's alternatives; pin checks for reprice
 │   ├── demo.py            # CLI entrypoint
 │   ├── nlsearch/          # constrained NL2SQL: parse → query plan → gates
 │   │   ├── plan.py        # QueryPlan/StepResult/PlanAlert formalism
@@ -373,6 +376,46 @@ each, the constraints and location), `servings` (None when the recipe does not s
 purchase, `need_qty`/`need_uom` when every line it covers states an amount in one unit. The MCP
 plan tools attach `summary.basis` only with `basis=true`; without it the summary is unchanged.
 
+## Alternatives and re-pricing (`POST /plan/alternatives`, `POST /plan/reprice`)
+
+A finished plan's `basis` is enough to rank the other products for one of its lines and to
+price it again with the shopper's choices, with no LLM call, no parse and no write. The MCP
+tools `rank_alternatives` and `reprice_plan` do the same; the demo hub uses them for the chat
+cart and keeps them away from its model.
+
+- `POST /plan/alternatives` takes `{basis, line_no, limit? 1..25 = 12}` and returns an
+  `AlternativeRanking` (`alternatives.py`). Candidates are the line at the exact, equivalent
+  form, form and generic levels plus its head word (one options query), and same-aisle
+  substitutes from stores in range when the pool is thin (the planner's t4 lookup; price ties
+  go to the lower id). Order (`ORDER`): same ingredient first, then
+  `alternatives.closeness` (the demo selector's `units.semantic_key`, with its head test read
+  from the line's ingredient word, so "cumin powder" is about cumin, not powder; for a line
+  that ends in its ingredient word it only breaks semantic_key's ties), pack fit for the
+  recipe's amount, origin preference only when the plan had one, the trip total after the
+  swap, the cost of the recipe's amount, rating only on exact cent ties, catalog id. Each
+  row's `trip` is computed by the same code as a re-price, so choosing it costs exactly that;
+  `trip.buys_at` is the store that trip buys the product at and its price a pack there, which
+  the re-priced cart charges and `cost_for_need` and `unit_price` are worked out at (`offer` is
+  the lowest price in range, which the trip skips when the stop costs more than it saves);
+  `rank_reason` says why it is below the row above. Products the origin exclusion drops are
+  in `held_back` with their evidence and never ranked; products matching the line's words
+  with no offer in range are counted in `unavailable`. Unknowns stay unknown ("Origin not
+  checked", no rating, pack fit `unknown`), and `data_note` labels the demo offers and reviews
+  while `OFFERS_SYNTHETIC` is true.
+- `POST /plan/reprice` takes `{basis, pins? ≤ 40}` (`pins`: `{line_no, product_id}`) and
+  returns a `ShoppingPlan` like `/plan/nl`'s. With no pins it is the plan's own lines, trip,
+  total and coverage. Each pin is checked first: a planned line, a candidate for it, not held
+  back by the origin exclusion, an offer within `max_km` and under the price cap. A pin equal to
+  the plan's pick is dropped, so it undoes a swap. `basis.pins` on the result are the merged
+  pins.
+- Errors on both: 422 `{error: line_not_planned | invalid_pin | invalid_basis, detail}`, 422
+  for an unknown country, 409 `stale_basis` when a product left the catalog or its range (plan
+  again).
+
+`tests/test_reprice.py` and `tests/test_alternatives.py` cover the round trip, the trip
+invariant to the cent, the order, the match levels, the honesty cases, exclusion parity, the
+query count and a 300 ms guard.
+
 ## Weekly menu optimizer (`POST /plan/week`)
 
 Plans N dinners from the recipe library under an optional budget — with no
@@ -435,6 +478,8 @@ nothing needs a token.
 | `plan_from_text` | 2–4 Claude calls | only when configured | `PlanResult` for pasted recipe text (NL2SQL path). `lat`/`lon`/`max_km` define "nearby"; `allow_partial=true` plans what is stocked and in range and lists the rest in `summary.not_stocked` / `summary.out_of_range` |
 | `plan_from_lines` | 1–3 LLM calls (no parse) | only when configured | `PlanResult` for reviewed lines, planned exactly as given (no parse). The model names `doc_key`; the hub fills the reviewed `lines`, `title` and `servings`, and any other client may pass up to 60 `lines` itself |
 | `plan_week` | ~1 selector call per day | only when configured | `WeekResult {summary, full}` |
+| `rank_alternatives` | free (no LLM) | only when configured | `AlternativeRanking` for one planned line of a plan's `basis` (`basis=true` on a plan tool): every other product that could fill it in the planner's order, the cart's pick flagged `current`, facts from the catalog or stated as unknown, each row's trip effect and why it sits where it does; `held_back` for what the origin exclusion drops. The demo hub calls it for the cart and hides it from its model |
+| `reprice_plan` | free (no LLM) | only when configured | `PlanResult` for a plan's `basis` priced again with the shopper's `pins` (`{line_no, product_id}`, at most 40): with no pins the summary is the plan's own; each pin is checked (a candidate, not held back by origin, an offer in range) and named in `notes`. Hidden from the hub's model too |
 | `submit_origin_evidence` | free | **always over HTTP** | `Submission` — a PENDING label reading, deduplicated |
 | `list_origin_submissions` | free | only when configured | `SubmissionPage` — the review queue, oldest first |
 | `review_origin_submission` | free | **always over HTTP** | `Submission` — approved (now evidence) or rejected with a note |
@@ -442,7 +487,8 @@ nothing needs a token.
 
 Every tool carries `ToolAnnotations`: reads are `read_only_hint=true`,
 plan tools additionally `idempotent_hint=false` (the selector may choose
-differently), the two write tools are `read_only_hint=false,
+differently) and `rank_alternatives` / `reprice_plan` `idempotent_hint=true`
+(no LLM: the same basis gives the same answer), the two write tools are `read_only_hint=false,
 destructive_hint=false` (nothing is ever deleted; `submit` is idempotent
 because the queue dedupes). `open_world_hint` is false everywhere —
 nothing reaches outside the seeded catalog.

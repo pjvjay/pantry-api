@@ -30,7 +30,10 @@ from .models import (
     MAX_LINE_NAME,
     MAX_LINE_QUANTITY,
     MAX_SERVINGS,
+    AlternativeRanking,
     OriginRanking,
+    Pin,
+    PlanBasis,
     Product,
     ProductOrigin,
     Recipe,
@@ -512,6 +515,72 @@ def plan_spec(req: SpecPlanRequest) -> ShoppingPlan:
     m.record_plan("spec", "ok")
     m.record_coverage(plan.origin_coverage)
     return plan
+
+
+# ─── Plan follow-ups: alternatives and re-pricing (no LLM) ───
+# REST twins of the MCP tools for clients without the hub: PlannerView, the
+# meal plan's per-line Options and the Hugging Face demo. The client holds the
+# plan's basis and sends it back; every pin is checked on the server
+# (alternatives.validate_pins), so the client never supplies trusted state.
+
+class AlternativesRequest(BaseModel):
+    """`basis` is a plan's `basis` as returned; `line_no` one of its planned lines."""
+
+    basis: PlanBasis
+    line_no: int = Field(ge=1, le=MAX_DOC_LINES)
+    limit: int = Field(default=12, ge=1, le=25)
+
+
+class RepriceRequest(BaseModel):
+    """`pins`: the shopper's product per line, at most 40; a pin equal to the plan's own
+    pick is dropped (that undoes a swap). The basis's own pins are merged first."""
+
+    basis: PlanBasis
+    pins: list[Pin] = Field(default_factory=list, max_length=40)
+
+
+def _alternatives_error(e: Exception) -> HTTPException:
+    """One mapping for both routes: a stale basis is a 409 (plan again), anything else the
+    client sent wrong a 422, each with a code and the reason in words."""
+    from . import alternatives as alts
+
+    if isinstance(e, alts.StaleBasisError):
+        return HTTPException(status_code=409, detail={"error": "stale_basis", "detail": str(e)})
+    code = ("line_not_planned" if isinstance(e, alts.LineNotPlannedError)
+            else "invalid_pin" if isinstance(e, alts.PinError) else "invalid_basis")
+    return HTTPException(status_code=422, detail={"error": code, "detail": str(e)})
+
+
+@app.post("/plan/alternatives", response_model=AlternativeRanking,
+          dependencies=[Depends(limits.rate_limit("/plan/alternatives"))])
+def plan_alternatives(req: AlternativesRequest) -> AlternativeRanking:
+    """The other products that could fill one planned line, in the planner's order, with
+    the plan's own pick flagged `current` (alternatives.rank_alternatives). No LLM call.
+    422 `line_not_planned`, `invalid_pin` or `invalid_basis`; 409 `stale_basis` when the
+    catalog changed under the plan."""
+    from . import alternatives as alts
+
+    _check_countries(req.basis.exclude_origin, req.basis.preference)
+    try:
+        return alts.rank_alternatives(req.basis, req.line_no, req.limit)
+    except (alts.BasisError, alts.PinError) as e:
+        raise _alternatives_error(e) from e
+
+
+@app.post("/plan/reprice", response_model=ShoppingPlan,
+          dependencies=[Depends(limits.rate_limit("/plan/reprice"))])
+def plan_reprice(req: RepriceRequest) -> ShoppingPlan:
+    """The plan priced again with the shopper's pins (flow.reprice): the same ShoppingPlan
+    shape as /plan/nl, so a client redraws it in place. With no pins it is the plan's own;
+    `basis.pins` on the result are the merged pins. No LLM call. Errors as
+    /plan/alternatives."""
+    from . import alternatives as alts
+
+    _check_countries(req.basis.exclude_origin, req.basis.preference)
+    try:
+        return flow.reprice(req.basis, req.pins)
+    except (alts.BasisError, alts.PinError) as e:
+        raise _alternatives_error(e) from e
 
 
 class WeekPlanRequest(BaseModel):

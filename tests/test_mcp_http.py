@@ -120,6 +120,30 @@ def test_anonymous_read_tool_works(client, anonymous):
     assert "pbj_sandwich" in {x["slug"] for x in result["structuredContent"]["result"]}
 
 
+def test_anonymous_callers_can_rank_and_reprice_over_http(client, anonymous):
+    """The cart's follow-up tools read nothing but the catalog and write nothing, so an
+    open endpoint serves them like any read tool. The plan comes from demo mode."""
+    from pantry_planner import config, flow
+
+    config.set_runtime_overrides(demo_mode=True)
+    try:
+        basis = flow.run("tomato_penne", lat=49.28, lon=-123.12, max_km=10).basis
+    finally:
+        config.clear_runtime_overrides()
+    payload = basis.model_dump(mode="json")
+    line = next(ln.line_no for ln in basis.lines if ln.product_id is not None)
+    r = _call(client, "rank_alternatives", {"basis": payload, "line_no": line, "limit": 2})
+    assert r.status_code == 200, r.text
+    ranked = r.json()["result"]
+    assert ranked["isError"] is False
+    assert any(i["current"] for i in ranked["structuredContent"]["items"])
+    r = _call(client, "reprice_plan", {"basis": payload})
+    assert r.status_code == 200, r.text
+    result = r.json()["result"]
+    assert result["isError"] is False
+    assert result["structuredContent"]["summary"]["basis"]["pins"] == []
+
+
 def test_anonymous_submit_is_refused_naming_the_env_var(client, anonymous):
     r = _call(client, "submit_origin_evidence", _submission_args())
     assert r.status_code == 200, r.text

@@ -20,7 +20,7 @@ EXPECTED_TOOLS = {
     "plan_recipe", "plan_from_text", "plan_from_lines", "plan_week",
     "get_product_origins", "rank_products_by_origin", "origin_triage",
     "submit_origin_evidence", "list_origin_submissions", "review_origin_submission",
-    "pipeline_status",
+    "pipeline_status", "rank_alternatives", "reprice_plan",
 }
 
 

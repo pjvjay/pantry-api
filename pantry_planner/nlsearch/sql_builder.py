@@ -313,7 +313,9 @@ def build_substitute_sql(c: Constraints, subcategory: str, exclude_ids: list[int
                          lat: float, lon: float, max_km: float | None = None,
                          limit: int = THIN_POOL) -> tuple[str, dict]:
     """Same-subcategory alternatives at their cheapest in-range store.
-    Constraints still apply — a no-dairy basket never gets a dairy sub."""
+    Constraints still apply — a no-dairy basket never gets a dairy sub.
+    Price ties go to the lower id, so the LIMIT keeps the same products on
+    SQLite and Postgres."""
     params: dict = {"sub_subcat": subcategory, "sub_lim": limit}
     _location_params(params, lat, lon)
     where = _constraint_where(c, params)
@@ -334,7 +336,7 @@ def build_substitute_sql(c: Constraints, subcategory: str, exclude_ids: list[int
         "  JOIN store_products sp ON sp.product_id = p.id\n"
         "  JOIN stores s ON s.id = sp.store_id\n"
         f"  WHERE {' AND '.join(where)}) x\n"
-        "WHERE rn_store = 1 ORDER BY store_price ASC LIMIT :sub_lim"
+        "WHERE rn_store = 1 ORDER BY store_price ASC, id ASC LIMIT :sub_lim"
     )
     return sql, params
 

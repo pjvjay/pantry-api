@@ -543,6 +543,32 @@ def test_thin_pool_gets_labeled_substitutes():
     assert all(p.subcategory == direct[0].subcategory for p in subs)
 
 
+def test_substitutes_on_a_price_tie_are_the_lowest_ids():
+    """The substitute LIMIT keeps the same products on SQLite and Postgres: a price tie goes
+    to the lower id, not to whichever row the engine happens to read first."""
+    from sqlalchemy import text
+    from sqlalchemy.orm import Session
+
+    from pantry_planner import db
+    from pantry_planner.nlsearch.schemas import Constraints
+    from pantry_planner.nlsearch.sql_builder import build_substitute_sql
+
+    try:
+        with Session(db.engine()) as s:
+            s.execute(text("UPDATE store_products SET price = 1.00 WHERE product_id IN "
+                           "(SELECT id FROM products WHERE subcategory = 'spice')"))
+            s.commit()
+            spices = sorted(s.execute(text(
+                "SELECT id FROM products WHERE subcategory = 'spice'")).scalars())
+            assert len(spices) > 3
+            sql, params = build_substitute_sql(Constraints(), "spice", [spices[0]],
+                                               49.28, -123.12, 12.0, limit=2)
+            got = [r["id"] for r in s.execute(text(sql), params).mappings()]
+        assert got == spices[1:3]
+    finally:
+        db.seed_from_json()
+
+
 # ─── efficiency layer ────────────────────────────────────────
 
 def test_product_terms_tokenizer_parity():
