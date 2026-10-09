@@ -287,8 +287,16 @@ def meal_nutrition(doc: RecipeDoc, ref: Reference, *, portions: float = 1,
              and (mass_fraction is None or mass_fraction >= floor))
     missing = [MissingLine(line_no=ln.line_no, ingredient=ln.ingredient, reason=ln.status,
                            detail=ln.reason) for ln in in_scope if ln.status != "counted"]
-    cov_note = (f"{len(counted)} of {len(in_scope)} ingredients counted"
-                + (f", {_pct(mass_fraction)} by weight" if mass_fraction is not None else ""))
+    unweighed = len(in_scope) - len(weighed)
+    cov_note = f"{len(counted)} of {len(in_scope)} ingredients counted"
+    if mass_fraction is not None:
+        cov_note += f", {_pct(mass_fraction)} by weight"
+        # The share is over the weighed lines only, so the sentence says so whenever a line
+        # has no weight: "100% by weight" alone would claim more than is known.
+        if unweighed:
+            cov_note += (f" of those weighed; {unweighed} "
+                         + ("ingredient's weight" if unweighed == 1 else "ingredients' weights")
+                         + " unknown")
     if not meets:
         cov_note = (f"Nutrition known for only {len(counted)} of {len(in_scope)} ingredients "
                     "- totals are minimums")
@@ -297,7 +305,7 @@ def meal_nutrition(doc: RecipeDoc, ref: Reference, *, portions: float = 1,
         count_fraction=None if count_fraction is None else round(count_fraction, 4),
         grams_weighed=round(grams_weighed, 1), grams_known=round(grams_known, 1),
         mass_fraction=None if mass_fraction is None else round(mass_fraction, 4),
-        lines_mass_unknown=len(in_scope) - len(weighed), floor=floor, meets_floor=meets,
+        lines_mass_unknown=unweighed, floor=floor, meets_floor=meets,
         note=cov_note)
 
     status = ("below_floor" if not meets

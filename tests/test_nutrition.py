@@ -287,6 +287,16 @@ def test_coverage_count_and_mass(monkeypatch):
     mn2 = meal_nutrition(d2, BASIC, floor=0.8)
     assert mn2.coverage.mass_fraction == 1.0 and mn2.coverage.lines_mass_unknown == 1
     assert mn2.coverage.meets_floor and mn2.status == "incomplete"
+    # the sentence the shopper reads never says "100% by weight" alone while a weight is
+    # unknown
+    assert mn2.coverage.note == ("4 of 5 ingredients counted, 100% by weight of those weighed; "
+                                 "1 ingredient's weight unknown")
+    two = meal(doc(*(line(i, "Rice", 10, "g") for i in range(1, 9)),
+                   line(9, "Saffron", 2, "each"), line(10, "Saffron", 1, "pinch")))
+    assert two.coverage.note.endswith("; 2 ingredients' weights unknown")
+    weighed = meal(doc(*(line(i, "Rice", 10, "g") for i in range(1, 5)),
+                       line(5, "Saffron", 10, "g")))
+    assert weighed.coverage.note == "4 of 5 ingredients counted, 80% by weight"
     # the floor comes from NUTRITION_MIN_COVERAGE
     monkeypatch.setenv("NUTRITION_MIN_COVERAGE", "0.9")
     config.settings.cache_clear()

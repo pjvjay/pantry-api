@@ -74,7 +74,9 @@ reviewed row (CNF municipal water), so a water line is counted. A non-purchase l
 row ("ice cubes") is excluded and does not count against coverage.
 
 **Coverage, with a floor.** Each meal reports coverage by line count and by mass, the mass
-taken over the lines whose weight is known. Below `NUTRITION_MIN_COVERAGE` (default 0.8) on
+taken over the lines whose weight is known. When a line's weight is unknown the note says
+so, as in "8 of 9 ingredients counted, 100% by weight of those weighed; 1 ingredient's weight
+unknown", never "100% by weight" alone. Below `NUTRITION_MIN_COVERAGE` (default 0.8) on
 either measure, the meal is `below_floor`, and its note reads "Nutrition known for only K of
 N ingredients - totals are minimums".
 
