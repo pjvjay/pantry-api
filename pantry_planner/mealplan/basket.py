@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import time
 from collections import Counter
+from dataclasses import dataclass
 from fractions import Fraction
 
 from .. import alternatives, flow
@@ -47,6 +48,7 @@ from .models import (
     BasketProduct,
     BasketRecipe,
     BasketStore,
+    Meal,
     MealPlanDraft,
 )
 from .needs import USABLE, fmt_qty, meal_servings, recipe_servings
@@ -94,9 +96,27 @@ def _left_out(resolved) -> dict[str, str]:
             for d in [*resolved.not_stocked, *resolved.out_of_range, *resolved.skipped]}
 
 
-def basket(draft: MealPlanDraft) -> Basket:
-    """The basket for a draft. Raises MealPlanError (REST 422) as /mealplan/schedule does."""
-    t0 = time.perf_counter()
+@dataclass
+class Purchases:
+    """What a draft's basket buys, before any offer is read: the draft read and checked
+    (schedule.prepare), every meal (place.expand), the chosen recipes in order and the
+    resolved ones among them, each line's need for all its recipe's meals, the lines buying
+    each product, and the products the origin exclusion holds back (id -> (country, field)),
+    with the evidence read for them."""
+    pre: schedule.Prepared
+    meals: list[Meal]
+    count: Counter
+    keys: list[str]
+    usable: list[str]
+    need: dict[tuple[str, int], tuple[Fraction, str] | None]
+    buying: dict[int, list[tuple[str, int]]]
+    origins: dict
+    demo: set[int]
+    held: dict[int, tuple[str, str]]
+
+
+def purchases(draft: MealPlanDraft) -> Purchases:
+    """Raises MealPlanError (REST 422) as /mealplan/schedule does."""
     pre = schedule.prepare(draft)
     products, docs, chosen = pre.products, pre.docs, pre.chosen
     meals = place.expand(draft)
@@ -124,11 +144,22 @@ def basket(draft: MealPlanDraft) -> Basket:
             if pid is not None and not is_non_purchase(ln.name):
                 buying.setdefault(pid, []).append((key, ln.line_no))
 
-    s = draft.settings
     origins, demo = alternatives._evidence(sorted(buying), products)
     _kept, dropped = filter_pool([products[pid] for pid in sorted(buying)],
-                                 exclude=list(s.exclude_origin), origins=origins)
-    held = {p.id: (country, fld) for p, country, fld in dropped}
+                                 exclude=list(draft.settings.exclude_origin), origins=origins)
+    return Purchases(pre=pre, meals=meals, count=count, keys=keys, usable=usable, need=need,
+                     buying=buying, origins=origins, demo=demo,
+                     held={p.id: (country, fld) for p, country, fld in dropped})
+
+
+def basket(draft: MealPlanDraft) -> Basket:
+    """The basket for a draft. Raises MealPlanError (REST 422) as /mealplan/schedule does."""
+    t0 = time.perf_counter()
+    pu = purchases(draft)
+    products, docs, chosen = pu.pre.products, pu.pre.docs, pu.pre.chosen
+    count, keys, usable, need, buying = pu.count, pu.keys, pu.usable, pu.need, pu.buying
+    origins, demo, held = pu.origins, pu.demo, pu.held
+    s = draft.settings
     lat, lon, max_km = schedule.shopping_point(s)
     offer = flow._cheapest_offers(
         schedule._offers(sorted(buying.keys() - held.keys()), lat, lon, max_km, s.stores_off),
