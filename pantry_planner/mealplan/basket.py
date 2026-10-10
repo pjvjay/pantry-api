@@ -8,12 +8,13 @@ pin, read and checked as /mealplan/schedule reads them (schedule.prepare). Nothi
 here: a recipe that is not resolved lists no lines, and its status says so. A recipe is chosen
 when it has a meal (place.expand: its wanted count and the meals already on the board).
 
-Every product is bought once for every meal of every recipe that uses it: its packs are the
-summed need over the pack size (packs.pack_count), and its store is the trip optimizer's for
-that one basket (tripopt over the in-range offers the trips read; a product whose packs are
-unknown is listed at its cheapest offer among the stops, as a trip lists it). price is one pack
-there. A line's cost_for_need is its recipe's share of what the product's packs cost, in
-proportion to its need, so the lines add up to est_total. The trips buy on several dates and
+Every product is bought once for every meal of every recipe that uses it, at its cheapest
+offer in range (the price matrix the trips read; the catalog's pack_price), by the catalog's
+whole-pack rule (catalog.whole_packs): the summed need over the pack size rounded up, and one
+pack for each line whose need or pack size is unknown. So the console's whole-pack cost of a
+selection in the Meals stage is this est_total. price is one pack; a line's cost_for_need is
+its recipe's share of what the product's packs cost (by need, or the one pack a line of
+unknown need counts), so the lines add up to est_total. The trips buy on several dates and
 can buy more packs; the Shop stage has their figures.
 
 The plan's origin exclusion applies as everywhere else (origins.filter_pool): a product
@@ -27,17 +28,14 @@ the same rules); a line left without a product for any other reason has no kind.
 """
 from __future__ import annotations
 
-import math
 import time
 from collections import Counter
 from fractions import Fraction
 
-from .. import alternatives, flow, tripopt
-from ..config import settings
+from .. import alternatives, flow
 from ..models import Product
 from ..nlsearch.units import is_non_purchase, normalize_quantity, tokens
 from ..origins import _match_preference, filter_pool
-from ..packs import pack_count
 from . import catalog, diets, place, schedule
 from .models import (
     SLOTS,
@@ -68,27 +66,6 @@ def _product(p: Product) -> BasketProduct:
                          labels=sorted(diets.product_contains(p)),
                          says_organic="organic" in tokens(f"{p.name} {p.description}"),
                          demo_product=p.id in schedule.demo_product_ids())
-
-
-def _stores(rows: list[dict], packs: dict[int, int | None], products: dict[int, Product],
-            lat: float, lon: float) -> dict[int, str]:
-    """Each stocked product's store: the trip optimizer's for the products whose packs are
-    known, and for the rest their cheapest offer among its stops, else in range."""
-    combined = {pid: n for pid, n in packs.items()
-                if n is not None and any(r["product_id"] == pid for r in rows)}
-    options = tripopt.optimize_trips(
-        [r for r in rows if r["product_id"] in combined],
-        [(pid, products[pid].name) for pid in sorted(combined)], home_lat=lat, home_lon=lon,
-        cost_per_km=settings().travel_cost_per_km, packs=combined) if combined else []
-    best = next((o for o in options if o.recommended), None)
-    out = {it.product_id: it.store_name for it in best.items} if best else {}
-    for pid in sorted({r["product_id"] for r in rows} - out.keys()):
-        offers = sorted((r["price"], r["store_name"]) for r in rows if r["product_id"] == pid
-                        and (best is None or r["store_name"] in best.stores))
-        offers = offers or sorted((r["price"], r["store_name"]) for r in rows
-                                  if r["product_id"] == pid)
-        out[pid] = offers[0][1]
-    return out
 
 
 def _left_out(resolved) -> dict[str, str]:
@@ -135,19 +112,27 @@ def basket(draft: MealPlanDraft) -> Basket:
                                  exclude=list(s.exclude_origin), origins=origins)
     held = {p.id: (country, fld) for p, country, fld in dropped}
     lat, lon, max_km = schedule.shopping_point(s)
-    rows = schedule._offers(sorted(buying.keys() - held.keys()), lat, lon, max_km)
-    stocked = {r["product_id"] for r in rows}
+    offer = flow._cheapest_offers(
+        schedule._offers(sorted(buying.keys() - held.keys()), lat, lon, max_km), "spec")
+    stocked = set(offer)
     missing = sorted(buying.keys() - held.keys() - stocked)
     nearest = flow._best_offers(schedule._offers(missing, lat, lon, None),
                                 key=lambda r: (r["dist_km2"], r["price"])) if missing else {}
-    packs = {pid: pack_count(
-        products[pid].unit_qty, products[pid].unit_uom,
-        [None if need[c] is None else (float(need[c][0]), need[c][1]) for c in buying[pid]],
-        min_lines=1) for pid in stocked}
-    store_of = _stores(rows, packs, products, lat, lon)
-    offer = {(r["store_name"], r["product_id"]): r for r in rows}
-    cost = {pid: round(offer[store_of[pid], pid]["price"] * packs[pid], 2) + 0.0
-            for pid in stocked if packs[pid] is not None}
+    # The whole-pack rule, per product: what its packs cost and each line's share of them.
+    cost: dict[int, float] = {}
+    share: dict[tuple[str, int], float] = {}
+    for pid in sorted(stocked):
+        p, price = products[pid], offer[pid]["price"]
+        known = {c: float(need[c][0]) for c in buying[pid]
+                 if need[c] is not None and need[c][1] == p.unit_uom} if p.unit_qty else {}
+        packs, single = catalog.whole_packs([known.get(c) for c in buying[pid]], p.unit_qty)
+        cost[pid] = round(price * (packs + single), 2) + 0.0
+        total = sum(known.values())
+        for c in buying[pid]:
+            if c not in known:
+                share[c] = round(price, 2) + 0.0          # its one pack
+            else:
+                share[c] = round(price * packs * known[c] / total, 2) + 0.0 if total else 0.0
 
     recipes: list[BasketRecipe] = []
     unavailable = 0
@@ -193,29 +178,18 @@ def basket(draft: MealPlanDraft) -> Basket:
                                                   else catalog.NOT_STOCKED),
                                 why_unavailable=_not_in_range(max_km, near))
                 else:
-                    row = offer[store_of[pid], pid]
-                    line.update(
-                        available=True, price=row["price"],
-                        store=BasketStore(name=row["store_name"], distance_km=round(
-                            math.sqrt(max(row["dist_km2"], 0.0)), 1)),
-                        cost_for_need=_share(cost.get(pid), n, [need[c] for c in buying[pid]]))
+                    o = offer[pid]
+                    line.update(available=True, price=o["price"],
+                                store=BasketStore(name=o["store"], distance_km=o["dist_km"]),
+                                cost_for_need=share[key, ln.line_no])
             unavailable += not line["available"]
             lines.append(BasketLine(**line))
         recipes.append(BasketRecipe(key=key, title=doc.title,
                                     status=resolved.status if resolved else "unresolved",
                                     meals=count[key], lines=lines))
-    any_line = any(ln.available for r in recipes for ln in r.lines)
-    total = None if any_line and not cost else round(sum(cost.values()), 2) + 0.0
-    return Basket(rev=draft.rev, recipes=recipes, unavailable_count=unavailable, est_total=total,
-                  budget=draft.prefs.budget, latency_ms=int((time.perf_counter() - t0) * 1000))
-
-
-def _share(cost: float | None, mine, all_needs: list) -> float | None:
-    """This line's part of the product's cost, by need. None when the cost is unknown."""
-    if cost is None or mine is None:
-        return None
-    total = sum(n[0] for n in all_needs)
-    return round(cost * float(mine[0] / total), 2) + 0.0 if total else None
+    return Basket(rev=draft.rev, recipes=recipes, unavailable_count=unavailable,
+                  est_total=round(sum(cost.values()), 2) + 0.0, budget=draft.prefs.budget,
+                  latency_ms=int((time.perf_counter() - t0) * 1000))
 
 
 def _not_in_range(max_km: float | None, nearest: dict | None) -> str:

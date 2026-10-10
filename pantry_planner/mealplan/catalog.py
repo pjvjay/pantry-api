@@ -13,9 +13,15 @@ estimate is this code's, and est_basis says what it rests on.
 A line is priced at its product's cheapest offer in range, from the price matrix the trips
 read, as its share of the pack: the amount the recipe uses for the household over the pack
 size, times the pack price. A line with no amount in the pack's unit is not priced, and
-lines_priced says how many were. An ingredient no store sells, that no store in range sells,
-or whose every candidate the origin exclusion holds back is named in `unavailable` and is
-never priced: an excluded product is never picked.
+lines_priced says how many were. That share is less than a shopper pays, since packs are
+bought whole, so each recipe also lists its lines (product, pack price, pack size and the need
+per meal in the pack's unit) for the console to cost any selection by whole packs, the rule
+/mealplan/basket buys by (whole_packs): per product, the summed need over the pack size
+rounded up, and one pack for each line whose need or pack size is unknown.
+
+An ingredient no store sells, that no store in range sells, or whose every candidate the
+origin exclusion holds back is named in `unavailable` and is never priced: an excluded product
+is never picked.
 
 A recipe fits when it satisfies the diet and contains nothing the shopper avoids (diets.py).
 The starters and the library carry their diets in the starters file; the shopper's own recipes
@@ -26,6 +32,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import threading
 import time
 from collections import OrderedDict
@@ -40,7 +47,17 @@ from ..nlsearch.schemas import Constraints, ParsedInput
 from ..nlsearch.units import is_non_purchase, normalize_quantity
 from ..recipe_doc import UnconfirmedLines, to_recipe_text, to_spec
 from . import diets, schedule
-from .models import SLOTS, Avoid, Catalog, CatalogRecipe, Diet, PlanSettings, RecipeRef, Slot
+from .models import (
+    SLOTS,
+    Avoid,
+    Catalog,
+    CatalogLine,
+    CatalogRecipe,
+    Diet,
+    PlanSettings,
+    RecipeRef,
+    Slot,
+)
 from .resolve import recipe_doc, starters_file
 
 # The shopper's own recipes one request may classify and price.
@@ -50,10 +67,21 @@ NOT_KNOWN = "its diet is not known: not every ingredient has a product to check"
 
 def est_basis(servings: int) -> str:
     people = "1 person" if servings == 1 else f"{servings} people"
-    return (f"Each estimate is one meal for {people}: every ingredient's share of its pack "
+    return (f"est_cost_per_meal is one meal for {people}, each ingredient's share of its pack "
             "price at the cheapest store in range (what the recipe uses over the pack size), "
-            "for the ingredients whose amount and price are known; shopping trips buy whole "
-            "packs, so they cost more.")
+            "while a selection costs whole packs, as the basket's est_total counts them: per "
+            "product the total need over the pack size rounded up, and one pack for each line "
+            "whose need or pack size is unknown, at the line's pack_price.")
+
+
+def whole_packs(needs: list[float | None], pack_qty: float | None) -> tuple[int, int]:
+    """The wizard's whole-pack rule for one product bought for several lines: (the packs for
+    the lines whose need is known in its pack's unit, their summed need over the pack size
+    rounded up; the packs for the other lines, one each). A product with no pack size counts
+    one pack per line."""
+    known = [n for n in needs if n is not None] if pack_qty else []
+    packs = max(0, math.ceil(sum(known) / pack_qty - 1e-9)) if known else 0
+    return packs, len(needs) - len(known)
 
 
 # Why a line has no product: no store sells it, no store in range does, or the plan's origin
@@ -209,13 +237,25 @@ def catalog(*, household_servings: int, diet: Diet, avoid: list[Avoid], settings
         shares: list[float] = []
         unavailable: list[str] = []
         held_back: list[str] = []
+        lines: list[CatalogLine] = []
         for ln in bought:
             pid = pk.by_line.get(ln.line_no)
-            offer = offers.get(pid) if pid in products else None
+            p = products.get(pid)
+            offer = offers.get(pid) if p is not None else None
+            held = pk.left_out.get(ln.line_no, ("",))[0] == ORIGIN_EXCLUDED
+            need = normalize_quantity(ln.quantity, ln.unit)
+            lines.append(CatalogLine(
+                ingredient=ln.name, product_id=pid if p is not None else None,
+                pack_price=offer["price"] if offer else None,
+                pack_qty=(p.unit_qty or None) if p is not None else None,
+                pack_uom=(p.unit_uom or None) if p is not None else None,
+                need_per_meal=(round(need[0] * scale, 4) if p is not None and need is not None
+                               and scale is not None and need[1] == p.unit_uom else None),
+                held_back=held))
             if offer is None:
                 if pk.checked:
                     unavailable.append(ln.name)
-                if pk.left_out.get(ln.line_no, ("",))[0] == ORIGIN_EXCLUDED:
+                if held:
                     held_back.append(ln.name)
                 continue
             share = (None if scale is None
@@ -240,7 +280,7 @@ def catalog(*, household_servings: int, diet: Diet, avoid: list[Avoid], settings
             contains=contains, servings=doc.servings, fits=fits, why_not=why_not,
             est_cost_per_meal=round(sum(shares), 2) + 0.0 if shares else None,
             lines_total=len(bought), lines_priced=len(shares), unavailable=unavailable,
-            held_back=held_back))
+            held_back=held_back, lines=lines))
     out.sort(key=lambda r: (SLOTS.index(r.slot), r.title.casefold(), r.key))
     return Catalog(recipes=out, est_basis=est_basis(household_servings),
                    latency_ms=int((time.perf_counter() - t0) * 1000))

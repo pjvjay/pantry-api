@@ -203,18 +203,31 @@ as `no_reference`.
 **`POST /mealplan/catalog`** takes `{household_servings, diet, avoid, settings, slots?,
 recipes?}` (`recipes`: the shopper's own refs, at most 24) and answers `{v, recipes[],
 est_basis, latency_ms}`, each recipe `{key, ref, title, slot, diets, contains, servings,
-fits, why_not, est_cost_per_meal, lines_total, lines_priced, unavailable, held_back}`,
-ordered by slot
-then title (`mealplan/catalog.py`). Each line's product is the one resolve picks in demo
-mode: the resolve's own retrieval and origin filter, then the demo selector; live, the
-resolve's model may pick another product later. A line is priced at its product's cheapest
-offer in range as its share of the pack (what the recipe uses for the household over the
-pack size); `lines_priced` of `lines_total` (water and ice are not bought) are. An ingredient
-no store in range sells, or that the origin exclusion empties, is in `unavailable` and never
-priced; `held_back` names those the origin rule left out (every candidate in range evidenced
-as from an excluded country), so the console never calls them "not sold nearby". `why_not` names the diet's tags first, then the avoided ones ("contains fish and
-gluten"). A shopper's own recipe is classified from its picks when every line has one;
-otherwise `diets` and `contains` are empty and it fits only with no diet and nothing avoided.
+fits, why_not, est_cost_per_meal, lines_total, lines_priced, unavailable, held_back,
+lines[]}`, ordered by slot then title (`mealplan/catalog.py`). Each line's product is the
+one resolve picks in demo mode: the resolve's own retrieval and origin filter, then the demo
+selector; live, the resolve's model may pick another product later.
+
+- `est_cost_per_meal` prices each line at its product's cheapest offer in range as its share
+  of the pack (what the recipe uses for the household over the pack size); `lines_priced` of
+  `lines_total` (water and ice are not bought) are. It is a per-meal figure, well under what
+  whole packs cost.
+- `lines` are `{ingredient, product_id, pack_price, pack_qty, pack_uom, need_per_meal,
+  held_back}`, `need_per_meal` in the pack's unit for one meal for the household. The console
+  costs any selection from them by **whole packs**: per product, the total need (meals ×
+  `need_per_meal`) over `pack_qty` rounded up, plus one pack for each line whose need or pack
+  size is unknown, at `pack_price`; a line with no `pack_price` is not bought.
+  `/mealplan/basket`'s `est_total` counts the same way (`catalog.whole_packs`), so stage 2's
+  budget bar and stage 3's total agree.
+- An ingredient no store in range sells, or that the origin exclusion empties, is in
+  `unavailable` and never priced; `held_back` names those the origin rule left out (every
+  candidate in range evidenced as from an excluded country), so the console never calls them
+  "not sold nearby".
+- `why_not` names the diet's tags first, then the avoided ones ("contains fish and gluten").
+  A shopper's own recipe is classified from its picks and line names when every line has a
+  product; otherwise `diets` and `contains` are empty and it fits only with no diet and
+  nothing avoided.
+
 The picks are cached in process per recipe and shopping point, so a diet or household change
 answers from the cache.
 
@@ -222,12 +235,13 @@ answers from the cache.
 unavailable_count, est_total, budget, latency_ms}` for every recipe with a meal
 (`mealplan/basket.py`): `{key, title, status, meals, lines[]}`, each line `{line_no,
 ingredient, need, product, store, price, cost_for_need, origin, pinned, shared_with,
-available, unavailable_kind, why_unavailable}`. Products are the draft's (resolved, then pinned, checked as the
-schedule checks them); a recipe not resolved yet lists no lines. Each product is bought once
-for every meal: packs from the summed need, its store the trip optimizer's for that one
-basket over the in-range offers, `price` one pack there, and each line's `cost_for_need` its
-share of the packs by need, so the lines add up to `est_total` (trips that buy on several
-dates can buy more). `origin` is `{country, claim, status: evidenced | conflicting | unknown,
+available, unavailable_kind, why_unavailable}`. Products are the draft's (resolved, then
+pinned, checked as the schedule checks them); a recipe not resolved yet lists no lines. Each
+product is bought once for every meal at its cheapest offer in range (`store`, and `price`
+one pack there: the catalog's `pack_price`), by the whole-pack rule above; each line's
+`cost_for_need` is its share of the packs by need (one pack for a line of unknown need), so
+the lines add up to `est_total`. Trips that buy on several dates can buy more; stage 5 shows
+theirs. `origin` is `{country, claim, status: evidenced | conflicting | unknown,
 preferred_rank}`, `claim` in the Options list's words and `preferred_rank` the place (1
 first) of the preference entry it matches. An excluded product is not available and never
 priced; a product no store in range sells names the nearest offer. `unavailable_kind` is

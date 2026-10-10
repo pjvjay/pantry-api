@@ -213,6 +213,26 @@ def test_an_estimate_is_each_lines_share_of_its_cheapest_pack_price(household):
         assert r["est_cost_per_meal"] == pytest.approx(total, abs=0.006), key
 
 
+def test_each_recipe_lists_its_lines_for_costing_whole_packs():
+    from pantry_planner.nlsearch.units import is_non_purchase, normalize_quantity
+
+    got = by_key(cat(household_servings=3))
+    for key, m in _meta().items():
+        bought = _resolved(key)
+        want = []
+        for ln in _lines(key):
+            if is_non_purchase(ln["name"]):
+                continue
+            p = PRODUCTS[bought[ln["line_no"]]]
+            qty, _uom = normalize_quantity(ln["quantity"], ln["unit"])
+            want.append({"ingredient": ln["name"], "product_id": p["id"],
+                         "pack_price": _cheapest(p["id"]), "pack_qty": p["unit_qty"],
+                         "pack_uom": p["unit_uom"],
+                         "need_per_meal": round(qty * 3 / m["servings"], 4), "held_back": False})
+        assert got[key]["lines"] == want, key
+        assert len(want) == got[key]["lines_total"]
+
+
 def test_diet_and_avoid_say_what_does_not_fit_and_why():
     for diet, avoid in (("vegetarian", ["gluten"]), ("vegan", []), ("pescatarian", ["egg"]),
                         ("any", ["dairy", "nuts"]), ("any", [])):
@@ -291,6 +311,8 @@ def test_held_back_names_what_the_origin_rule_left_out_not_what_is_out_of_range(
     for key in ("lib:tomato_penne", "starter:tomato_pilaf", "starter:ginger_soy_salmon"):
         assert "Garlic" in got[key]["unavailable"], key
         assert got[key]["held_back"] == ["Garlic"], key
+        (line,) = [ln for ln in got[key]["lines"] if ln["ingredient"] == "Garlic"]
+        assert (line["held_back"], line["product_id"], line["pack_price"]) == (True, None, None)
     melt = got[TUNA_MELT]
     assert (melt["unavailable"], melt["held_back"]) == (["Canned Tuna"], [])
     for r in got.values():
@@ -427,45 +449,77 @@ def test_the_basket_lists_each_chosen_recipes_lines_with_the_drafts_products(cho
     assert salt[PIZZA]["shared_with"] == [BIRYANI] and salt[BIRYANI]["shared_with"] == [PIZZA]
 
 
-def test_stores_prices_and_shares_come_from_the_offers_the_trips_read(chosen):
-    """Every product once, its packs for every meal, its store the trip optimizer's for that
-    one basket over the in-range offers; each line's cost its share of the packs by need."""
-    from pantry_planner import tripopt
+def _cheapest_offer(pid: int, max_km: float | None = None) -> dict:
+    """The product's cheapest offer in range, ties to the lower store id: the price matrix the
+    trips read, run directly."""
     from pantry_planner.config import settings
     from pantry_planner.nlsearch.sql_builder import build_price_matrix_sql
 
+    cfg = settings()
+    sql, params = build_price_matrix_sql([pid], cfg.default_lat, cfg.default_lon, max_km)
+    return min(_sql(sql, **params), key=lambda r: (r["price"], r["store_id"]))
+
+
+def test_the_basket_buys_whole_packs_at_the_cheapest_offer_in_range(chosen):
+    """Every product once, at its cheapest offer in range, its packs the summed need over the
+    pack size rounded up; each line's cost its share of the packs by need."""
     body = bask(chosen)
     needs = _needs(chosen)
     buying: dict[int, list[tuple[str, int]]] = {}
     for r in body["recipes"]:
         for ln in r["lines"]:
             buying.setdefault(ln["product"]["id"], []).append((r["key"], ln["line_no"]))
-    packs = {pid: max(1, math.ceil(float(sum(needs[c][0] for c in cs))
-                                   / PRODUCTS[pid]["unit_qty"] - 1e-9))
-             for pid, cs in buying.items()}
-    cfg = settings()
-    sql, params = build_price_matrix_sql(sorted(buying), cfg.default_lat, cfg.default_lon)
-    rows = _sql(sql, **params)
-    best = next(o for o in tripopt.optimize_trips(
-        rows, [(pid, PRODUCTS[pid]["name"]) for pid in sorted(buying)],
-        home_lat=cfg.default_lat, home_lon=cfg.default_lon,
-        cost_per_km=cfg.travel_cost_per_km, packs=packs) if o.recommended)
-    store_of = {it.product_id: it.store_name for it in best.items}
-    row = {(r["store_name"], r["product_id"]): r for r in rows}
-    cost = {pid: round(row[store_of[pid], pid]["price"] * packs[pid], 2) for pid in buying}
+    cost = {}
+    for pid, cs in buying.items():
+        total = float(sum(needs[c][0] for c in cs))
+        packs = math.ceil(total / PRODUCTS[pid]["unit_qty"] - 1e-9)
+        at = _cheapest_offer(pid)
+        cost[pid] = round(at["price"] * packs, 2)
+        for r in body["recipes"]:
+            for ln in r["lines"]:
+                if ln["product"]["id"] != pid:
+                    continue
+                assert ln["store"] == {"name": at["store_name"], "distance_km": round(
+                    math.sqrt(at["dist_km2"]), 1)}
+                assert ln["price"] == at["price"]
+                share = at["price"] * packs * float(needs[r["key"], ln["line_no"]][0]) / total
+                assert ln["cost_for_need"] == pytest.approx(share, abs=0.006)
     assert body["est_total"] == pytest.approx(sum(cost.values()), abs=0.001)
-    for r in body["recipes"]:
-        for ln in r["lines"]:
-            pid = ln["product"]["id"]
-            at = row[store_of[pid], pid]
-            assert ln["store"] == {"name": store_of[pid], "distance_km": round(
-                math.sqrt(at["dist_km2"]), 1)}
-            assert ln["price"] == at["price"]
-            mine = needs[r["key"], ln["line_no"]][0]
-            share = cost[pid] * float(mine / sum(needs[c][0] for c in buying[pid]))
-            assert ln["cost_for_need"] == pytest.approx(share, abs=0.006)
     assert sum(ln["cost_for_need"] for r in body["recipes"] for ln in r["lines"]) == \
         pytest.approx(body["est_total"], abs=0.02)
+
+
+def _whole_pack_cost(lines: list[tuple[int, dict]]) -> float:
+    """The console's rule over catalog lines, (meals, line) each: per product the total need
+    over the pack size rounded up, one pack per line whose need or pack size is unknown, at
+    the line's pack price; a line with no pack price is not bought."""
+    by_product: dict[int, list[tuple[int, dict]]] = {}
+    for meals, ln in lines:
+        if ln["pack_price"] is not None:
+            by_product.setdefault(ln["product_id"], []).append((meals, ln))
+    total = 0.0
+    for got in by_product.values():
+        qty, price = got[0][1]["pack_qty"], got[0][1]["pack_price"]
+        known = [m * ln["need_per_meal"] for m, ln in got
+                 if ln["need_per_meal"] is not None and qty]
+        packs = (math.ceil(sum(known) / qty - 1e-9) if known else 0) + len(got) - len(known)
+        total += round(price * packs, 2)
+    return round(total, 2)
+
+
+def test_the_catalogs_lines_cost_a_selection_as_the_basket_does(chosen):
+    """Stage 2's budget bar and stage 3's total agree: the catalog's lines, costed by whole
+    packs for the chosen meals, are the basket's est_total to the cent."""
+    recipes = by_key(cat(household_servings=2))
+    lines = [(n, ln) for key, n in COUNTS.items() for ln in recipes[f"starter:{key}"]["lines"]]
+    assert _whole_pack_cost(lines) == bask(chosen)["est_total"]
+    # far more than the per-meal shares the estimate adds up
+    shares = sum(n * recipes[f"starter:{k}"]["est_cost_per_meal"] for k, n in COUNTS.items())
+    assert bask(chosen)["est_total"] > shares
+    one = by_key(cat(household_servings=1))
+    lines = [(n, ln) for key, n in COUNTS.items() for ln in one[f"starter:{key}"]["lines"]]
+    half = starter_draft(COUNTS, prefs={"household_servings": 1})
+    assert _whole_pack_cost(lines) == bask(half)["est_total"]
 
 
 def test_pins_replace_the_resolved_product_and_are_checked_as_the_schedule_checks_them(chosen):
@@ -572,7 +626,7 @@ def test_origin_evidence_and_the_preference_order(chosen, reseed):
     assert egg["origin"]["status"] == "conflicting" and egg["origin"]["country"] is None
 
 
-def test_an_unresolved_recipe_lists_no_lines_and_unknown_amounts_have_no_cost():
+def test_an_unresolved_recipe_lists_no_lines_and_an_unknown_amount_is_one_pack():
     known = doc_recipe("my:k", "Rice Bowl", 2, [("Basmati Rice", 200, "g", 8)], wanted=2)
     unknown = doc_recipe("my:u", "Salmon", None, [("Atlantic Salmon", 400, "g", 47)], wanted=1)
     draft = doc_draft({"my:k": known, "my:u": unknown}, prefs={"budget": 50})
@@ -590,13 +644,14 @@ def test_an_unresolved_recipe_lists_no_lines_and_unknown_amounts_have_no_cost():
         "unresolved", [])
     (salmon,) = got["my:u"]["lines"]
     assert got["my:u"]["status"] == "needs_servings"
-    assert (salmon["need"], salmon["cost_for_need"], salmon["available"]) == (
-        "amount unknown", None, True)
-    assert salmon["price"] is not None
+    # its need is unknown, so it counts as one pack
+    assert (salmon["need"], salmon["available"]) == ("amount unknown", True)
+    assert salmon["cost_for_need"] == salmon["price"] == _cheapest_offer(47)["price"]
     (rice,) = got["my:k"]["lines"]
-    assert rice["need"] == "400 g" and rice["cost_for_need"] is not None
-    # the total sums the lines with a cost; the budget is the draft's
-    assert body["est_total"] == pytest.approx(rice["cost_for_need"], abs=0.001)
+    assert rice["need"] == "400 g"
+    assert rice["cost_for_need"] == _cheapest_offer(8)["price"]      # 400 g of a 2 kg bag
+    assert body["est_total"] == pytest.approx(rice["cost_for_need"] + salmon["cost_for_need"],
+                                              abs=0.001)
     assert body["budget"] == 50
 
 

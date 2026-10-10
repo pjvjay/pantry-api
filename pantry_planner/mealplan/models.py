@@ -513,6 +513,21 @@ class TripLineOptions(BaseModel):
 
 # ─── The wizard's catalog and basket ─────────────────────────
 
+class CatalogLine(BaseModel):
+    """One line a recipe buys, for costing a selection by whole packs: the product the
+    resolve picks in demo mode, one pack's price at its cheapest store in range (None when no
+    store in range sells it, or no product was found), the pack's size and unit, and the
+    line's need for one meal for the household in that unit (None when unknown or in another
+    unit). held_back: the origin rule left the line without a product."""
+    ingredient: str
+    product_id: int | None
+    pack_price: float | None
+    pack_qty: float | None
+    pack_uom: str | None
+    need_per_meal: float | None
+    held_back: bool
+
+
 class CatalogRecipe(BaseModel):
     """One recipe the Meals stage offers. diets and contains are empty when they are not
     known (a shopper's recipe whose lines do not all have a product): a known recipe that
@@ -535,10 +550,15 @@ class CatalogRecipe(BaseModel):
     lines_priced: int
     unavailable: list[str]
     held_back: list[str]
+    lines: list[CatalogLine]
 
 
 class Catalog(BaseModel):
-    """POST /mealplan/catalog. est_basis says in one sentence how the estimates are made."""
+    """POST /mealplan/catalog. est_basis says in one sentence how the estimates are made, and
+    how a selection is costed from the recipes' lines: per product, the total need (meals x
+    need_per_meal) over pack_qty rounded up, plus one pack for each line whose need or pack
+    size is unknown, at pack_price; a line with no pack_price is not bought. /mealplan/basket's
+    est_total counts the same way."""
     v: Literal[1] = 1
     recipes: list[CatalogRecipe]
     est_basis: str
@@ -573,8 +593,9 @@ class BasketOrigin(BaseModel):
 class BasketLine(BaseModel):
     """One ingredient of one recipe and the product the plan buys for it. need is the
     recipe's amount for all its meals; price is one pack at the store; cost_for_need is this
-    recipe's share of what the whole packs of that product cost (None when the packs are not
-    known). shared_with names the other recipes buying the same product. unavailable_kind says
+    recipe's share of what the whole packs of that product cost: by need for the lines whose
+    need is known, one pack for a line whose need is not (None when unavailable). shared_with
+    names the other recipes buying the same product. unavailable_kind says
     why an unavailable line is: origin_excluded, out_of_range or not_stocked (None when it is
     available, or no product was chosen for another reason)."""
     line_no: int
@@ -605,8 +626,9 @@ class BasketRecipe(BaseModel):
 class Basket(BaseModel):
     """POST /mealplan/basket: every chosen recipe's ingredients, each with its product, store,
     price and origin. est_total is what the whole packs cost, each product bought once for
-    every meal; trips that buy a product on two dates can cost more. None when no line has a
-    cost; it sums the lines that have one."""
+    every meal at its cheapest store in range, by the catalog's rule (catalog.whole_packs):
+    the summed need over the pack size rounded up, and one pack for each line whose need or
+    pack size is unknown. Trips that buy a product on two dates can cost more."""
     v: Literal[1] = 1
     rev: int
     recipes: list[BasketRecipe]
