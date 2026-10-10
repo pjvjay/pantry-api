@@ -132,10 +132,12 @@ def shopping_point(s: PlanSettings) -> tuple[float, float, float | None]:
             cfg.default_lon if s.lon is None else s.lon, s.max_km)
 
 
-def _offers(product_ids: list[int], lat: float, lon: float,
-            max_km: float | None) -> list[dict]:
-    """Every in-range (store, product) offer for these products: one query."""
-    sql, params = build_price_matrix_sql(sorted(set(product_ids)), lat, lon, max_km)
+def _offers(product_ids: list[int], lat: float, lon: float, max_km: float | None,
+            stores_off: list[int] | None = None) -> list[dict]:
+    """Every in-range (store, product) offer for these products, none from a store the
+    shopper turned off (PlanSettings.stores_off): one query."""
+    sql, params = build_price_matrix_sql(sorted(set(product_ids)), lat, lon, max_km,
+                                         exclude_stores=stores_off)
     with Session(db.engine()) as s:
         return [dict(r) for r in s.execute(text(sql), params).mappings()]
 
@@ -203,7 +205,8 @@ class _Ctx:
         ids = {n.product_id for n in needs} | {s.product_id for t in draft.trips
                                                for s in t.snapshot}
         ids &= products.keys()
-        self.rows = (_offers(sorted(ids), self.lat, self.lon, self.max_km) if offers is None
+        self.rows = (_offers(sorted(ids), self.lat, self.lon, self.max_km,
+                             draft.settings.stores_off) if offers is None
                      else [r for r in offers if r["product_id"] in ids])
         self.stocked = {r["product_id"] for r in self.rows}
 

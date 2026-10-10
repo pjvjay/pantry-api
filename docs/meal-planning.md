@@ -183,6 +183,13 @@ Canada, then `DEFAULT_ALLIES` (mealplan/models.py: United Kingdom, France, Germa
 Spain, Netherlands, Ireland, Denmark, Norway, Sweden, Australia, New Zealand, Japan, South
 Korea, Mexico). A preference only orders products; only the exclusion leaves one out.
 
+**Stores turned off.** `settings.stores_off` (store ids, at most 50) are stores the shopper
+turned off in the Ingredients stage. No offer of theirs is priced or put on a trip: the
+catalog's `pack_price`, the basket, the schedule's trips (and so the calendar's store names)
+and both kinds of Options list read the price matrix without them
+(`build_price_matrix_sql(..., exclude_stores=)`). Resolve ignores them, and so do the
+catalog's cached picks, so turning a store off or on never resolves a recipe again.
+
 **Diets.** Every demo starter says its `slot`, its `diets` (which of vegan, vegetarian and
 pescatarian it satisfies) and `contains`; the library's are the starters file's
 `library_meta`, since `recipes.json` is pantry-db's byte for byte. `mealplan/diets.py` is the

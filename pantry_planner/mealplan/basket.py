@@ -129,10 +129,11 @@ def basket(draft: MealPlanDraft) -> Basket:
     held = {p.id: (country, fld) for p, country, fld in dropped}
     lat, lon, max_km = schedule.shopping_point(s)
     offer = flow._cheapest_offers(
-        schedule._offers(sorted(buying.keys() - held.keys()), lat, lon, max_km), "spec")
+        schedule._offers(sorted(buying.keys() - held.keys()), lat, lon, max_km, s.stores_off),
+        "spec")
     stocked = set(offer)
     missing = sorted(buying.keys() - held.keys() - stocked)
-    nearest = flow._best_offers(schedule._offers(missing, lat, lon, None),
+    nearest = flow._best_offers(schedule._offers(missing, lat, lon, None, s.stores_off),
                                 key=lambda r: (r["dist_km2"], r["price"])) if missing else {}
     # The whole-pack rule, per product: what its packs cost and each line's share of them.
     cost: dict[int, float] = {}

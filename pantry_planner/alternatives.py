@@ -493,11 +493,13 @@ def _unavailable(basis: PlanBasis, nearest: dict | None) -> str:
 
 # ─── Offers ──────────────────────────────────────────────────
 
-def _matrix(s: Session, basis: PlanBasis, ids: set[int], max_km: float | None) -> list:
+def _matrix(s: Session, basis: PlanBasis, ids: set[int], max_km: float | None,
+            stores_off: frozenset[int] = frozenset()) -> list:
     from .nlsearch.sql_builder import build_price_matrix_sql
 
     lat, lon = _point(basis)
-    sql, params = build_price_matrix_sql(sorted(ids), lat, lon, max_km)
+    sql, params = build_price_matrix_sql(sorted(ids), lat, lon, max_km,
+                                         exclude_stores=sorted(stores_off))
     return list(s.execute(text(sql), params).mappings())
 
 
@@ -698,7 +700,9 @@ class TripEffect:
                the packs then bought, what that planner then charges for them, and why
                there is no trip when there is none): its own figures, so a row says what
                choosing it costs there;
-    where      how the reasons name the trip total ("your plan's trips").
+    where      how the reasons name the trip total ("your plan's trips");
+    stores_off the stores that planner's shopper turned off: no offer of theirs counts, so a
+               candidate sold in range only there is unavailable.
 
     The current pick may have no offer in range any more (a line no longer stocked, the
     reason to look for another product): it is then left out of the rows instead of making
@@ -709,6 +713,7 @@ class TripEffect:
     effect: Callable[[int], tuple[AltTrip | None, int | None, float | None, str]]
     where: str = "your trip"
     max_eval: int = MAX_TRIP_EVAL
+    stores_off: frozenset[int] = frozenset()
 
 
 def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT, *,
@@ -752,7 +757,8 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
         stats = _stats(s, sorted(selectable))
         located = has_location(basis)
         basket = set(picks.values())
-        rows_all = _matrix(s, basis, basket | set(selectable), basis.max_km) if located else []
+        rows_all = _matrix(s, basis, basket | set(selectable), basis.max_km,
+                           effect.stores_off if effect else frozenset()) if located else []
 
     offers = flow._cheapest_offers(rows_all, basis.path) if located else {}
     if located and current_id not in offers:

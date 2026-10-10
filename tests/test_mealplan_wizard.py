@@ -716,3 +716,112 @@ def test_the_basket_refuses_what_the_schedule_refuses(chosen, monkeypatch):
                                                                         burst=1))
     assert client().post("/mealplan/basket", json={"draft": chosen}).status_code == 200
     assert client().post("/mealplan/basket", json={"draft": chosen}).status_code == 429
+
+
+# ─── Stores the shopper turned off ───────────────────────────
+
+STORE_NAMES = {1: "Pantry Mart Downtown", 2: "GreenLeaf Grocers Kitsilano",
+               3: "ValueFoods East Van", 4: "MegaSave Richmond"}
+OFF = [1, 3]
+
+
+def _cheapest_on(pid: int, off: list[int]) -> float:
+    return min(r["price"] for r in _sql(
+        "SELECT store_id, price FROM store_products WHERE product_id = :p", p=pid)
+        if r["store_id"] not in off)
+
+
+def test_a_store_turned_off_is_never_priced_or_put_on_a_trip(chosen):
+    from tests.mealplan_fixtures import schedule, strategy
+
+    off_names = {STORE_NAMES[i] for i in OFF}
+    draft = {**chosen, "settings": {"stores_off": OFF}}
+    sched = schedule(draft)
+    for name in ("fresh", "fewest_trips"):
+        st = strategy(sched, name)
+        assert st["trips"]
+        for t in st["trips"]:
+            assert not off_names & set(t["stores"]), t["stores"]
+            assert all(ln["store"] not in off_names for ln in t["lines"])
+            for o in t["frontier"]:
+                assert not off_names & set(o["stores"])
+    on_stores = {ln["store"] for t in strategy(schedule(chosen), "fresh")["trips"]
+                 for ln in t["lines"]}
+    assert on_stores & off_names            # the turned-off stores were on the trips before
+    # the basket prices every product at its cheapest offer among the stores left on
+    body = bask(draft)
+    for r in body["recipes"]:
+        for ln in r["lines"]:
+            assert ln["store"]["name"] not in off_names
+            assert ln["price"] == _cheapest_on(ln["product"]["id"], OFF)
+    # and so does the catalog's pack_price
+    for key, r in by_key(cat(settings={"stores_off": OFF})).items():
+        for ln in r["lines"]:
+            assert ln["pack_price"] == _cheapest_on(ln["product_id"], OFF), (key, ln)
+    # the Options lists, with and without a trip date, offer nothing from them
+    trip = strategy(sched, "fresh")["trips"][0]
+    pid = trip["lines"][0]["product"]["id"]
+    for extra in ({"trip_date": trip["date"]}, {}):
+        r = client().post("/mealplan/alternatives",
+                          json={"draft": draft, "product_id": pid, **extra})
+        assert r.status_code == 200, r.text
+        for it in r.json()["ranking"]["items"]:
+            assert it["offer"]["store"] not in off_names
+            assert it["trip"] is None or (it["trip"]["buys_at"]["store"] not in off_names
+                                          and not off_names & set(it["trip"]["stores"]))
+
+
+def test_the_calendar_names_only_the_stores_left_on(chosen):
+    from tests.mealplan_fixtures import schedule, strategy
+
+    off_names = {STORE_NAMES[i] for i in OFF}
+    draft = {**chosen, "settings": {"stores_off": OFF}}
+    first = schedule(draft)
+    draft["trips"] = [
+        {"date": t["date"], "fingerprint": t["fingerprint"], "strategy": "fresh",
+         "snapshot": [{"product_id": ln["product"]["id"], "packs": ln["packs"],
+                       "storage": ln["storage"], "price_at_approval": ln["price"]}
+                      for ln in t["lines"]]} for t in strategy(first, "fresh")["trips"]]
+    approved = schedule(draft)["approved_schedule"]
+    assert approved["trips"]
+    r = client().post("/calendar/preview", json={"schedule": approved})
+    assert r.status_code == 200
+    for e in r.json()["events"]:
+        if e["kind"] == "trip":
+            assert not any(n in e["location"] for n in off_names), e["location"]
+
+
+def test_turning_a_store_off_resolves_nothing_again(chosen, monkeypatch):
+    """The resolve ignores stores_off: no recipe is resolved again, and the catalog's picks
+    (cached per recipe, shopping point and origin rules) are the same picks."""
+    from pantry_planner import flow
+    from pantry_planner.mealplan import catalog, resolve
+
+    before = cat()
+    calls = []
+    real = catalog.picks
+    monkeypatch.setattr(catalog, "picks", lambda *a, **k: calls.append(a) or real(*a, **k))
+
+    def boom(*_a, **_k):
+        raise AssertionError("resolved again")
+
+    for mod, name in ((resolve, "resolve_one"), (flow, "run"), (flow, "run_spec")):
+        monkeypatch.setattr(mod, name, boom)
+    rules = {"stores_off": OFF}
+    after = cat(settings=rules)
+    assert calls == []
+    assert [[ln["product_id"] for ln in r["lines"]] for r in after["recipes"]] == [
+        [ln["product_id"] for ln in r["lines"]] for r in before["recipes"]]
+    draft = {**chosen, "settings": rules}
+    assert client().post("/mealplan/schedule", json=draft).status_code == 200
+    assert bask(draft)["recipes"]
+
+
+def test_stores_off_is_bounded(chosen):
+    for bad in ([0], [-1], list(range(1, 52)), ["one"]):
+        r = client().post("/mealplan/basket",
+                          json={"draft": {**chosen, "settings": {"stores_off": bad}}})
+        assert r.status_code == 422, bad
+    ok = client().post("/mealplan/basket",
+                       json={"draft": {**chosen, "settings": {"stores_off": [999]}}})
+    assert ok.status_code == 200          # a store id nobody has turns nothing off

@@ -57,6 +57,8 @@ MAX_PINS_PER_RECIPE = 40
 MAX_PRODUCT_ID = 2**31 - 1
 # Origin rules for the plan: as many countries as /plan/spec and /mealplan/resolve take.
 MAX_COUNTRIES = 50
+# Stores the shopper may turn off in one plan.
+MAX_STORES_OFF = 50
 # The grocery budget for the whole plan, in dollars.
 MAX_BUDGET = 10_000
 
@@ -208,6 +210,7 @@ class ApprovedTrip(BaseModel):
 Country = Annotated[str, Field(min_length=1, max_length=100)]
 LineNo = Annotated[str, Field(min_length=1, max_length=4)]
 ProductId = Annotated[int, Field(ge=1, le=MAX_PRODUCT_ID)]
+StoreId = Annotated[int, Field(ge=1, le=MAX_PRODUCT_ID)]
 # The shopper's own product for a recipe line: recipe_key -> {line_no: product_id}.
 PinMap = dict[Annotated[str, Field(min_length=1, max_length=100)],
               Annotated[dict[LineNo, ProductId], Field(max_length=MAX_PINS_PER_RECIPE)]]
@@ -229,13 +232,17 @@ class PlanSettings(BaseModel):
     pin and every Options list is checked against them (a product evidenced as from an
     excluded country is held back). address is the shopper's own words for lat/lon (an
     address they searched, or "your current location"): kept with the plan for the console to
-    show, and never read here, so changing it alone changes nothing."""
+    show, and never read here, so changing it alone changes nothing. stores_off are the store
+    ids the shopper turned off: no offer of theirs is priced or put on a trip (the catalog,
+    the basket, the schedule's trips and the Options lists skip them), while resolve ignores
+    them, so turning a store off or on never resolves a recipe again."""
     lat: float | None = Field(default=None, ge=-90, le=90)
     lon: float | None = Field(default=None, ge=-180, le=180)
     max_km: float | None = Field(default=None, ge=0.5, le=100)
     address: str | None = Field(default=None, max_length=200)
     exclude_origin: list[Country] = Field(default_factory=list, max_length=MAX_COUNTRIES)
     preference: list[Country] = Field(default_factory=list, max_length=MAX_COUNTRIES)
+    stores_off: list[StoreId] = Field(default_factory=list, max_length=MAX_STORES_OFF)
 
     @model_validator(mode="after")
     def _known_countries(self) -> PlanSettings:

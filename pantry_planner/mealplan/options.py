@@ -118,7 +118,7 @@ def trip_line_options(draft: MealPlanDraft, trip_date: dt.date | None, product_i
     pre = schedule.prepare(draft)
     lat, lon, max_km = schedule._location(draft)
     # Every in-range offer, read once: each re-schedule below takes its rows from these.
-    offers = schedule._offers(sorted(pre.products), lat, lon, max_km)
+    offers = schedule._offers(sorted(pre.products), lat, lon, max_km, draft.settings.stores_off)
     base: StrategyResult | None = None
     trip: Trip | None = None
     if trip_date is None:
@@ -222,7 +222,8 @@ def trip_line_options(draft: MealPlanDraft, trip_date: dt.date | None, product_i
 
     ranking = alternatives.rank_alternatives(basis, 1, limit, effect=alternatives.TripEffect(
         needs=needs, on_trip=set(trip.stores) if trip else set(), packs=packs,
-        effect=effect if trip else no_trip, where=WHERE))
+        effect=effect if trip else no_trip, where=WHERE,
+        stores_off=frozenset(draft.settings.stores_off)))
 
     # The meal plan's words where the cart's would mislead: the ingredient once per name, the
     # reason an amount is unknown, and a purchase the product would share with other meals.

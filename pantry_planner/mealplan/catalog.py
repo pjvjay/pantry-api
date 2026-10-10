@@ -261,7 +261,8 @@ def catalog(*, household_servings: int, diet: Diet, avoid: list[Avoid], settings
     lat, lon, max_km = schedule.shopping_point(settings)
     ids = sorted({pid for by_line in chosen.values() for pid in by_line.values()}
                  & products.keys())
-    offers = flow._cheapest_offers(schedule._offers(ids, lat, lon, max_km), "spec")
+    offers = flow._cheapest_offers(
+        schedule._offers(ids, lat, lon, max_km, settings.stores_off), "spec")
 
     out = []
     for ref in refs:
