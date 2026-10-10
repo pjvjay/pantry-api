@@ -5,6 +5,7 @@
   "about": "Demo starter recipes for the example '3 Pepperoni Pizza + 2 Chicken Fried Rice + 3 chicken briyani + 7 mango milkshakes in 2 weeks', and the breakfasts, lunches and dinners the meal plan wizard offers for each diet, made only of products in products.json. Written for the demo: the quantities are demo house amounts, not from a published recipe, and every surface shows them as 'demo recipe'.",
   "aliases_note": "`aliases` are whole alternative names matched at the alias step; `token_aliases` map one recipe-title token to misspellings of it. Plurals are also handled by the singularise rule; the plural aliases are listed so the alias step alone covers the example sentence.",
   "diets_note": "`slot` is where a recipe is offered; `diets` lists which of vegan, vegetarian and pescatarian it satisfies and `contains` the contains-tags of the products its lines resolve to in demo mode, a seafood product's meat tag read as fish, and what the lines' own names say (a White Chocolate line is dairy whatever its product's tags) (mealplan/diets.py). `library_meta` says the same of the library recipes, whose recipes.json pantry-db shares byte for byte. tests/test_mealplan_seeds.py checks every entry against those products and names.",
+  "image_note": "`image_wiki` is the English Wikipedia article whose lead image shows the dish, or the closest dish there is a picture of: the console shows that image through the demo hub (GET /hub/images/wiki?title=), credited to Wikipedia and linked back. Only the title is kept here, never an image. Checked by hand against Wikipedia's API on 2026-10-10 (each title is an article with a lead image); the tests never call Wikipedia.",
   "needs_demo_products": {
     "Instant Yeast": 169,
     "Pepperoni": 167,
@@ -23,6 +24,7 @@
         "gluten",
         "meat"
       ],
+      "image_wiki": "Pepperoni",
       "label": "demo recipe",
       "amounts_basis": "demo_house_amounts",
       "aliases": [
@@ -134,6 +136,7 @@
         "meat",
         "soy"
       ],
+      "image_wiki": "Fried rice",
       "label": "demo recipe",
       "amounts_basis": "demo_house_amounts",
       "aliases": [
@@ -238,6 +241,7 @@
         "dairy",
         "meat"
       ],
+      "image_wiki": "Biryani",
       "label": "demo recipe",
       "amounts_basis": "demo_house_amounts",
       "aliases": [
@@ -405,6 +409,7 @@
       "contains": [
         "dairy"
       ],
+      "image_wiki": "Milkshake",
       "label": "demo recipe",
       "amounts_basis": "demo_house_amounts",
       "aliases": [
@@ -467,6 +472,7 @@
         "egg",
         "gluten"
       ],
+      "image_wiki": "Scrambled eggs",
       "label": "demo recipe",
       "amounts_basis": "demo_house_amounts",
       "aliases": [
@@ -537,6 +543,7 @@
       "contains": [
         "dairy"
       ],
+      "image_wiki": "Yogurt",
       "label": "demo recipe",
       "amounts_basis": "demo_house_amounts",
       "aliases": [
@@ -591,6 +598,7 @@
         "gluten",
         "soy"
       ],
+      "image_wiki": "Congee",
       "label": "demo recipe",
       "amounts_basis": "demo_house_amounts",
       "aliases": [
@@ -680,6 +688,7 @@
       "contains": [
         "gluten"
       ],
+      "image_wiki": "Pa amb tomàquet",
       "label": "demo recipe",
       "amounts_basis": "demo_house_amounts",
       "aliases": [
@@ -751,6 +760,7 @@
         "egg",
         "fish"
       ],
+      "image_wiki": "Smoked salmon",
       "label": "demo recipe",
       "amounts_basis": "demo_house_amounts",
       "aliases": [
@@ -822,6 +832,7 @@
         "fish",
         "gluten"
       ],
+      "image_wiki": "Melt sandwich",
       "label": "demo recipe",
       "amounts_basis": "demo_house_amounts",
       "aliases": [
@@ -884,6 +895,7 @@
       "contains": [
         "gluten"
       ],
+      "image_wiki": "Pasta primavera",
       "label": "demo recipe",
       "amounts_basis": "demo_house_amounts",
       "aliases": [
@@ -962,6 +974,7 @@
         "pescatarian"
       ],
       "contains": [],
+      "image_wiki": "Pilaf",
       "label": "demo recipe",
       "amounts_basis": "demo_house_amounts",
       "aliases": [
@@ -1078,6 +1091,7 @@
         "gluten",
         "soy"
       ],
+      "image_wiki": "Fish steak",
       "label": "demo recipe",
       "amounts_basis": "demo_house_amounts",
       "aliases": [
@@ -1165,7 +1179,8 @@
         "dairy",
         "gluten",
         "nuts"
-      ]
+      ],
+      "image_wiki": "Peanut butter and jelly sandwich"
     },
     "spaghetti_bolognese": {
       "slot": "dinner",
@@ -1174,14 +1189,16 @@
         "dairy",
         "gluten",
         "meat"
-      ]
+      ],
+      "image_wiki": "Bolognese sauce"
     },
     "chicken_curry": {
       "slot": "dinner",
       "diets": [],
       "contains": [
         "meat"
-      ]
+      ],
+      "image_wiki": "Chicken karahi"
     },
     "grilled_cheese": {
       "slot": "lunch",
@@ -1192,7 +1209,8 @@
       "contains": [
         "dairy",
         "gluten"
-      ]
+      ],
+      "image_wiki": "Grilled cheese"
     },
     "veggie_stirfry": {
       "slot": "dinner",
@@ -1201,14 +1219,16 @@
         "vegetarian",
         "pescatarian"
       ],
-      "contains": []
+      "contains": [],
+      "image_wiki": "Stir frying"
     },
     "beef_rice_bowl": {
       "slot": "dinner",
       "diets": [],
       "contains": [
         "meat"
-      ]
+      ],
+      "image_wiki": "Beef and broccoli"
     },
     "tomato_penne": {
       "slot": "dinner",
@@ -1219,7 +1239,8 @@
       "contains": [
         "dairy",
         "gluten"
-      ]
+      ],
+      "image_wiki": "Pasta al pomodoro"
     }
   }
 }

@@ -168,6 +168,21 @@ def test_every_starter_and_library_recipe_has_a_slot_diets_and_contains():
                                       "soy"}
 
 
+def test_every_starter_and_library_recipe_names_a_wikipedia_article_for_its_picture():
+    """image_wiki is the English Wikipedia article whose lead image the console shows: a title
+    as Wikipedia writes it (spaces, a capital first letter, none of the characters no title
+    has, at most 255 bytes). That each is an article with a lead image was checked by hand
+    against Wikipedia's API; a test never calls it."""
+    titles = {f"starter:{s['key']}": s["image_wiki"] for s in STARTERS["starters"]}
+    titles.update({f"lib:{slug}": m["image_wiki"] for slug, m in STARTERS["library_meta"].items()})
+    assert len(titles) == len(STARTERS["starters"]) + len(LIBRARY)
+    for key, title in titles.items():
+        assert isinstance(title, str) and title == " ".join(title.split()) != "", key
+        assert title[0].isupper() and "_" not in title, key
+        assert not set(title) & set("#<>[]|{}"), key
+        assert len(title.encode()) <= 255, key
+
+
 def test_the_wizard_has_enough_recipes_in_each_section_for_each_diet():
     meta = _all_meta()
     for slot, at_least in (("breakfast", 5), ("lunch", 5), ("dinner", 8)):
@@ -269,7 +284,7 @@ def test_a_lines_name_says_what_its_product_tags_leave_out():
         ["vegetarian", "pescatarian"], ["honey"])
     assert STARTERS["library_meta"]["pbj_sandwich"] == {
         "slot": "lunch", "diets": ["vegetarian", "pescatarian"],
-        "contains": ["dairy", "gluten", "nuts"]}
+        "contains": ["dairy", "gluten", "nuts"], "image_wiki": "Peanut butter and jelly sandwich"}
 
 
 def test_the_default_allies_are_countries_the_origin_rules_know():
