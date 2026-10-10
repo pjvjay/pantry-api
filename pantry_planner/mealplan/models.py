@@ -582,7 +582,8 @@ class BasketStore(BaseModel):
 
 class BasketOrigin(BaseModel):
     """status: evidenced (the evidence resolves to a country), conflicting or unknown. claim is
-    the evidence in the Options list's words ("Canada: origin", "Origin not checked").
+    the evidence in plain words: "From Thailand", "Made in Canada, ingredients may be
+    imported", "Origin unclear: sources disagree", "Origin unknown".
     preferred_rank is the place (1 first) of the plan's preference entry it matches."""
     country: str | None
     claim: str

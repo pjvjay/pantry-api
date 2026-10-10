@@ -546,8 +546,8 @@ def test_an_excluded_product_is_not_available_and_never_priced(chosen, reseed):
     assert line["unavailable_kind"] == "origin_excluded"
     assert line["why_unavailable"] == ("Chicken Thighs Bone-In is evidenced as United States "
                                        "(made or packed there), which this plan excludes")
-    assert line["origin"] == {"country": "United States", "claim": "United States: processed "
-                              "there, ingredients may be imported", "status": "evidenced",
+    assert line["origin"] == {"country": "United States", "claim": "Made in United States, "
+                              "ingredients may be imported", "status": "evidenced",
                               "preferred_rank": None}
     assert excl["unavailable_count"] == 1
     (before,) = [ln for r in plain["recipes"] for ln in r["lines"]
@@ -617,13 +617,14 @@ def test_origin_evidence_and_the_preference_order(chosen, reseed):
           for src, c in (("label-photo", "Canada"), ("off", "France")))])
     body = bask({**copy.deepcopy(chosen), "settings": {"preference": ["France", "Canada"]}})
     origin = {ln["product"]["id"]: ln["origin"] for r in body["recipes"] for ln in r["lines"]}
-    assert origin[18] == {"country": "Canada", "claim": "Canada: origin", "status": "evidenced",
+    assert origin[18] == {"country": "Canada", "claim": "From Canada", "status": "evidenced",
                           "preferred_rank": 2}
-    assert origin[SALT] == {"country": None, "claim": "Origin not checked", "status": "unknown",
+    assert origin[SALT] == {"country": None, "claim": "Origin unknown", "status": "unknown",
                             "preferred_rank": None}
     eggs = bask(starter_draft({"scrambled_eggs_on_toast": 1}))
     (egg,) = [ln for r in eggs["recipes"] for ln in r["lines"] if ln["product"]["id"] == 60]
-    assert egg["origin"]["status"] == "conflicting" and egg["origin"]["country"] is None
+    assert egg["origin"] == {"country": None, "claim": "Origin unclear: sources disagree",
+                             "status": "conflicting", "preferred_rank": None}
 
 
 def test_an_unresolved_recipe_lists_no_lines_and_an_unknown_amount_is_one_pack():

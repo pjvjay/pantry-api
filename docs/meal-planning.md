@@ -242,8 +242,9 @@ one pack there: the catalog's `pack_price`), by the whole-pack rule above; each 
 `cost_for_need` is its share of the packs by need (one pack for a line of unknown need), so
 the lines add up to `est_total`. Trips that buy on several dates can buy more; stage 5 shows
 theirs. `origin` is `{country, claim, status: evidenced | conflicting | unknown,
-preferred_rank}`, `claim` in the Options list's words and `preferred_rank` the place (1
-first) of the preference entry it matches. An excluded product is not available and never
+preferred_rank}`: `claim` in plain words ("From Thailand", "Made in Canada, ingredients may
+be imported", "Origin unclear: sources disagree", "Origin unknown"), and `preferred_rank` the
+place (1 first) of the preference entry it matches. An excluded product is not available and never
 priced; a product no store in range sells names the nearest offer. `unavailable_kind` is
 `origin_excluded`, `out_of_range` or `not_stocked` (null when available); for a line the
 resolve bought nothing for, the kind and the reason are the planner's ("its only candidate

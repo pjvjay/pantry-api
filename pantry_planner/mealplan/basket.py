@@ -53,11 +53,26 @@ NO_PRODUCT = "no product was chosen for it"
 _STATUS = {"resolved": "evidenced", "conflicting": "conflicting"}
 
 
+def _claim(alt) -> str:
+    """The evidence in a shopper's words: "From Thailand" for a full origin claim, "Made in
+    Canada, ingredients may be imported" for a processing one, "From X, as the source states"
+    for any other; "Origin unclear: sources disagree" or "Origin unknown" without one."""
+    if alt.status == "conflicting":
+        return "Origin unclear: sources disagree"
+    if alt.status != "resolved" or not alt.country:
+        return "Origin unknown"
+    if alt.claim == "full":
+        return f"From {alt.country}"
+    if alt.claim == "processing":
+        return f"Made in {alt.country}, ingredients may be imported"
+    return f"From {alt.country}, as the source states"
+
+
 def _origin(o, demo: bool, preference: list[str]) -> BasketOrigin:
     alt = alternatives._alt_origin(o, demo)
     hit = _match_preference(o, preference) if o is not None and o.status == "resolved" else None
     return BasketOrigin(country=alt.country if alt.status == "resolved" else None,
-                        claim=alt.label, status=_STATUS.get(alt.status, "unknown"),
+                        claim=_claim(alt), status=_STATUS.get(alt.status, "unknown"),
                         preferred_rank=hit[0] + 1 if hit else None)
 
 
