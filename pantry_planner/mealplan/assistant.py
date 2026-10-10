@@ -499,7 +499,7 @@ def _result(draft: MealPlanDraft, sched: MealSchedule, current: MealPlanContext 
                        total_cost=t.total_cost, total_is_floor=t.total_is_floor,
                        reason=t.reason) for t in rec.trips]
     plan_warnings = [w.message for w in sched.warnings
-                     if w.level in ("must_fix", "decide")
+                     if w.level in ("must_fix", "should_fix", "decide")
                      and w.strategy in (None, rec.name)]
     if current is not None and current.approved_trips:
         n = len(current.approved_trips)

@@ -31,6 +31,9 @@ Slot = Literal["breakfast", "lunch", "dinner", "snack"]
 SLOTS: tuple[str, ...] = ("breakfast", "lunch", "dinner", "snack")
 Strategy = Literal["fresh", "fewest_trips"]
 STRATEGIES: tuple[str, ...] = ("fresh", "fewest_trips")
+# The shopper's diet, and the products' contains-tags they can choose to avoid.
+Diet = Literal["any", "pescatarian", "vegetarian", "vegan"]
+Avoid = Literal["dairy", "gluten", "nuts", "soy", "egg"]
 # Where a purchase is kept: from the product's storage class in shelf_life.json (the file's
 # own label), or the freezer when the plan freezes it on arrival.
 Storage = Literal["fridge", "freezer", "pantry"]
@@ -54,6 +57,8 @@ MAX_PINS_PER_RECIPE = 40
 MAX_PRODUCT_ID = 2**31 - 1
 # Origin rules for the plan: as many countries as /plan/spec and /mealplan/resolve take.
 MAX_COUNTRIES = 50
+# The grocery budget for the whole plan, in dollars.
+MAX_BUDGET = 10_000
 
 
 class MealPlanError(ValueError):
@@ -160,7 +165,9 @@ class Meal(BaseModel):
 class Prefs(BaseModel):
     """Household settings. shop_weekdays are ISO weekdays minus one (Monday 0 .. Sunday 6).
     buy_ahead_days is the shopper's own limit for a perishable with no cited storage time.
-    thaw_reminder is used only where no cited thaw time applies."""
+    thaw_reminder is used only where no cited thaw time applies. budget is the groceries for
+    the whole plan (None: no budget); diet and avoid choose the recipes the catalog offers.
+    All three have defaults, so a draft saved before them still loads."""
     household_servings: int = Field(default=2, ge=1, le=MAX_SERVINGS)
     slots_on: list[Slot] = Field(default_factory=lambda: list(SLOTS), min_length=1)
     shop_weekdays: list[int] = Field(default_factory=lambda: list(range(7)), min_length=1,
@@ -170,6 +177,9 @@ class Prefs(BaseModel):
     thaw_reminder: Literal["evening_before", "morning_of"] = "evening_before"
     allow_freezer: bool = True
     strategy: Strategy = "fresh"
+    budget: float | None = Field(default=None, gt=0, le=MAX_BUDGET, allow_inf_nan=False)
+    diet: Diet = "any"
+    avoid: list[Avoid] = Field(default_factory=list, max_length=5)
 
     @model_validator(mode="after")
     def _weekdays(self) -> Prefs:
@@ -384,9 +394,10 @@ class Action(BaseModel):
 
 
 class PlanWarning(BaseModel):
-    """level: must_fix, decide or note. strategy None: about the plan whatever the strategy.
-    remedies are edits the console can apply (at most 3); the engine never applies them."""
-    level: Literal["must_fix", "decide", "note"]
+    """level: must_fix, should_fix, decide or note. strategy None: about the plan whatever the
+    strategy. remedies are edits the console can apply (at most 3); the engine never applies
+    them."""
+    level: Literal["must_fix", "should_fix", "decide", "note"]
     code: str
     message: str
     strategy: Strategy | None = None

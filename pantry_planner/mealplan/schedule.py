@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime as dt
 import functools
 import json
+import math
 from dataclasses import dataclass
 
 from sqlalchemy import text
@@ -585,6 +586,7 @@ def compute(draft: MealPlanDraft) -> MealSchedule:
         res, ws = _strategy(ctx, name)
         results.append(res)
         warnings.extend(ws)
+    warnings.extend(_budget_warnings(draft, results))
     warnings.sort(key=warn.sort_key)
     for res in results:
         res.warning_counts = warn.counts(warnings, res.name)
@@ -685,6 +687,32 @@ def _plan_warnings(draft: MealPlanDraft, placed: list[PlacedMeal],
             f"{len(unknown)} product(s) have no cited storage time: {len(setting)} chilled or "
             f"fresh ones follow your buy-ahead setting ({draft.prefs.buy_ahead_days} days), "
             "and shelf-stable or frozen ones are not limited."))
+    return out
+
+
+def _budget_warnings(draft: MealPlanDraft,
+                     results: list[StrategyResult]) -> list[PlanWarning]:
+    """over_budget for each strategy whose known total is more than the shopper's budget: the
+    total and the budget named, and nothing at all when there is no budget. A total that is a
+    floor (a line with no price) says "at least". Remedies: the other strategy when its total
+    is known and within the budget, then a budget that covers this total."""
+    from .options import STRATEGY_NAMES
+
+    budget = draft.prefs.budget
+    if budget is None:
+        return []
+    out = []
+    for res in results:
+        if res.total_cost is None or res.total_cost <= budget:
+            continue
+        rem = [warn.set_strategy(o.name) for o in results
+               if o.name != res.name and o.total_cost is not None and o.total_cost <= budget]
+        rem.append(warn.set_pref("budget", math.ceil(res.total_cost)))
+        out.append(warn.make(
+            "should_fix", "over_budget",
+            f"{STRATEGY_NAMES[res.name]}: the trips come to "
+            f"{'at least ' if res.total_is_floor else ''}${res.total_cost:.2f}, over your "
+            f"budget of ${budget:.2f}.", strategy=res.name, remedies=rem))
     return out
 
 
