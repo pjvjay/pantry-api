@@ -1,13 +1,16 @@
-"""The meal plan wizard's Meals stage: POST /mealplan/catalog, on both engines (SQLite here,
-Postgres with PANTRY_TEST_DB_URL).
+"""The meal plan wizard's Meals and Ingredients stages: POST /mealplan/catalog and POST
+/mealplan/basket, on both engines (SQLite here, Postgres with PANTRY_TEST_DB_URL).
 
-No LLM, in demo mode or live: the catalog runs live too with every model boundary patched to
-raise. Expected values come from the seed files, the offers read from the database directly and
-the resolve in demo mode, never from the code under test.
+No LLM in either, in demo mode or live: the catalog runs live too with every model boundary
+patched to raise. Expected values come from the seed files, the offers read from the database
+directly and the resolve in demo mode, never from the code under test.
 """
 from __future__ import annotations
 
+import copy
 import json
+import math
+from fractions import Fraction
 
 import pytest
 from sqlalchemy import text
@@ -18,17 +21,21 @@ from tests.mealplan_fixtures import (
     PRODUCTS,
     STARTERS,
     client,
+    doc_draft,
+    doc_recipe,
     done_db,
+    starter_draft,
     use_db,
 )
 
 SEED = json.loads((SEEDS_DIR / "mealplan_starters.json").read_text(encoding="utf-8"))
 LIBRARY = {r["slug"]: r for r in json.loads((SEEDS_DIR / "recipes.json").read_text())}
 SLOTS = ("breakfast", "lunch", "dinner", "snack")
-TUNA, CHEDDAR = 48, 23
+TUNA, CHEDDAR, THIGHS, BONELESS, SALT = 48, 23, 11, 46, 122
 WHEAT_BREAD, OTHER_WHEAT_BREAD = 2, 1     # Wheat Bread 2, the resolve's pick, and Wheat Bread 1
 FAR_STORE = 4        # MegaSave Richmond, about 14 km from the server's reference point
-TUNA_MELT = "starter:tuna_melt"
+TUNA_MELT, BIRYANI, PIZZA = "starter:tuna_melt", "starter:chicken_biryani", \
+    "starter:pepperoni_pizza"
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -333,3 +340,217 @@ def test_the_catalog_has_its_own_sixty_a_minute_bucket(monkeypatch):
     assert client().post("/mealplan/catalog", json={}).status_code == 200
     r = client().post("/mealplan/catalog", json={})
     assert r.status_code == 429 and r.headers["Retry-After"]
+
+
+# ─── The basket ──────────────────────────────────────────────
+
+COUNTS = {"pepperoni_pizza": 3, "chicken_biryani": 2, "tuna_melt": 2}
+
+
+@pytest.fixture(scope="module")
+def chosen():
+    return starter_draft(COUNTS)
+
+
+def bask(draft: dict) -> dict:
+    r = client().post("/mealplan/basket", json={"draft": draft})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _needs(draft: dict) -> dict[tuple[str, int], tuple[Fraction, str]]:
+    """Each line's need for all its recipe's meals, from the starter file: quantity x meals x
+    household / servings."""
+    from pantry_planner.nlsearch.units import normalize_quantity
+
+    out = {}
+    for key, n in COUNTS.items():
+        s = STARTERS[key]
+        for ln in s["lines"]:
+            q = normalize_quantity(ln["quantity"], ln["unit"])
+            if q is not None:
+                out[s["doc_key"], ln["line_no"]] = (Fraction(repr(q[0])) * n * 2
+                                                    / s["servings"], q[1])
+    return out
+
+
+def test_the_basket_lists_each_chosen_recipes_lines_with_the_drafts_products(chosen):
+    from pantry_planner.mealplan.needs import fmt_qty
+
+    body = bask(chosen)
+    assert (body["v"], body["rev"], body["unavailable_count"], body["budget"]) == (1, 0, 0, None)
+    got = {r["key"]: r for r in body["recipes"]}
+    assert set(got) == {f"starter:{k}" for k in COUNTS}
+    needs = _needs(chosen)
+    for key, n in COUNTS.items():
+        r = got[f"starter:{key}"]
+        assert (r["status"], r["meals"], r["title"]) == ("ok", n, STARTERS[key]["title"])
+        bought = {ln["line_no"]: ln["product_id"]
+                  for ln in chosen["resolved"][f"starter:{key}"]["lines"]}
+        lines = [ln for ln in STARTERS[key]["lines"] if ln["name"] != "Water"]
+        assert [ln["line_no"] for ln in r["lines"]] == [ln["line_no"] for ln in lines]
+        for ln in r["lines"]:
+            p = PRODUCTS[bought[ln["line_no"]]]
+            assert ln["product"]["id"] == p["id"] and ln["product"]["name"] == p["name"]
+            assert ln["product"]["size"] == p["unit_size"]
+            assert ln["product"]["demo_product"] == (p["id"] in (166, 167, 168, 169))
+            assert set(ln["product"]["labels"]) - {"fish"} <= set(
+                t for t in p["dietary_tags"].split(",") if t)
+            assert ln["need"] == fmt_qty(*needs[f"starter:{key}", ln["line_no"]])
+            assert ln["available"] and ln["why_unavailable"] is None and not ln["pinned"]
+    # Salt is one purchase for the pizza and the biryani; each names the other.
+    salt = {k: ln for k, r in got.items() for ln in r["lines"] if ln["product"]["id"] == SALT}
+    assert salt[PIZZA]["shared_with"] == [BIRYANI] and salt[BIRYANI]["shared_with"] == [PIZZA]
+
+
+def test_stores_prices_and_shares_come_from_the_offers_the_trips_read(chosen):
+    """Every product once, its packs for every meal, its store the trip optimizer's for that
+    one basket over the in-range offers; each line's cost its share of the packs by need."""
+    from pantry_planner import tripopt
+    from pantry_planner.config import settings
+    from pantry_planner.nlsearch.sql_builder import build_price_matrix_sql
+
+    body = bask(chosen)
+    needs = _needs(chosen)
+    buying: dict[int, list[tuple[str, int]]] = {}
+    for r in body["recipes"]:
+        for ln in r["lines"]:
+            buying.setdefault(ln["product"]["id"], []).append((r["key"], ln["line_no"]))
+    packs = {pid: max(1, math.ceil(float(sum(needs[c][0] for c in cs))
+                                   / PRODUCTS[pid]["unit_qty"] - 1e-9))
+             for pid, cs in buying.items()}
+    cfg = settings()
+    sql, params = build_price_matrix_sql(sorted(buying), cfg.default_lat, cfg.default_lon)
+    rows = _sql(sql, **params)
+    best = next(o for o in tripopt.optimize_trips(
+        rows, [(pid, PRODUCTS[pid]["name"]) for pid in sorted(buying)],
+        home_lat=cfg.default_lat, home_lon=cfg.default_lon,
+        cost_per_km=cfg.travel_cost_per_km, packs=packs) if o.recommended)
+    store_of = {it.product_id: it.store_name for it in best.items}
+    row = {(r["store_name"], r["product_id"]): r for r in rows}
+    cost = {pid: round(row[store_of[pid], pid]["price"] * packs[pid], 2) for pid in buying}
+    assert body["est_total"] == pytest.approx(sum(cost.values()), abs=0.001)
+    for r in body["recipes"]:
+        for ln in r["lines"]:
+            pid = ln["product"]["id"]
+            at = row[store_of[pid], pid]
+            assert ln["store"] == {"name": store_of[pid], "distance_km": round(
+                math.sqrt(at["dist_km2"]), 1)}
+            assert ln["price"] == at["price"]
+            mine = needs[r["key"], ln["line_no"]][0]
+            share = cost[pid] * float(mine / sum(needs[c][0] for c in buying[pid]))
+            assert ln["cost_for_need"] == pytest.approx(share, abs=0.006)
+    assert sum(ln["cost_for_need"] for r in body["recipes"] for ln in r["lines"]) == \
+        pytest.approx(body["est_total"], abs=0.02)
+
+
+def test_pins_replace_the_resolved_product_and_are_checked_as_the_schedule_checks_them(chosen):
+    body = bask({**chosen, "pins": {BIRYANI: {"1": BONELESS}}})
+    (line,) = [ln for r in body["recipes"] if r["key"] == BIRYANI for ln in r["lines"]
+               if ln["line_no"] == 1]
+    assert line["product"]["id"] == BONELESS and line["pinned"] and line["available"]
+    # a pin equal to the resolve's pick is no pin
+    same = bask({**chosen, "pins": {BIRYANI: {"1": THIGHS}}})
+    assert not any(ln["pinned"] for r in same["recipes"] for ln in r["lines"])
+    r = client().post("/mealplan/basket", json={"draft": {**chosen, "pins": {
+        BIRYANI: {"99": BONELESS}}}})
+    assert r.status_code == 422 and r.json()["detail"]["error"] == "pin_invalid"
+
+
+def test_an_excluded_product_is_not_available_and_never_priced(chosen, reseed):
+    _us_evidence(THIGHS)
+    plain = bask(chosen)
+    excl = bask({**chosen, "settings": {"exclude_origin": ["United States"]}})
+    (line,) = [ln for r in excl["recipes"] if r["key"] == BIRYANI for ln in r["lines"]
+               if ln["product"]["id"] == THIGHS]
+    assert (line["available"], line["price"], line["store"], line["cost_for_need"]) == (
+        False, None, None, None)
+    assert line["why_unavailable"] == ("Chicken Thighs Bone-In is evidenced as United States "
+                                       "(made or packed there), which this plan excludes")
+    assert line["origin"] == {"country": "United States", "claim": "United States: processed "
+                              "there, ingredients may be imported", "status": "evidenced",
+                              "preferred_rank": None}
+    assert excl["unavailable_count"] == 1
+    (before,) = [ln for r in plain["recipes"] for ln in r["lines"]
+                 if ln["product"]["id"] == THIGHS]
+    assert excl["est_total"] == pytest.approx(plain["est_total"] - before["cost_for_need"],
+                                              abs=0.001)
+
+
+def test_a_product_no_store_in_range_sells_names_the_nearest_offer(chosen, reseed):
+    _sql("DELETE FROM store_products WHERE product_id = :p AND store_id <> :far",
+         p=TUNA, far=FAR_STORE)
+    (far,) = _sql("SELECT price FROM store_products WHERE product_id = :p", p=TUNA)
+    body = bask({**chosen, "settings": {"max_km": 5}})
+    (line,) = [ln for r in body["recipes"] for ln in r["lines"] if ln["product"]["id"] == TUNA]
+    assert not line["available"] and line["price"] is None and line["store"] is None
+    assert line["why_unavailable"].startswith(
+        "no store within 5 km sells it; the nearest offer is MegaSave Richmond, ")
+    assert line["why_unavailable"].endswith(f"km away, at ${far['price']:.2f}")
+    assert body["unavailable_count"] == 1
+
+
+def test_origin_evidence_and_the_preference_order(chosen, reseed):
+    from pantry_planner import db
+
+    db.save_origin_evidence([
+        dict(product_id=18, source="label-photo", source_ref="18.jpg", claim_type="product-of",
+             verbatim="Product of Canada", ingredient_origin="Canada", manufactured_in="Canada",
+             confidence="high", importer_only=False, note="", observed_at=""),
+        *(dict(product_id=60, source=src, source_ref=f"60-{c}", claim_type="product-of",
+               verbatim=f"Product of {c}", ingredient_origin=c, manufactured_in=c,
+               confidence="high", importer_only=False, note="", observed_at="")
+          for src, c in (("label-photo", "Canada"), ("off", "France")))])
+    body = bask({**copy.deepcopy(chosen), "settings": {"preference": ["France", "Canada"]}})
+    origin = {ln["product"]["id"]: ln["origin"] for r in body["recipes"] for ln in r["lines"]}
+    assert origin[18] == {"country": "Canada", "claim": "Canada: origin", "status": "evidenced",
+                          "preferred_rank": 2}
+    assert origin[SALT] == {"country": None, "claim": "Origin not checked", "status": "unknown",
+                            "preferred_rank": None}
+    eggs = bask(starter_draft({"scrambled_eggs_on_toast": 1}))
+    (egg,) = [ln for r in eggs["recipes"] for ln in r["lines"] if ln["product"]["id"] == 60]
+    assert egg["origin"]["status"] == "conflicting" and egg["origin"]["country"] is None
+
+
+def test_an_unresolved_recipe_lists_no_lines_and_unknown_amounts_have_no_cost():
+    known = doc_recipe("my:k", "Rice Bowl", 2, [("Basmati Rice", 200, "g", 8)], wanted=2)
+    unknown = doc_recipe("my:u", "Salmon", None, [("Atlantic Salmon", 400, "g", 47)], wanted=1)
+    draft = doc_draft({"my:k": known, "my:u": unknown}, prefs={"budget": 50})
+    draft["recipes"]["starter:tuna_melt"] = {
+        "ref": {"key": "starter:tuna_melt", "starter": "tuna_melt"}, "wanted": 1,
+        "slot": "lunch"}
+    draft["recipes"]["my:idle"] = {**known[0], "ref": {**known[0]["ref"], "key": "my:idle",
+                                                       "doc": {**known[0]["ref"]["doc"],
+                                                               "key": "my:idle"}},
+                                   "wanted": 0}
+    body = bask(draft)
+    got = {r["key"]: r for r in body["recipes"]}
+    assert set(got) == {"my:k", "my:u", "starter:tuna_melt"}      # my:idle has no meal
+    assert (got["starter:tuna_melt"]["status"], got["starter:tuna_melt"]["lines"]) == (
+        "unresolved", [])
+    (salmon,) = got["my:u"]["lines"]
+    assert got["my:u"]["status"] == "needs_servings"
+    assert (salmon["need"], salmon["cost_for_need"], salmon["available"]) == (
+        "amount unknown", None, True)
+    assert salmon["price"] is not None
+    (rice,) = got["my:k"]["lines"]
+    assert rice["need"] == "400 g" and rice["cost_for_need"] is not None
+    # the total sums the lines with a cost; the budget is the draft's
+    assert body["est_total"] == pytest.approx(rice["cost_for_need"], abs=0.001)
+    assert body["budget"] == 50
+
+
+def test_the_basket_refuses_what_the_schedule_refuses(chosen, monkeypatch):
+    from pantry_planner import limits
+
+    bad = {**chosen, "recipes": {**chosen["recipes"], "lib:nope": {
+        "ref": {"key": "lib:nope", "slug": "nope"}, "wanted": 1}}}
+    r = client().post("/mealplan/basket", json={"draft": bad})
+    assert r.status_code == 422 and r.json()["detail"]["error"] == "unknown_recipe_key"
+    big = {"draft": {**chosen, "padding": "x" * 300_000}}
+    assert client().post("/mealplan/basket", json=big).status_code == 413
+    assert limits.LIMITS["/mealplan/basket"] == limits.Limit(per_minute=120, burst=120)
+    monkeypatch.setitem(limits.LIMITS, "/mealplan/basket", limits.Limit(per_minute=60,
+                                                                        burst=1))
+    assert client().post("/mealplan/basket", json={"draft": chosen}).status_code == 200
+    assert client().post("/mealplan/basket", json={"draft": chosen}).status_code == 429

@@ -31,6 +31,7 @@ from .mealplan.assistant import DishIn, MealPlanContext, MealPlanResult, Propose
 from .mealplan.catalog import MAX_OWN_RECIPES
 from .mealplan.models import (
     Avoid,
+    Basket,
     Catalog,
     Diet,
     MealPlanDraft,
@@ -871,6 +872,27 @@ def mealplan_catalog(req: MealPlanCatalogRequest) -> Catalog:
         return catalog(household_servings=req.household_servings, diet=req.diet,
                        avoid=req.avoid, settings=req.settings, slots=req.slots,
                        own=req.recipes)
+    except MealPlanError as e:
+        raise _meal_plan_error(e) from e
+
+
+class BasketRequest(BaseModel):
+    draft: MealPlanDraft
+
+
+@app.post("/mealplan/basket", response_model=Basket,
+          dependencies=[Depends(_options_size),
+                        Depends(limits.rate_limit("/mealplan/basket"))])
+def mealplan_basket(req: BasketRequest) -> Basket:
+    """The wizard's Ingredients stage: every chosen recipe's ingredients with the product the
+    draft buys (resolved, then pinned), its store and distance, one pack's price, the
+    recipe's share of the whole packs, the origin evidence and the product's labels; and what
+    is not available nearby, with why. Pure: no LLM, no write. 422 as /mealplan/schedule."""
+    from .mealplan.basket import basket
+    from .mealplan.models import MealPlanError
+
+    try:
+        return basket(req.draft)
     except MealPlanError as e:
         raise _meal_plan_error(e) from e
 

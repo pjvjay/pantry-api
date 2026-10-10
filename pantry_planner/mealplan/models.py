@@ -506,7 +506,7 @@ class TripLineOptions(BaseModel):
     ranking: AlternativeRanking
 
 
-# ─── The wizard's catalog ────────────────────────────────────
+# ─── The wizard's catalog and basket ─────────────────────────
 
 class CatalogRecipe(BaseModel):
     """One recipe the Meals stage offers. diets and contains are empty when they are not
@@ -534,4 +534,72 @@ class Catalog(BaseModel):
     v: Literal[1] = 1
     recipes: list[CatalogRecipe]
     est_basis: str
+    latency_ms: int
+
+
+class BasketProduct(BaseModel):
+    """labels are the product's contains-tags (diets.product_contains)."""
+    id: int
+    name: str
+    size: str
+    labels: list[str]
+    says_organic: bool
+    demo_product: bool
+
+
+class BasketStore(BaseModel):
+    name: str
+    distance_km: float | None
+
+
+class BasketOrigin(BaseModel):
+    """status: evidenced (the evidence resolves to a country), conflicting or unknown. claim is
+    the evidence in the Options list's words ("Canada: origin", "Origin not checked").
+    preferred_rank is the place (1 first) of the plan's preference entry it matches."""
+    country: str | None
+    claim: str
+    status: Literal["evidenced", "unknown", "conflicting"]
+    preferred_rank: int | None
+
+
+class BasketLine(BaseModel):
+    """One ingredient of one recipe and the product the plan buys for it. need is the
+    recipe's amount for all its meals; price is one pack at the store; cost_for_need is this
+    recipe's share of what the whole packs of that product cost (None when the packs are not
+    known). shared_with names the other recipes buying the same product."""
+    line_no: int
+    ingredient: str
+    need: str
+    product: BasketProduct | None
+    store: BasketStore | None
+    price: float | None
+    cost_for_need: float | None
+    origin: BasketOrigin
+    pinned: bool
+    shared_with: list[str]
+    available: bool
+    why_unavailable: str | None
+
+
+class BasketRecipe(BaseModel):
+    """status is the resolve's (ok, needs_servings, ...) or unresolved; a recipe that buys
+    nothing yet lists no lines."""
+    key: str
+    title: str
+    status: str
+    meals: int
+    lines: list[BasketLine]
+
+
+class Basket(BaseModel):
+    """POST /mealplan/basket: every chosen recipe's ingredients, each with its product, store,
+    price and origin. est_total is what the whole packs cost, each product bought once for
+    every meal; trips that buy a product on two dates can cost more. None when no line has a
+    cost; it sums the lines that have one."""
+    v: Literal[1] = 1
+    rev: int
+    recipes: list[BasketRecipe]
+    unavailable_count: int
+    est_total: float | None
+    budget: float | None
     latency_ms: int
