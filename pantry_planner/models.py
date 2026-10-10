@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import datetime as dt
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
 
 from pydantic import AfterValidator, BaseModel, Field, model_validator
 
@@ -642,9 +643,9 @@ class AlternativeRanking(BaseModel):
 # A library recipe, a demo starter, a pasted or imported ingredient list and
 # a dish the assistant wrote all reach the planner as a RecipeDoc. Its lines
 # are what the shopper saw and confirmed; recipe_doc.to_spec plans them as
-# given, with no parse. Only ingredient lines and a link back are kept: a
-# recipe's method text is never stored or shown. Mirrored in the frontend's
-# types.ts.
+# given, with no parse. Only ingredient lines and links back (to the page,
+# and to its own preview image) are kept: a recipe's method text is never
+# stored or shown. Mirrored in the frontend's types.ts.
 
 MAX_DOC_LINES = 60
 # The bounds a RecipeDoc is validated against. POST /recipes/parse-lines keeps
@@ -689,8 +690,20 @@ class RecipeLine(BaseModel):
     amount_basis: AmountBasis
 
 
+def _http_url(url: str) -> str:
+    """An absolute http(s) URL: a host, and no space or control character."""
+    parts = urlsplit(url)
+    if (parts.scheme.lower() not in ("http", "https") or not parts.hostname
+            or any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in url)):
+        raise ValueError("must be an absolute http(s) URL")
+    return url
+
+
 class RecipeSource(BaseModel):
-    """Where the recipe came from, for the link back and the labels."""
+    """Where the recipe came from, for the link back and the labels. image_url links to the
+    page's own preview image (its schema.org Recipe image or og:image, a video's thumbnail),
+    which the console shows credited to the site and linked back, as a link preview does:
+    a link, never the image itself."""
     kind: Literal["library", "starter", "pasted", "web", "youtube", "assistant"]
     method: Literal["db", "seed", "paste", "jsonld", "microdata", "youtube_description",
                     "youtube_linked_page", "gemini_video", "agent_written"]
@@ -703,6 +716,7 @@ class RecipeSource(BaseModel):
     extractor: str | None = Field(default=None, max_length=100)
     model: str | None = Field(default=None, max_length=100)
     label: str | None = Field(default=None, max_length=100)
+    image_url: Annotated[str, Field(max_length=2000), AfterValidator(_http_url)] | None = None
 
 
 class RecipeDoc(BaseModel):
