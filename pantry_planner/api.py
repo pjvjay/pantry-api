@@ -28,11 +28,17 @@ from .config import (
 )
 from .llm import LLMError
 from .mealplan.assistant import DishIn, MealPlanContext, MealPlanResult, ProposedDish
+from .mealplan.catalog import MAX_OWN_RECIPES
 from .mealplan.models import (
+    Avoid,
+    Catalog,
+    Diet,
     MealPlanDraft,
     MealSchedule,
+    PlanSettings,
     RecipeRef,
     ResolvedRecipe,
+    Slot,
     TripLineOptions,
 )
 from .models import (
@@ -834,6 +840,39 @@ def mealplan_alternatives(req: TripLineOptionsRequest) -> TripLineOptions:
     except (MealPlanError, NoTripLineError, alts.BasisError, alts.PinError) as e:
         status, detail = options_error(e)
         raise HTTPException(status_code=status, detail=detail) from e
+
+
+class MealPlanCatalogRequest(BaseModel):
+    """The wizard's Meals stage: the recipes to offer this household, under its diet, what it
+    avoids and where it shops. recipes are the shopper's own, classified and priced like the
+    library's and the starters'; slots keeps only those sections (all of them by default)."""
+
+    household_servings: int = Field(default=2, ge=1, le=20)
+    diet: Diet = "any"
+    avoid: list[Avoid] = Field(default_factory=list, max_length=5)
+    settings: PlanSettings = Field(default_factory=PlanSettings)
+    slots: list[Slot] | None = Field(default=None, min_length=1, max_length=4)
+    recipes: list[RecipeRef] = Field(default_factory=list, max_length=MAX_OWN_RECIPES)
+
+
+@app.post("/mealplan/catalog", response_model=Catalog,
+          dependencies=[Depends(_draft_size),
+                        Depends(limits.rate_limit("/mealplan/catalog"))])
+def mealplan_catalog(req: MealPlanCatalogRequest) -> Catalog:
+    """Every library recipe, demo starter and recipe of the shopper's, with its slot, diets,
+    contains, whether it fits (and why not) and an estimate of one meal's cost: each line's
+    share of its pack price at the cheapest store in range, the product the resolve picks in
+    demo mode. No LLM call in demo mode or live; an excluded product is never priced. 422 for
+    a library slug or starter that does not exist."""
+    from .mealplan.catalog import catalog
+    from .mealplan.models import MealPlanError
+
+    try:
+        return catalog(household_servings=req.household_servings, diet=req.diet,
+                       avoid=req.avoid, settings=req.settings, slots=req.slots,
+                       own=req.recipes)
+    except MealPlanError as e:
+        raise _meal_plan_error(e) from e
 
 
 class MyRecipeName(BaseModel):

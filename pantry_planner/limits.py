@@ -87,6 +87,9 @@ LIMITS: dict[str, Limit] = {
     "/mealplan/suggest-cook-days": Limit(per_minute=60, burst=60),
     # Options for a trip line: no LLM, but one re-schedule per candidate it ranks.
     "/mealplan/alternatives": Limit(per_minute=60, burst=60),
+    # The wizard's Meals stage reads every recipe's candidates (cached per recipe and
+    # shopping point).
+    "/mealplan/catalog": Limit(per_minute=60, burst=60),
     # Calendar export: pure, no LLM. The dialog previews, then downloads.
     "/calendar/preview": Limit(per_minute=60, burst=60),
     "/calendar/ics": Limit(per_minute=60, burst=60),

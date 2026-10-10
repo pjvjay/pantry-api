@@ -504,3 +504,34 @@ class TripLineOptions(BaseModel):
     lines: list[CoveredLine]
     plan_total: float | None
     ranking: AlternativeRanking
+
+
+# ─── The wizard's catalog ────────────────────────────────────
+
+class CatalogRecipe(BaseModel):
+    """One recipe the Meals stage offers. diets and contains are empty when they are not
+    known (a shopper's recipe whose lines do not all have a product): a known recipe that
+    satisfies no diet always contains something. est_cost_per_meal is one meal for the
+    household, each priced line's share of its pack price; None when no line is priced.
+    unavailable names the ingredients with no offer in range."""
+    key: str
+    ref: RecipeRef
+    title: str
+    slot: Slot
+    diets: list[str]
+    contains: list[str]
+    servings: int | None
+    fits: bool
+    why_not: str | None
+    est_cost_per_meal: float | None
+    lines_total: int
+    lines_priced: int
+    unavailable: list[str]
+
+
+class Catalog(BaseModel):
+    """POST /mealplan/catalog. est_basis says in one sentence how the estimates are made."""
+    v: Literal[1] = 1
+    recipes: list[CatalogRecipe]
+    est_basis: str
+    latency_ms: int

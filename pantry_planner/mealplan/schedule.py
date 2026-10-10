@@ -44,6 +44,7 @@ from .models import (
     MealRef,
     MealSchedule,
     PlacedMeal,
+    PlanSettings,
     PlanWarning,
     ShelfLifeInfo,
     StrategyResult,
@@ -121,8 +122,12 @@ def _storage_overrides(draft: MealPlanDraft, products: dict[int, Product]) -> di
 # ─── Facts ───────────────────────────────────────────────────
 
 def _location(draft: MealPlanDraft) -> tuple[float, float, float | None]:
+    return shopping_point(draft.settings)
+
+
+def shopping_point(s: PlanSettings) -> tuple[float, float, float | None]:
+    """Where a plan shops: its point (or the server's) and its distance limit."""
     cfg = settings()
-    s = draft.settings
     return (cfg.default_lat if s.lat is None else s.lat,
             cfg.default_lon if s.lon is None else s.lon, s.max_km)
 
