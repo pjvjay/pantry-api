@@ -209,6 +209,15 @@ Country = Annotated[str, Field(min_length=1, max_length=100)]
 LineNo = Annotated[str, Field(min_length=1, max_length=4)]
 ProductId = Annotated[int, Field(ge=1, le=MAX_PRODUCT_ID)]
 
+# The meal plan wizard's default origin rules, which the shopper edits in its first stage:
+# products evidenced as from the United States are excluded, and the preference is Canada,
+# then these allies. A preference only orders; it never leaves a product out, since most
+# products have no origin evidence at all.
+DEFAULT_EXCLUDE_ORIGIN = ("United States",)
+DEFAULT_ALLIES = ("United Kingdom", "France", "Germany", "Italy", "Spain", "Netherlands",
+                  "Ireland", "Denmark", "Norway", "Sweden", "Australia", "New Zealand", "Japan",
+                  "South Korea", "Mexico")
+
 
 class PlanSettings(BaseModel):
     """Where the household shops: the stores in range and their prices. Defaults are the

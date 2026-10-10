@@ -47,6 +47,13 @@ def _starter(key: str) -> dict:
     return {"key": f"starter:{key}", "starter": key}
 
 
+def _resolve_starters() -> list[dict]:
+    """Every demo starter, resolved twelve at a time (a request's bound, MAX_RECIPES)."""
+    keys = list(STARTERS)
+    return [r for i in range(0, len(keys), 12)
+            for r in _resolve(*(_starter(k) for k in keys[i:i + 12]))]
+
+
 def test_starters_resolve_through_run_spec_with_no_parse(monkeypatch):
     from pantry_planner import flow
 
@@ -55,7 +62,7 @@ def test_starters_resolve_through_run_spec_with_no_parse(monkeypatch):
     real = flow.run_spec
     monkeypatch.setattr(flow, "run_spec", lambda spec, **kw: calls.append(spec) or real(spec,
                                                                                       **kw))
-    out = _resolve(*(_starter(k) for k in STARTERS))
+    out = _resolve_starters()
     assert len(calls) == len(STARTERS)
     for got, (key, seed) in zip(out, STARTERS.items(), strict=True):
         assert (got["key"], got["status"], got["label"]) == (f"starter:{key}", "ok",
@@ -86,7 +93,7 @@ def test_every_starter_line_buys_a_product_named_for_it_and_says_so_honestly():
     Onions, each labelled 'exact'."""
     from pantry_planner.nlsearch.units import tokens
 
-    out = {r["key"]: r for r in _resolve(*(_starter(k) for k in STARTERS))}
+    out = {r["key"]: r for r in _resolve_starters()}
     picks = {(key, ln["name"]): ln for key, r in out.items() for ln in r["lines"]}
     assert picks["starter:chicken_biryani", "Ginger"]["product_id"] == _by_name("Fresh Ginger")
     assert picks["starter:chicken_biryani", "Cilantro"]["product_id"] == _by_name("Cilantro")
@@ -128,7 +135,7 @@ def test_a_substitute_for_one_line_is_still_the_match_for_another():
 
 
 def test_the_demo_products_let_the_example_resolve_in_stock():
-    out = {r["key"]: r for r in _resolve(*(_starter(k) for k in STARTERS))}
+    out = {r["key"]: r for r in _resolve_starters()}
     bought = {ln["product_id"] for r in out.values() for ln in r["lines"]}
     assert {166, 167, 169} <= bought            # frozen mango, pepperoni, instant yeast
     assert all(not r["not_stocked"] for r in out.values())
