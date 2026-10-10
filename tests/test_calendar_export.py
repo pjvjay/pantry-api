@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -335,3 +336,137 @@ def test_google_links_are_all_day_template_urls_with_a_capped_description():
     escaped = ce.google_template_url("t", D, D, "<script>&", None)
     assert parse_qs(urlsplit(escaped).query)["details"] == ["&lt;script&gt;&amp;"]
     assert "location" not in parse_qs(urlsplit(escaped).query)
+
+
+# ─── Times and reminders ─────────────────────────────────────
+
+GOLDEN = Path(__file__).parent / "fixtures" / "calendar_all_day.ics"
+
+
+def with_reminders() -> ce.ApprovedSchedule:
+    """The module's schedule with a cook's nutrition and two thaw reminders: every kind."""
+    base = schedule(cooks=[cook(nutrition=nutrition(True))]).model_dump(mode="json")
+    return ce.ApprovedSchedule.model_validate({**base, "reminders": [
+        reminder(source={"basis": "cited", "rule_ids": ["fsis-thaw-fridge-small"]}),
+        reminder(item_id="thaw-m1-12", source={"basis": "your_setting",
+                                               "setting": "thaw reminders: the evening before"})]})
+
+
+def test_without_timing_the_ics_is_byte_for_byte_the_all_day_export():
+    """tests/fixtures/calendar_all_day.ics was written from this schedule by the export as it
+    was before timing existed."""
+    events = ce.build_events(with_reminders())
+    assert all(e.all_day and e.reminders_min == [] and e.start_time is None for e in events)
+    assert ce.render_ics(events, now=NOW).encode("utf-8") == GOLDEN.read_bytes()
+    assert ce.build_events(with_reminders(), timing=None) == events
+
+
+TIMING = ce.Timing(timezone="America/Vancouver",
+                   trips=ce.EventTime(start="18:00", minutes=60),
+                   cooks=ce.EventTime(start="17:30", minutes=45),
+                   reminders=ce.Reminders(trips=[1440, 60, 60], cooks=[30], reminders=[120]))
+
+
+def _blocks(text: str) -> dict[str, list[str]]:
+    """Each VEVENT's content lines (its VALARMs among them), by SUMMARY."""
+    out, cur = {}, None
+    for ln in unfold(text):
+        if ln == "BEGIN:VEVENT":
+            cur = []
+        elif ln == "END:VEVENT":
+            out[unescape(next(x for x in cur if x.startswith("SUMMARY:"))[8:])] = cur
+            cur = None
+        elif cur is not None:
+            cur.append(ln)
+    return out
+
+
+def test_timing_times_trips_and_cooks_in_the_zone_and_alarms_every_kind():
+    plain = ce.build_events(with_reminders())
+    events = ce.build_events(with_reminders(), timing=TIMING)
+    assert [e.uid for e in events] == [e.uid for e in plain]
+    by_kind = {e.kind: e for e in events}
+    t, c, th = by_kind["trip"], by_kind["cook"], by_kind["thaw"]
+    assert (t.all_day, t.date, t.end, t.start_time, t.end_time, t.timezone) == (
+        False, D, D, "18:00", "19:00", "America/Vancouver")
+    assert t.reminders_min == [60, 1440]
+    assert (c.all_day, c.start_time, c.end_time, c.reminders_min) == (
+        False, "17:30", "18:15", [30])
+    assert (th.all_day, th.end, th.start_time, th.timezone, th.reminders_min) == (
+        True, th.date + dt.timedelta(days=1), None, None, [120])
+
+    blocks = _blocks(ce.render_ics(events, now=NOW))
+    trip_lines = blocks[t.title]
+    assert "DTSTART;TZID=America/Vancouver:20261031T180000" in trip_lines
+    assert "DTEND;TZID=America/Vancouver:20261031T190000" in trip_lines
+    assert "TRANSP:OPAQUE" in trip_lines
+    assert [x for x in trip_lines if x.startswith("TRIGGER")] == ["TRIGGER:-PT60M",
+                                                                   "TRIGGER:-PT1440M"]
+    assert trip_lines.count("BEGIN:VALARM") == trip_lines.count("END:VALARM") == 2
+    assert trip_lines.count("ACTION:DISPLAY") == 2
+    assert f"DESCRIPTION:{ce.escape_text(t.title)}" in trip_lines
+    assert "DTSTART;TZID=America/Vancouver:20261031T173000" in blocks[c.title]
+    thaw_lines = blocks[th.title]
+    assert f"DTSTART;VALUE=DATE:{th.date:%Y%m%d}" in thaw_lines
+    assert "TRANSP:TRANSPARENT" in thaw_lines and "TRIGGER:-PT120M" in thaw_lines
+
+    q = {k: v[0] for k, v in parse_qs(urlsplit(t.google_url).query).items()}
+    assert (q["dates"], q["ctz"]) == ("20261031T180000/20261031T190000", "America/Vancouver")
+    assert "ctz" not in parse_qs(urlsplit(th.google_url).query)
+
+    p = ce.preview(with_reminders(), events, TIMING)
+    assert p.all_day is False
+    assert p.notes[0] == ("Times are in America/Vancouver: trips at 18:00 for 60 min and cook "
+                          "days at 17:30 for 45 min; every other event is all-day.")
+    assert p.notes[1] == ("Reminders: trips 60, 1440 min before; cook days 30 min before; "
+                          "freeze and thaw reminders 120 min before (an all-day event's start "
+                          "is its midnight).")
+    assert ce.preview(with_reminders(), plain).notes == ce.IMPORT_NOTES
+
+
+def test_reminders_alone_leave_every_event_all_day():
+    timing = ce.Timing(timezone="UTC", reminders=ce.Reminders(cooks=[0, 40320]))
+    events = ce.build_events(with_reminders(), timing=timing)
+    assert all(e.all_day for e in events)
+    assert {e.kind: e.reminders_min for e in events} == {"trip": [], "cook": [0, 40320],
+                                                         "thaw": []}
+    text = ce.render_ics(events, now=NOW)
+    assert "TZID" not in text and "TRIGGER:-PT0M" in text and "TRIGGER:-PT40320M" in text
+    assert ce.preview(with_reminders(), events, timing).notes[0] == (
+        "Every event is all-day, on its plan date in any time zone.")
+
+
+def test_a_timed_event_that_runs_past_midnight_ends_the_next_day():
+    timing = ce.Timing(timezone="Europe/London", trips=ce.EventTime(start="23:30", minutes=90))
+    (t,) = [e for e in ce.build_events(schedule(), timing=timing) if e.kind == "trip"]
+    assert (t.date, t.end, t.end_time) == (D, D + dt.timedelta(days=1), "01:00")
+    text = "".join(unfold(ce.render_ics([t], now=NOW)))
+    assert "DTEND;TZID=Europe/London:20261101T010000" in text
+
+
+@pytest.mark.parametrize("bad", [
+    {"timezone": "Mars/Olympus_Mons"}, {"timezone": "../etc/passwd"}, {"timezone": ""},
+    {"timezone": "UTC", "trips": {"start": "24:00", "minutes": 30}},
+    {"timezone": "UTC", "trips": {"start": "7:00", "minutes": 30}},
+    {"timezone": "UTC", "cooks": {"start": "07:00", "minutes": 0}},
+    {"timezone": "UTC", "cooks": {"start": "07:00", "minutes": 1441}},
+    {"timezone": "UTC", "reminders": {"trips": [10, 20, 30, 40]}},
+    {"timezone": "UTC", "reminders": {"cooks": [40321]}},
+    {"timezone": "UTC", "reminders": {"reminders": [-1]}},
+])
+def test_timing_is_bounded(bad):
+    with pytest.raises(ValidationError):
+        ce.Timing.model_validate(bad)
+
+
+def test_a_server_without_a_time_zone_database_checks_the_names_shape(monkeypatch):
+    import zoneinfo
+
+    def missing(name):
+        raise zoneinfo.ZoneInfoNotFoundError(name)
+
+    assert ce.known_zone("America/Vancouver") and not ce.known_zone("Mars/Olympus_Mons")
+    monkeypatch.setattr(zoneinfo, "ZoneInfo", missing)
+    monkeypatch.setattr(zoneinfo, "available_timezones", lambda: set())
+    assert ce.known_zone("America/Vancouver") and ce.known_zone("Mars/Olympus_Mons")
+    assert not ce.known_zone("../etc/passwd") and not ce.known_zone("Not a zone")

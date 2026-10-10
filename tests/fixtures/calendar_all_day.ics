@@ -1,0 +1,79 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//pantry-planner//Meal plan calendar export 1//EN
+CALSCALE:GREGORIAN
+X-WR-CALNAME:Pantry plan
+BEGIN:VEVENT
+UID:3d7d07452dd2a8527cf4fce829ea1132@pantry-planner
+DTSTAMP:20261008T120000Z
+SEQUENCE:5
+DTSTART;VALUE=DATE:20261030
+DTEND;VALUE=DATE:20261031
+SUMMARY:Thaw: move Chicken Thighs Bone-In to the fridge
+DESCRIPTION:Move Chicken Thighs Bone-In to the fridge to thaw for Jalapeño
+  Poppers on Sat 31 Oct\nSource: U.S. Department of Agriculture\, The Big T
+ haw — Safe Defrosting Methods\, rule fsis-thaw-fridge-small: "Even small
+  amounts of frozen food — such as a pound of ground meat or boneless chi
+ cken breasts — require a full day to thaw." (https://www.fsis.usda.gov/f
+ ood-safety/safe-food-handling-and-preparation/food-safety-basics/big-thaw-
+ safe-defrosting-methods\, page dated 2013-06-15).\nFor your shopping trip 
+ on Sat 31 Oct.
+CATEGORIES:Pantry plan,Reminder
+TRANSP:TRANSPARENT
+STATUS:CONFIRMED
+END:VEVENT
+BEGIN:VEVENT
+UID:6b3e4bd08a439a605ed93ae91c796a08@pantry-planner
+DTSTAMP:20261008T120000Z
+SEQUENCE:5
+DTSTART;VALUE=DATE:20261030
+DTEND;VALUE=DATE:20261031
+SUMMARY:Thaw: move Chicken Thighs Bone-In to the fridge
+DESCRIPTION:Move Chicken Thighs Bone-In to the fridge to thaw for Jalapeño
+  Poppers on Sat 31 Oct\nSource: your setting (thaw reminders: the evening 
+ before).\nFor your shopping trip on Sat 31 Oct.
+CATEGORIES:Pantry plan,Reminder
+TRANSP:TRANSPARENT
+STATUS:CONFIRMED
+END:VEVENT
+BEGIN:VEVENT
+UID:a2639fcec59ba3328624ab213e20580c@pantry-planner
+DTSTAMP:20261008T120000Z
+SEQUENCE:5
+DTSTART;VALUE=DATE:20261031
+DTEND;VALUE=DATE:20261101
+SUMMARY:Groceries: Pantry Mart Downtown\, ValueFoods East Van
+LOCATION:Pantry Mart Downtown (demo store)\; ValueFoods East Van (demo stor
+ e)
+DESCRIPTION:Shopping trip Sat 31 Oct 2026 (fresh)\n\nPantry Mart Downtown\n
+  Dairy\n  - 1 x Crème fraîche 250ml: need 100 ml\; $3.49\n\nTotal $3.49\
+ nPrices and stock are demo data.\n\nStore hours: unknown\, check before yo
+ u go.\nWhy this date: Chicken Biryani on Sun 1 Nov needs Chicken Thighs\, 
+ which keeps 1 to 2 days in the fridge (FoodSafety.gov\, Cold Food Storage 
+ Chart\, fs-poultry-pieces-fridge).\nSource: https://www.foodsafety.gov/x\,
+  page dated 2023-09-19.\nDemo data: Stores\, prices and stock are syntheti
+ c demo data.
+CATEGORIES:Pantry plan,Groceries
+TRANSP:TRANSPARENT
+STATUS:CONFIRMED
+END:VEVENT
+BEGIN:VEVENT
+UID:6883e7bbf0fb9abc397d41ae5f16a7fb@pantry-planner
+DTSTAMP:20261008T120000Z
+SEQUENCE:5
+DTSTART;VALUE=DATE:20261031
+DTEND;VALUE=DATE:20261101
+SUMMARY:Cook: Jalapeño Poppers (dinner)
+DESCRIPTION:Dinner for 2 people (your household setting).\nThe recipe makes
+  4 servings\; for 2\, use 1/2 of each amount.\n\nIngredients\, as the reci
+ pe gives them:\n- 6 Jalapeño peppers\n- 100 g Crème fraîche\n\nNutritio
+ n per serving (demo amounts): ≥ 610 kcal\, 35 g protein\, fat unknown\, 
+ saturated fat unknown\, carbohydrate unknown\, fibre unknown\, sugars unkn
+ own\, sodium unknown.\n5 of 6 ingredients counted.\nRecipe amounts are dem
+ o house amounts\, not from a published recipe.\nReference values for gener
+ ic foods\, raw ingredients summed\; not dietary advice.
+CATEGORIES:Pantry plan,Cooking
+TRANSP:TRANSPARENT
+STATUS:CONFIRMED
+END:VEVENT
+END:VCALENDAR

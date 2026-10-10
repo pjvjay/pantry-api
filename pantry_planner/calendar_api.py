@@ -1,9 +1,11 @@
 """POST /calendar/preview and POST /calendar/ics: an approved meal plan as calendar events.
 
-Both take {schedule: ApprovedSchedule, include?: [trips, cooks, reminders]}, where schedule is
-the approved_schedule that /mealplan/schedule returned, posted back as it came. They are pure:
-no LLM, no write, no outbound call, no credentials. The events come from the one builder in
-calendar_export.py, so the preview shows exactly what the file holds.
+Both take {schedule: ApprovedSchedule, include?: [trips, cooks, reminders], timing?: Timing},
+where schedule is the approved_schedule that /mealplan/schedule returned, posted back as it
+came, and timing the shopper's times and reminders (without it every event is all-day with no
+alarm, as before, byte for byte). They are pure: no LLM, no write, no outbound call, no
+credentials. The events come from the one builder in calendar_export.py, so the preview shows
+exactly what the file holds.
 
 - preview: 200 {calendar_name, all_day, events[], counts, filename, notes}, each event with
   its Google add-event link (built, never fetched);
@@ -31,6 +33,7 @@ from .calendar_export import (
     CalendarExportError,
     CalendarPreview,
     Include,
+    Timing,
     build_events,
     ics_filename,
     preview,
@@ -44,9 +47,12 @@ router = APIRouter(tags=["calendar"])
 
 
 class CalendarRequest(BaseModel):
+    """timing: the trips' and cook days' times and every kind's reminders; None keeps every
+    event all-day with no alarm."""
     schedule: ApprovedSchedule
     include: list[Include] = Field(default_factory=lambda: list(INCLUDE_ALL), min_length=1,
                                    max_length=3)
+    timing: Timing | None = None
 
 
 async def _body_size(request: Request) -> None:
@@ -70,7 +76,8 @@ def _addresses() -> dict[str, str] | None:
 
 def _events(req: CalendarRequest) -> list[CalendarEvent]:
     try:
-        return build_events(req.schedule, include=set(req.include), addresses=_addresses())
+        return build_events(req.schedule, include=set(req.include), addresses=_addresses(),
+                            timing=req.timing)
     except CalendarExportError as e:
         raise HTTPException(status_code=e.status, detail={
             "error": e.code, "detail": e.detail, **e.extra}) from e
@@ -80,23 +87,24 @@ def _events(req: CalendarRequest) -> list[CalendarEvent]:
              dependencies=[Depends(_body_size),
                            Depends(limits.rate_limit("/calendar/preview"))])
 def calendar_preview(req: CalendarRequest) -> CalendarPreview:
-    """The all-day events an export of this approved schedule holds, each with its Google
-    add-event link: trips (the shopping list, store hours unknown, the cited reason, demo
-    stores), freeze and thaw reminders (each with its source) and cook days (ingredients,
-    servings, nutrition with the demo-amounts badge). 409 while a trip needs review or a
-    product on it is no longer stocked."""
+    """The events an export of this approved schedule holds, each with its Google add-event
+    link: trips (the shopping list, store hours unknown, the cited reason, demo stores), freeze
+    and thaw reminders (each with its source) and cook days (ingredients, servings, nutrition
+    with the demo-amounts badge). All-day unless `timing` times the trips and cook days; its
+    reminders are each event's reminders_min. 409 while a trip needs review or a product on
+    it is no longer stocked."""
     events = _events(req)
-    return preview(req.schedule, events)
+    return preview(req.schedule, events, req.timing)
 
 
 @router.post("/calendar/ics", response_class=Response,
              responses={200: {"content": {"text/calendar": {}},
-                              "description": "An RFC 5545 calendar of all-day events."}},
+                              "description": "An RFC 5545 calendar of the events."}},
              dependencies=[Depends(_body_size), Depends(limits.rate_limit("/calendar/ics"))])
 def calendar_ics(req: CalendarRequest) -> Response:
     """The same events as /calendar/preview, as an .ics file to import (RFC 5545: CRLF, lines
-    folded at 75 octets, all-day VALUE=DATE events, stable UIDs, SEQUENCE the plan's
-    revision)."""
+    folded at 75 octets, all-day VALUE=DATE events or, with `timing`, TZID times, one VALARM
+    per reminder, stable UIDs, SEQUENCE the plan's revision)."""
     events = _events(req)
     if not events:
         raise HTTPException(status_code=422, detail={
