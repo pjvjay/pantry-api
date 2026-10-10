@@ -22,8 +22,9 @@ The plan's origin exclusion applies as everywhere else (origins.filter_pool): a 
 evidenced as from an excluded country is not available and is never priced.
 
 An unavailable line says why, as unavailable_kind: origin_excluded (its product, or every
-candidate in range, is evidenced as from an excluded country), out_of_range (sold, but by no
-store in range) or not_stocked (no store sells it). For a line the resolve bought nothing for,
+candidate in range, is evidenced as from an excluded country), stores_off (sold in range only
+at stores the shopper turned off), out_of_range (sold, but by no store in range) or not_stocked
+(no store sells it). For a line the resolve bought nothing for,
 the kind and the reason are the planner's own (catalog.cached_picks: the same retrieval under
 the same rules); a line left without a product for any other reason has no kind.
 """
@@ -51,6 +52,7 @@ from .models import (
 from .needs import USABLE, fmt_qty, meal_servings, recipe_servings
 
 NO_PRODUCT = "no product was chosen for it"
+STORES_OFF = "stores_off"
 _STATUS = {"resolved": "evidenced", "conflicting": "conflicting"}
 
 
@@ -133,6 +135,14 @@ def basket(draft: MealPlanDraft) -> Basket:
         "spec")
     stocked = set(offer)
     missing = sorted(buying.keys() - held.keys() - stocked)
+    # Sold in range only at stores the shopper turned off: those stores, nearest first.
+    only_off: dict[int, list[str]] = {}
+    if missing and s.stores_off:
+        for r in sorted(schedule._offers(missing, lat, lon, max_km),
+                        key=lambda r: (r["dist_km2"], r["store_id"])):
+            names = only_off.setdefault(r["product_id"], [])
+            if r["store_name"] not in names:
+                names.append(r["store_name"])
     nearest = flow._best_offers(schedule._offers(missing, lat, lon, None, s.stores_off),
                                 key=lambda r: (r["dist_km2"], r["price"])) if missing else {}
     # The whole-pack rule, per product: what its packs cost and each line's share of them.
@@ -189,6 +199,9 @@ def basket(draft: MealPlanDraft) -> Basket:
                     line.update(unavailable_kind=catalog.ORIGIN_EXCLUDED, why_unavailable=(
                         f"{products[pid].name} is evidenced as "
                         f"{alternatives._where(country, fld)}, which this plan excludes"))
+                elif pid in only_off:
+                    line.update(unavailable_kind=STORES_OFF, why_unavailable=(
+                        "Sold only at stores you turned off: " + ", ".join(only_off[pid])))
                 elif pid not in stocked:
                     near = nearest.get(pid)
                     line.update(unavailable_kind=(catalog.OUT_OF_RANGE if near

@@ -825,3 +825,29 @@ def test_stores_off_is_bounded(chosen):
     ok = client().post("/mealplan/basket",
                        json={"draft": {**chosen, "settings": {"stores_off": [999]}}})
     assert ok.status_code == 200          # a store id nobody has turns nothing off
+
+
+def test_a_product_sold_in_range_only_at_stores_turned_off_says_so(chosen, reseed):
+    """Canned Tuna sold only at the two stores turned off (and the far one, out of range):
+    the line is stores_off, naming them nearest first, and never priced."""
+    _sql("DELETE FROM store_products WHERE product_id = :p AND store_id NOT IN (1, 3, 4)",
+         p=TUNA)
+    rules = {"stores_off": OFF, "max_km": 5}
+    body = bask({**chosen, "settings": rules})
+    (line,) = [ln for r in body["recipes"] for ln in r["lines"] if ln["product"]["id"] == TUNA]
+    assert (line["available"], line["price"], line["store"], line["cost_for_need"]) == (
+        False, None, None, None)
+    assert line["unavailable_kind"] == "stores_off"
+    assert line["why_unavailable"] == ("Sold only at stores you turned off: "
+                                       "Pantry Mart Downtown, ValueFoods East Van")
+    assert body["unavailable_count"] == 1
+    # with one of them back on, it is bought there
+    back = bask({**chosen, "settings": {"stores_off": [1], "max_km": 5}})
+    (line,) = [ln for r in back["recipes"] for ln in r["lines"] if ln["product"]["id"] == TUNA]
+    assert line["available"] and line["store"]["name"] == "ValueFoods East Van"
+    # with none in range at all it is out of range, the nearest offer named among stores on
+    _sql("DELETE FROM store_products WHERE product_id = :p AND store_id <> 4", p=TUNA)
+    (line,) = [ln for r in bask({**chosen, "settings": rules})["recipes"] for ln in r["lines"]
+               if ln["product"]["id"] == TUNA]
+    assert line["unavailable_kind"] == "out_of_range"
+    assert "MegaSave Richmond" in line["why_unavailable"]

@@ -258,7 +258,8 @@ preferred_rank}`: `claim` in plain words ("From Thailand", "Made in Canada, ingr
 be imported", "Origin unclear: sources disagree", "Origin unknown"), and `preferred_rank` the
 place (1 first) of the preference entry it matches. An excluded product is not available and never
 priced; a product no store in range sells names the nearest offer. `unavailable_kind` is
-`origin_excluded`, `out_of_range` or `not_stocked` (null when available); for a line the
+`origin_excluded`, `stores_off` ("Sold only at stores you turned off: ..."), `out_of_range` or
+`not_stocked` (null when available); for a line the
 resolve bought nothing for, the kind and the reason are the planner's ("its only candidate
 is evidenced as coming from United States, which this plan excludes").
 

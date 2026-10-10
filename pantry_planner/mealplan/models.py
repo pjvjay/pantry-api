@@ -607,9 +607,10 @@ class BasketLine(BaseModel):
     recipe's amount for all its meals; price is one pack at the store; cost_for_need is this
     recipe's share of what the whole packs of that product cost: by need for the lines whose
     need is known, one pack for a line whose need is not (None when unavailable). shared_with
-    names the other recipes buying the same product. unavailable_kind says
-    why an unavailable line is: origin_excluded, out_of_range or not_stocked (None when it is
-    available, or no product was chosen for another reason)."""
+    names the other recipes buying the same product. unavailable_kind says why an unavailable
+    line is: origin_excluded, stores_off (sold in range only at stores the shopper turned
+    off), out_of_range or not_stocked (None when it is available, or no product was chosen
+    for another reason)."""
     line_no: int
     ingredient: str
     need: str
@@ -621,7 +622,8 @@ class BasketLine(BaseModel):
     pinned: bool
     shared_with: list[str]
     available: bool
-    unavailable_kind: Literal["origin_excluded", "not_stocked", "out_of_range"] | None
+    unavailable_kind: Literal["origin_excluded", "stores_off", "not_stocked",
+                              "out_of_range"] | None
     why_unavailable: str | None
 
 
