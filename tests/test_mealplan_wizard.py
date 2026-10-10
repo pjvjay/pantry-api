@@ -213,6 +213,19 @@ def test_an_estimate_is_each_lines_share_of_its_cheapest_pack_price(household):
         assert r["est_cost_per_meal"] == pytest.approx(total, abs=0.006), key
 
 
+def test_a_product_of_unknown_need_is_one_pack_in_all():
+    """Salt "to taste" in three recipes is one bag, not three; a known need still rounds up,
+    and a line of unknown need beside it adds no pack of its own."""
+    from pantry_planner.mealplan.catalog import whole_packs
+
+    assert whole_packs([None, None, None], 1000) == 1
+    assert whole_packs([5.0, None], None) == 1
+    assert whole_packs([600.0, 500.0], 500) == 3
+    assert whole_packs([600.0, None], 500) == 2
+    assert whole_packs([100.0, None], 500) == 1
+    assert whole_packs([0.0], 500) == 0
+
+
 def test_each_recipe_lists_its_lines_for_costing_whole_packs():
     from pantry_planner.nlsearch.units import is_non_purchase, normalize_quantity
 
@@ -491,8 +504,9 @@ def test_the_basket_buys_whole_packs_at_the_cheapest_offer_in_range(chosen):
 
 def _whole_pack_cost(lines: list[tuple[int, dict]]) -> float:
     """The console's rule over catalog lines, (meals, line) each: per product the total need
-    over the pack size rounded up, one pack per line whose need or pack size is unknown, at
-    the line's pack price; a line with no pack price is not bought."""
+    over the pack size rounded up, and at least one pack (one in all) when a line's need or
+    the pack size is unknown, at the line's pack price; a line with no pack price is not
+    bought."""
     by_product: dict[int, list[tuple[int, dict]]] = {}
     for meals, ln in lines:
         if ln["pack_price"] is not None:
@@ -502,7 +516,8 @@ def _whole_pack_cost(lines: list[tuple[int, dict]]) -> float:
         qty, price = got[0][1]["pack_qty"], got[0][1]["pack_price"]
         known = [m * ln["need_per_meal"] for m, ln in got
                  if ln["need_per_meal"] is not None and qty]
-        packs = (math.ceil(sum(known) / qty - 1e-9) if known else 0) + len(got) - len(known)
+        packs = math.ceil(sum(known) / qty - 1e-9) if known else 0
+        packs = max(packs, 1) if len(known) < len(got) else packs
         total += round(price * packs, 2)
     return round(total, 2)
 

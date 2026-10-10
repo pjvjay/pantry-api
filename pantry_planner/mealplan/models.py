@@ -628,8 +628,8 @@ class Basket(BaseModel):
     """POST /mealplan/basket: every chosen recipe's ingredients, each with its product, store,
     price and origin. est_total is what the whole packs cost, each product bought once for
     every meal at its cheapest store in range, by the catalog's rule (catalog.whole_packs):
-    the summed need over the pack size rounded up, and one pack for each line whose need or
-    pack size is unknown. Trips that buy a product on two dates can cost more."""
+    the summed need over the pack size rounded up, and at least one pack (one in all) when a
+    line's need or the pack size is unknown. Trips that buy a product on two dates can cost more."""
     v: Literal[1] = 1
     rev: int
     recipes: list[BasketRecipe]

@@ -219,8 +219,8 @@ selector; live, the resolve's model may pick another product later.
 - `lines` are `{ingredient, product_id, pack_price, pack_qty, pack_uom, need_per_meal,
   held_back}`, `need_per_meal` in the pack's unit for one meal for the household. The console
   costs any selection from them by **whole packs**: per product, the total need (meals ×
-  `need_per_meal`) over `pack_qty` rounded up, plus one pack for each line whose need or pack
-  size is unknown, at `pack_price`; a line with no `pack_price` is not bought.
+  `need_per_meal`) over `pack_qty` rounded up, and at least one pack (one in all, however many
+  lines share it) when a line's need or the pack size is unknown, at `pack_price`; a line with no `pack_price` is not bought.
   `/mealplan/basket`'s `est_total` counts the same way (`catalog.whole_packs`), so stage 2's
   budget bar and stage 3's total agree.
 - An ingredient no store in range sells, or that the origin exclusion empties, is in

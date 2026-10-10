@@ -10,12 +10,13 @@ when it has a meal (place.expand: its wanted count and the meals already on the 
 
 Every product is bought once for every meal of every recipe that uses it, at its cheapest
 offer in range (the price matrix the trips read; the catalog's pack_price), by the catalog's
-whole-pack rule (catalog.whole_packs): the summed need over the pack size rounded up, and one
-pack for each line whose need or pack size is unknown. So the console's whole-pack cost of a
-selection in the Meals stage is this est_total. price is one pack; a line's cost_for_need is
-its recipe's share of what the product's packs cost (by need, or the one pack a line of
-unknown need counts), so the lines add up to est_total. The trips buy on several dates and
-can buy more packs; the Shop stage has their figures.
+whole-pack rule (catalog.whole_packs): the summed need over the pack size rounded up, and at
+least one pack (one in all) when a line's need or the pack size is unknown. So the console's
+whole-pack cost of a selection in the Meals stage is this est_total. price is one pack; a
+line's cost_for_need is its recipe's share of what the product's packs cost: by need, or
+split evenly when no line's need is known; a line of unknown need beside known ones has none
+(the packs the others buy cover it). The lines add up to est_total. The trips buy on several
+dates and can buy more packs; the Shop stage has their figures.
 
 The plan's origin exclusion applies as everywhere else (origins.filter_pool): a product
 evidenced as from an excluded country is not available and is never priced.
@@ -140,13 +141,13 @@ def basket(draft: MealPlanDraft) -> Basket:
         p, price = products[pid], offer[pid]["price"]
         known = {c: float(need[c][0]) for c in buying[pid]
                  if need[c] is not None and need[c][1] == p.unit_uom} if p.unit_qty else {}
-        packs, single = catalog.whole_packs([known.get(c) for c in buying[pid]], p.unit_qty)
-        cost[pid] = round(price * (packs + single), 2) + 0.0
+        packs = catalog.whole_packs([known.get(c) for c in buying[pid]], p.unit_qty)
+        cost[pid] = round(price * packs, 2) + 0.0
         total = sum(known.values())
         for c in buying[pid]:
-            if c not in known:
-                share[c] = round(price, 2) + 0.0          # its one pack
-            else:
+            if not known:                                 # the one pack, split evenly
+                share[c] = round(price * packs / len(buying[pid]), 2) + 0.0
+            elif c in known:
                 share[c] = round(price * packs * known[c] / total, 2) + 0.0 if total else 0.0
 
     recipes: list[BasketRecipe] = []
@@ -196,7 +197,7 @@ def basket(draft: MealPlanDraft) -> Basket:
                     o = offer[pid]
                     line.update(available=True, price=o["price"],
                                 store=BasketStore(name=o["store"], distance_km=o["dist_km"]),
-                                cost_for_need=share[key, ln.line_no])
+                                cost_for_need=share.get((key, ln.line_no)))
             unavailable += not line["available"]
             lines.append(BasketLine(**line))
         recipes.append(BasketRecipe(key=key, title=doc.title,

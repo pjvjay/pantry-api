@@ -17,7 +17,9 @@ lines_priced says how many were. That share is less than a shopper pays, since p
 bought whole, so each recipe also lists its lines (product, pack price, pack size and the need
 per meal in the pack's unit) for the console to cost any selection by whole packs, the rule
 /mealplan/basket buys by (whole_packs): per product, the summed need over the pack size
-rounded up, and one pack for each line whose need or pack size is unknown.
+rounded up, and
+at least one pack when a line's need or the pack size is unknown (one in all, however many
+lines share the product).
 
 An ingredient no store sells, that no store in range sells, or whose every candidate the
 origin exclusion holds back is named in `unavailable` and is never priced: an excluded product
@@ -70,18 +72,19 @@ def est_basis(servings: int) -> str:
     return (f"est_cost_per_meal is one meal for {people}, each ingredient's share of its pack "
             "price at the cheapest store in range (what the recipe uses over the pack size), "
             "while a selection costs whole packs, as the basket's est_total counts them: per "
-            "product the total need over the pack size rounded up, and one pack for each line "
-            "whose need or pack size is unknown, at the line's pack_price.")
+            "product the total need over the pack size rounded up, and at least one pack when "
+            "a line's need or the pack size is unknown (one in all, however many lines share "
+            "it), at the line's pack_price.")
 
 
-def whole_packs(needs: list[float | None], pack_qty: float | None) -> tuple[int, int]:
-    """The wizard's whole-pack rule for one product bought for several lines: (the packs for
-    the lines whose need is known in its pack's unit, their summed need over the pack size
-    rounded up; the packs for the other lines, one each). A product with no pack size counts
-    one pack per line."""
+def whole_packs(needs: list[float | None], pack_qty: float | None) -> int:
+    """The wizard's whole-pack rule for one product bought for several lines: the summed need
+    of the lines whose need is known in its pack's unit, over the pack size, rounded up; and at
+    least one pack when a line's need, or the pack size, is unknown. That pack is one in all:
+    salt "to taste" in three recipes is one bag of salt, not three."""
     known = [n for n in needs if n is not None] if pack_qty else []
     packs = max(0, math.ceil(sum(known) / pack_qty - 1e-9)) if known else 0
-    return packs, len(needs) - len(known)
+    return max(packs, 1) if len(known) < len(needs) else packs
 
 
 # Why a line has no product: no store sells it, no store in range does, or the plan's origin
