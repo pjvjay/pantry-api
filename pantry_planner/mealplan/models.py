@@ -492,11 +492,16 @@ class TripLineOptions(BaseModel):
     trips (as the Shop band sums them) and its change, trip.stores the stops of the trip
     that buys it for these meals, trip.buys_at the store and pack price there; packs and
     cost_for_need are what that trip line then buys and charges. stocked is False when no
-    store in range sells the line's product any more (it is then not among the rows)."""
+    store in range sells the line's product any more (it is then not among the rows).
+
+    trip_date None: no trip is planned yet (the wizard's Ingredients stage). The ranking is
+    for every line of the plan that buys the product, each row's trip is None, its packs are
+    what those meals need and cost_for_need those packs at its cheapest offer in range;
+    plan_total is None. `lines` still names every covered line, so choosing pins them all."""
     v: Literal[1] = 1
     rev: int
     strategy: Strategy
-    trip_date: dt.date
+    trip_date: dt.date | None
     product_id: int
     product: str
     stocked: bool

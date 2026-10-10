@@ -809,10 +809,11 @@ def mealplan_schedule(draft: MealPlanDraft) -> MealSchedule:
 
 class TripLineOptionsRequest(BaseModel):
     """One trip line: the product bought on `trip_date` under `strategy` (the draft's own
-    when omitted), in the plan as `draft` holds it."""
+    when omitted), in the plan as `draft` holds it. With no trip_date: every line of the
+    plan that buys the product, before any trip is planned."""
 
     draft: MealPlanDraft
-    trip_date: dt.date
+    trip_date: dt.date | None = None
     product_id: int = Field(ge=1, le=2**31 - 1)
     strategy: Literal["fresh", "fewest_trips"] | None = None
     limit: int = Field(default=12, ge=1, le=25)
@@ -828,9 +829,10 @@ async def _options_size(request: Request) -> None:
 def mealplan_alternatives(req: TripLineOptionsRequest) -> TripLineOptions:
     """Options for one trip line: the chat cart's ranking (alternatives.rank_alternatives)
     for every recipe line the purchase covers, under the plan's shopping point and origin
-    rules, each row's trip the plan re-scheduled with that product pinned (no LLM). The
-    console pins the chosen product on `lines`. 422 as /mealplan/schedule; 409 no_trip_line
-    when that trip buys no such product any more."""
+    rules, each row's trip the plan re-scheduled with that product pinned (no LLM). With no
+    trip_date the purchase is every line of the plan buying the product and no row has a
+    trip (plan_total null). The console pins the chosen product on `lines`. 422 as
+    /mealplan/schedule; 409 no_trip_line when nothing buys such a product any more."""
     from . import alternatives as alts
     from .mealplan.models import MealPlanError
     from .mealplan.options import NoTripLineError, options_error, trip_line_options

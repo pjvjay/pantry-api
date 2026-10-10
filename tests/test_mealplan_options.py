@@ -76,6 +76,13 @@ def _sql(stmt: str, **params) -> None:
         s.commit()
 
 
+def _sql_rows(stmt: str, **params) -> list[dict]:
+    from pantry_planner import db
+
+    with Session(db.engine()) as s:
+        return [dict(r) for r in s.execute(text(stmt), params).mappings()]
+
+
 def options(draft: dict, date: str, product_id: int, **extra) -> dict:
     r = client().post("/mealplan/alternatives",
                       json={"draft": draft, "trip_date": date, "product_id": product_id,
@@ -382,6 +389,67 @@ def test_the_meal_basis_is_the_plan_basis_resolve_used(example):
         assert got == want, key
         assert (mine.path, mine.constraints) == (plan.basis.path, plan.basis.constraints)
         assert (mine.exclude_origin, mine.preference) == ([], [])
+
+
+# ─── With no trip date (the wizard's Ingredients stage) ─────
+
+def _no_trip(draft: dict, product_id: int, **extra) -> dict:
+    r = client().post("/mealplan/alternatives",
+                      json={"draft": draft, "product_id": product_id, **extra})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_without_a_trip_date_every_line_buying_the_product_is_ranked_with_no_trip(example):
+    """The purchase is every line of the plan that buys the product, for all its recipe's
+    meals (the basket's lines): Salt for the pizza's three meals and the biryani's three. No
+    row has a trip; its packs are what those meals need and its cost those packs at its
+    cheapest offer in range."""
+    import math
+
+    from tests.mealplan_fixtures import EXAMPLE, STARTERS
+
+    opts = _no_trip(example, SALT)
+    assert (opts["trip_date"], opts["plan_total"], opts["product"]) == (
+        None, None, PRODUCTS[SALT]["name"])
+    assert {(c["recipe_key"], c["ingredient"]) for c in opts["lines"]} == {
+        (BIRYANI, "Salt"), (PIZZA, "Salt")}
+    basket = client().post("/mealplan/basket", json={"draft": example}).json()
+    assert {(r["key"], ln["line_no"]) for r in basket["recipes"] for ln in r["lines"]
+            if ln["product"]["id"] == SALT} == {(c["recipe_key"], c["line_no"])
+                                                 for c in opts["lines"]}
+    grams = sum(ln["quantity"] * EXAMPLE[key] * 2 / STARTERS[key]["servings"]
+                for key in ("pepperoni_pizza", "chicken_biryani")
+                for ln in STARTERS[key]["lines"] if ln["name"] == "Salt")
+    assert opts["ranking"]["need"] == f"{grams:g} g"
+    items = opts["ranking"]["items"]
+    assert items and all(it["trip"] is None for it in items)
+    for it in items:
+        p = PRODUCTS[it["product_id"]]
+        if p["unit_uom"] != "g":
+            continue
+        packs = math.ceil(grams / p["unit_qty"])
+        (cheapest,) = _sql_rows("SELECT MIN(price) AS p FROM store_products "
+                                "WHERE product_id = :p", p=it["product_id"])
+        assert it["packs"] == packs
+        assert _cents(it["cost_for_need"]) == _cents(cheapest["p"] * packs)
+        trip_reason = next(r for r in it["reasons"] if r["code"] == "trip")
+        assert trip_reason["text"].startswith("No trip is planned yet")
+    # choosing one pins every covered line, and the basket then buys it for both
+    other = next(it for it in items if not it["current"])
+    after = client().post("/mealplan/basket", json={
+        "draft": pinned(example, opts, other["product_id"])}).json()
+    assert {ln["product"]["id"] for r in after["recipes"] for ln in r["lines"]
+            if ln["ingredient"] == "Salt"} == {other["product_id"]}
+    # the same draft gives the same answer
+    assert _no_trip(example, SALT)["ranking"] == opts["ranking"]
+
+
+def test_without_a_trip_date_a_product_nothing_buys_is_a_409(example):
+    bought = {ln["product_id"] for r in example["resolved"].values() for ln in r["lines"]}
+    absent = next(pid for pid in sorted(PRODUCTS) if pid not in bought)
+    r = client().post("/mealplan/alternatives", json={"draft": example, "product_id": absent})
+    assert r.status_code == 409 and r.json()["detail"]["error"] == "no_trip_line"
 
 
 # ─── The route ───────────────────────────────────────────────
