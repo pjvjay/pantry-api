@@ -100,8 +100,8 @@ def by_key(body: dict) -> dict[str, dict]:
 
 
 def _meta() -> dict[str, dict]:
-    out = {s["doc_key"]: {**{k: s[k] for k in ("slot", "diets", "contains", "title",
-                                                 "servings")},
+    out = {s["doc_key"]: {**{k: s[k] for k in ("slot", "diets", "contains", "image_wiki",
+                                                 "title", "servings")},
                           "ref": {"key": s["doc_key"], "starter": s["key"]}}
            for s in SEED["starters"]}
     for slug, m in SEED["library_meta"].items():
@@ -145,6 +145,7 @@ def test_the_catalog_offers_the_library_and_every_starter_in_its_slot():
         r = got[key]
         assert (r["slot"], r["diets"], r["contains"], r["title"], r["servings"]) == (
             m["slot"], m["diets"], m["contains"], m["title"], m["servings"]), key
+        assert r["image"] == {"kind": "wiki", "title": m["image_wiki"]}, key
         assert {k: v for k, v in r["ref"].items() if v is not None} == m["ref"]
     assert [SLOTS.index(r["slot"]) for r in body["recipes"]] == sorted(
         SLOTS.index(r["slot"]) for r in body["recipes"])
@@ -377,6 +378,35 @@ def test_the_shoppers_own_recipes_are_classified_from_their_products():
     assert (plain["my:stew"]["fits"], plain["my:stew"]["why_not"]) == (True, None)
 
 
+PAGE_IMAGE = "https://blog.example/img/tofu-bowl.jpg"
+
+
+def _from_the_web(recipe: dict, image_url: str | None = PAGE_IMAGE) -> dict:
+    """The recipe as if imported from a page whose preview image is image_url."""
+    return {**recipe, "doc": {**recipe["doc"], "source": {
+        "kind": "web", "method": "jsonld", "url": "https://blog.example/tofu-bowl",
+        "site": "blog.example", "image_url": image_url}}}
+
+
+def test_a_shoppers_recipe_shows_its_pages_preview_image_and_a_pasted_one_none():
+    """A recipe names its picture, never holds one: a seed's Wikipedia article, the link to the
+    preview image of the page a shopper's recipe came from, or nothing."""
+    lines = [("Jasmine Rice", 150, "g")]
+    web = _from_the_web(_doc("my:web", "Tofu Rice Bowl", lines))
+    untitled = _from_the_web(_doc("my:untitled", "Rice", lines), None)
+    pasted = _doc("my:pasted", "Plain Rice", lines)
+    got = by_key(cat(recipes=[web, untitled, pasted]))
+    assert got["my:web"]["image"] == {"kind": "url", "url": PAGE_IMAGE}
+    assert got["my:untitled"]["image"] is None and got["my:pasted"]["image"] is None
+    assert got[TUNA_MELT]["image"] == {"kind": "wiki", "title": "Melt sandwich"}
+    assert got["lib:pbj_sandwich"]["image"] == {"kind": "wiki",
+                                                "title": "Peanut butter and jelly sandwich"}
+    for bad in ("/img/tofu-bowl.jpg", "javascript:alert(1)", "data:image/png;base64,AAAA",
+                "https://blog.example/" + "x" * 2000):
+        r = client().post("/mealplan/catalog", json={"recipes": [_from_the_web(web, bad)]})
+        assert r.status_code == 422, bad
+
+
 def test_the_catalog_is_bounded():
     for bad in ({"diet": "keto"}, {"avoid": ["meat"]}, {"household_servings": 0},
                 {"household_servings": 21}, {"slots": []}, {"slots": ["brunch"]},
@@ -491,6 +521,18 @@ def test_the_basket_lists_each_chosen_recipes_lines_with_the_drafts_products(cho
     # Salt is one purchase for the pizza and the biryani; each names the other.
     salt = {k: ln for k, r in got.items() for ln in r["lines"] if ln["product"]["id"] == SALT}
     assert salt[PIZZA]["shared_with"] == [BIRYANI] and salt[BIRYANI]["shared_with"] == [PIZZA]
+
+
+def test_the_baskets_recipes_name_their_pictures_as_the_catalog_does(chosen):
+    got = {r["key"]: r["image"] for r in bask(chosen)["recipes"]}
+    assert got == {f"starter:{k}": {"kind": "wiki", "title": STARTERS[k]["image_wiki"]}
+                   for k in COUNTS}
+    web, pasted = (doc_recipe(k, "Rice Bowl", 2, [("Basmati Rice", 200, "g", 8)], wanted=1)
+                   for k in ("my:web", "my:pasted"))
+    web[0]["ref"] = _from_the_web(web[0]["ref"])
+    got = {r["key"]: r["image"]
+           for r in bask(doc_draft({"my:web": web, "my:pasted": pasted}))["recipes"]}
+    assert got == {"my:web": {"kind": "url", "url": PAGE_IMAGE}, "my:pasted": None}
 
 
 def _cheapest_offer(pid: int, max_km: float | None = None) -> dict:

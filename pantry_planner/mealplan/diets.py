@@ -108,14 +108,15 @@ def fits(contains: list[str], diet: str, avoid: list[str]) -> tuple[bool, str | 
 
 
 def seed_meta(ref: RecipeRef) -> dict | None:
-    """{slot, diets, contains} of a demo starter or library recipe, from the starters file;
-    None for a recipe the file does not describe (the shopper's own)."""
+    """{slot, diets, contains, image_wiki} of a demo starter or library recipe, from the
+    starters file; None for a recipe the file does not describe (the shopper's own)."""
     from .resolve import starters_file
 
     data = starters_file()
     if ref.starter is not None:
         s = next((s for s in data["starters"] if s["key"] == ref.starter), None)
-        return None if s is None else {k: s[k] for k in ("slot", "diets", "contains")}
+        return None if s is None else {k: s[k] for k in ("slot", "diets", "contains",
+                                                         "image_wiki")}
     if ref.slug is not None:
         return data["library_meta"].get(ref.slug)
     return None

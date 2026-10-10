@@ -21,6 +21,8 @@ dates and can buy more packs; the Shop stage has their figures.
 The plan's origin exclusion applies as everywhere else (origins.filter_pool): a product
 evidenced as from an excluded country is not available and is never priced.
 
+Each recipe names its picture as the catalog does (catalog.image).
+
 An unavailable line says why, as unavailable_kind: origin_excluded (its product, or every
 candidate in range, is evidenced as from an excluded country), stores_off (sold in range only
 at stores the shopper turned off), out_of_range (sold, but by no store in range) or not_stocked
@@ -246,6 +248,7 @@ def basket(draft: MealPlanDraft) -> Basket:
             unavailable += not line["available"]
             lines.append(BasketLine(**line))
         recipes.append(BasketRecipe(key=key, title=doc.title,
+                                    image=catalog.image(draft.recipes[key].ref, doc),
                                     status=resolved.status if resolved else "unresolved",
                                     meals=count[key], lines=lines))
     return Basket(rev=draft.rev, recipes=recipes, unavailable_count=unavailable,

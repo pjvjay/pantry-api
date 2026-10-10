@@ -524,6 +524,25 @@ class TripLineOptions(BaseModel):
 
 # ─── The wizard's catalog and basket ─────────────────────────
 
+class WikiImage(BaseModel):
+    """A demo starter's or library recipe's picture: the lead image of this English Wikipedia
+    article (the starters file's image_wiki), which the console shows through the demo hub
+    (GET /hub/images/wiki?title=), credited to Wikipedia."""
+    kind: Literal["wiki"] = "wiki"
+    title: str
+
+
+class UrlImage(BaseModel):
+    """A shopper's own recipe's picture: the link to the preview image of the page it was
+    imported from (its doc's source.image_url), which the console shows through the hub's
+    guarded image proxy, credited to the site."""
+    kind: Literal["url"] = "url"
+    url: str
+
+
+RecipeImage = Annotated[WikiImage | UrlImage, Field(discriminator="kind")]
+
+
 class CatalogLine(BaseModel):
     """One line a recipe buys, for costing a selection by whole packs: the product the
     resolve picks in demo mode, one pack's price at its cheapest store in range (None when no
@@ -546,10 +565,11 @@ class CatalogRecipe(BaseModel):
     household, each priced line's share of its pack price; None when no line is priced.
     unavailable names the ingredients with no offer in range; held_back those of them the
     plan's origin exclusion left out (every candidate in range is evidenced as from an excluded
-    country)."""
+    country). image is its picture (catalog.image), None when it has none."""
     key: str
     ref: RecipeRef
     title: str
+    image: RecipeImage | None
     slot: Slot
     diets: list[str]
     contains: list[str]
@@ -629,9 +649,10 @@ class BasketLine(BaseModel):
 
 class BasketRecipe(BaseModel):
     """status is the resolve's (ok, needs_servings, ...) or unresolved; a recipe that buys
-    nothing yet lists no lines."""
+    nothing yet lists no lines. image is its picture, as the catalog gives it."""
     key: str
     title: str
+    image: RecipeImage | None
     status: str
     meals: int
     lines: list[BasketLine]

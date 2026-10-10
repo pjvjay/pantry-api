@@ -224,8 +224,8 @@ as `no_reference`.
 **`POST /mealplan/catalog`** takes `{household_servings, diet, avoid, settings, slots?,
 recipes?, pins?}` (`recipes`: the shopper's own refs, at most 24; `pins`: the plan's, as the
 draft holds them, so a pinned line is costed at the shopper's product) and answers `{v, recipes[],
-est_basis, latency_ms}`, each recipe `{key, ref, title, slot, diets, contains, servings,
-fits, why_not, est_cost_per_meal, lines_total, lines_priced, unavailable, held_back,
+est_basis, latency_ms}`, each recipe `{key, ref, title, image, slot, diets, contains,
+servings, fits, why_not, est_cost_per_meal, lines_total, lines_priced, unavailable, held_back,
 lines[]}`, ordered by slot then title (`mealplan/catalog.py`). Each line's product is the
 one resolve picks in demo mode: the resolve's own retrieval and origin filter, then the demo
 selector; live, the resolve's model may pick another product later.
@@ -253,17 +253,31 @@ selector; live, the resolve's model may pick another product later.
 The picks are cached in process per recipe and shopping point, so a diet or household change
 answers from the cache.
 
+**Pictures.** A catalog or basket recipe names its picture as `image`, and never holds one:
+
+- `{"kind": "wiki", "title"}` for a demo starter or library recipe: its `image_wiki` in the
+  starters file (`library_meta` for the library), the English Wikipedia article whose lead
+  image shows the dish or the closest one ("Congee", "Biryani", "Melt sandwich" for the Tuna
+  Melt, "Pa amb tomàquet" for the Tomato Garlic Toast). The console shows that image through
+  the demo hub (`GET /hub/images/wiki?title=`), credited to Wikipedia and linked back. Each
+  title was checked by hand to be an article with a lead image; the tests never call Wikipedia.
+- `{"kind": "url", "url"}` for a shopper's own recipe whose doc has `source.image_url`: the
+  link to the preview image of the page it was imported from (its schema.org Recipe image or
+  `og:image`, a video's thumbnail; an absolute http(s) URL of at most 2,000 characters), shown
+  through the hub's guarded `GET /hub/images/remote?url=`, credited to the site.
+- `null` otherwise (a pasted recipe, a page with no preview image).
+
 **`POST /mealplan/basket`** takes `{draft}` and answers `{v, rev, recipes[],
 unavailable_count, est_total, budget, latency_ms}` for every recipe with a meal
-(`mealplan/basket.py`): `{key, title, status, meals, lines[]}`, each line `{line_no,
-ingredient, need, product, store, price, cost_for_need, origin, pinned, shared_with,
-available, unavailable_kind, why_unavailable}`. Products are the draft's (resolved, then
-pinned, checked as the schedule checks them); a recipe not resolved yet lists no lines. Each
-product is bought once for every meal at its cheapest offer in range (`store`, and `price`
-one pack there: the catalog's `pack_price`), by the whole-pack rule above; each line's
-`cost_for_need` is its share of the packs by need (one pack for a line of unknown need), so
-the lines add up to `est_total`. Trips that buy on several dates can buy more; stage 5 shows
-theirs. `origin` is `{country, claim, status: evidenced | conflicting | unknown,
+(`mealplan/basket.py`): `{key, title, image, status, meals, lines[]}` (`image` as the
+catalog's), each line `{line_no, ingredient, need, product, store, price, cost_for_need,
+origin, pinned, shared_with, available, unavailable_kind, why_unavailable}`. Products are the
+draft's (resolved, then pinned, checked as the schedule checks them); a recipe not resolved yet
+lists no lines. Each product is bought once for every meal at its cheapest offer in range
+(`store`, and `price` one pack there: the catalog's `pack_price`), by the whole-pack rule
+above; each line's `cost_for_need` is its share of the packs by need (one pack for a line of
+unknown need), so the lines add up to `est_total`. Trips that buy on several dates can buy
+more; stage 5 shows theirs. `origin` is `{country, claim, status: evidenced | conflicting | unknown,
 preferred_rank}`: `claim` in plain words ("From Thailand", "Made in Canada, ingredients may
 be imported", "Origin unclear: sources disagree", "Origin unknown"), and `preferred_rank` the
 place (1 first) of the preference entry it matches. An excluded product is not available and never

@@ -29,6 +29,11 @@ A recipe fits when it satisfies the diet and contains nothing the shopper avoids
 The starters and the library carry their diets in the starters file; the shopper's own recipes
 are classified from their picks when every line they buy has one, and are unknown otherwise:
 diets and contains empty, and fits only when there is no diet and nothing to avoid.
+
+Each recipe names its picture (image): a starter's or library recipe's Wikipedia article (the
+starters file's image_wiki), or the link to the preview image of the page a shopper's own
+recipe was imported from. Only a title or a link: the console fetches the picture through the
+demo hub, and nothing here calls the network.
 """
 from __future__ import annotations
 
@@ -59,6 +64,8 @@ from .models import (
     PlanSettings,
     RecipeRef,
     Slot,
+    UrlImage,
+    WikiImage,
 )
 from .resolve import recipe_doc, starters_file
 
@@ -194,6 +201,17 @@ def cached_picks(ref: RecipeRef, doc: RecipeDoc, s: PlanSettings) -> Picks:
     return out
 
 
+def image(ref: RecipeRef, doc: RecipeDoc) -> WikiImage | UrlImage | None:
+    """A recipe's picture: a demo starter's or library recipe's Wikipedia article, the
+    preview image link of the page a shopper's own recipe came from, or None."""
+    meta = diets.seed_meta(ref)
+    if meta is not None:
+        return WikiImage(title=meta["image_wiki"])
+    if doc.source.image_url:
+        return UrlImage(url=doc.source.image_url)
+    return None
+
+
 def _recipes(own: list[RecipeRef]) -> list[RecipeRef]:
     """The library, the demo starters, then the shopper's own (a key twice is one recipe)."""
     out = [RecipeRef(key=f"lib:{r.slug}", slug=r.slug) for r in db.load_all_recipes()]
@@ -311,8 +329,8 @@ def catalog(*, household_servings: int, diet: Diet, avoid: list[Avoid], settings
             fits = diet == "any" and not avoid
             why_not = None if fits else NOT_KNOWN
         out.append(CatalogRecipe(
-            key=ref.key, ref=ref, title=doc.title, slot=slot_of[ref.key], diets=dts,
-            contains=contains, servings=doc.servings, fits=fits, why_not=why_not,
+            key=ref.key, ref=ref, title=doc.title, image=image(ref, doc), slot=slot_of[ref.key],
+            diets=dts, contains=contains, servings=doc.servings, fits=fits, why_not=why_not,
             est_cost_per_meal=round(sum(shares), 2) + 0.0 if shares else None,
             lines_total=len(bought), lines_priced=len(shares), unavailable=unavailable,
             held_back=held_back, lines=lines))
