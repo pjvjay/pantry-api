@@ -77,6 +77,10 @@ milkshakes" is seven snack occasions at household servings.
    every input word are offered as candidates ("chicken curry" offers Simple Chicken Curry;
    it is not matched).
 
+A match carries its recipe's slot: a starter's own, a library recipe's from the starters
+file's `library_meta` (the grilled cheese and the PB&J are lunches), and the shopper's own
+recipe's as the console sends it (dinner when it sends none).
+
 Only exact and plural matches may be accepted without asking. Alias and fuzzy matches come
 back with `needs_confirmation: true`, and the console shows "chicken briyani → Chicken
 Biryani (demo starter)?" with Use or Not this.

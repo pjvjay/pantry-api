@@ -214,11 +214,11 @@ class MealPlanResult(BaseModel):
 def _candidates(docs: list[RecipeDoc]):
     from .. import db
     from . import selection
-    from .resolve import starters_file
+    from .resolve import library_slots, starters_file
 
     return selection.candidates(
         [(r.slug, r.name) for r in db.load_all_recipes()], starters_file()["starters"],
-        [{"key": d.key, "title": d.title} for d in docs])
+        [{"key": d.key, "title": d.title} for d in docs], library_slots=library_slots())
 
 
 def _ref_for(key: str, docs: dict[str, RecipeDoc]) -> RecipeRef | None:

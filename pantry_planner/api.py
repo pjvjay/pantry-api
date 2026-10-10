@@ -923,11 +923,11 @@ def mealplan_selection_parse(req: SelectionParseRequest) -> dict:
     (exact, plural, alias, fuzzy), with no LLM. Only exact and plural matches may be
     accepted without asking: alias and fuzzy come back with needs_confirmation true."""
     from .mealplan import selection
-    from .mealplan.resolve import starters_file
+    from .mealplan.resolve import library_slots, starters_file
 
     cands = selection.candidates(
         [(r.slug, r.name) for r in db.load_all_recipes()], starters_file()["starters"],
-        [r.model_dump() for r in req.recipes])
+        [r.model_dump() for r in req.recipes], library_slots=library_slots())
     return selection.parse(req.text, cands, req.household_servings)
 
 
