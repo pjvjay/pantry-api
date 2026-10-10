@@ -90,7 +90,7 @@ Everything's env-var driven. Defaults in `pantry_planner/config.py`.
 | `TRUSTED_PROXY_HOPS`         | `0`                              | Proxies in front of the API that append to `X-Forwarded-For`; 0 = the header is ignored and the rate limit keys on the TCP peer |
 | `LLM_DAILY_COST_CAP_USD`     | *(unset: no ceiling)*            | Estimated LLM spend per replica per UTC day above which LLM-calling endpoints answer 503 |
 | `OFFERS_SYNTHETIC`           | `true`                           | Store prices, stock and reviews are the seeded demo data; the alternatives ranking labels them so (`data_note`, "(demo)" ratings). Set false only for real offers |
-| `STORES_SYNTHETIC`           | `true`                           | The stores are fictional: a calendar export names each as "<store> (demo store)" and never gives its seeded address |
+| `STORES_SYNTHETIC`           | `true`                           | The stores are fictional: a calendar export names each as "<store> (demo store)" and never gives its seeded address, and `/mealplan/stores` says `synthetic: true` so the console labels them demo stores |
 
 The four model settings are **specs**: `gemini:<model>` (e.g.
 `gemini:gemini-flash-latest`) routes that call to Google Gemini through its

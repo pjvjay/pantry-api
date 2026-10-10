@@ -375,11 +375,12 @@ def build_price_matrix_sql(product_ids: list[int], lat: float, lon: float,
 
 
 def build_store_distances_sql(lat: float, lon: float) -> tuple[str, dict]:
-    """Every store with its squared distance from (lat, lon), as the price matrix measures
-    it: the meal plan's list of stores to turn off and on."""
+    """Every store with its place and its squared distance from (lat, lon), as the price
+    matrix measures it: the meal plan's list and map of stores to turn off and on."""
     params: dict = {}
     _location_params(params, lat, lon)
     sql = ("SELECT s.id AS store_id, s.name AS store_name, s.address AS address,\n"
+           "       s.lat AS lat, s.lon AS lon,\n"
            f"       {DIST_EXPR} AS dist_km2\n"
            "FROM stores s\n"
            "ORDER BY dist_km2, s.id")

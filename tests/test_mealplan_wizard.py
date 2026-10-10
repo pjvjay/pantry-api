@@ -912,18 +912,25 @@ def _km(lat: float, lon: float) -> float:
 
 
 def test_the_stores_list_every_store_nearest_first_with_what_it_sells(chosen, reseed):
-    stores = {r["id"]: r for r in _sql("SELECT id, name, lat, lon FROM stores")}
+    from pantry_planner.config import settings
+
+    stores = {r["id"]: r for r in _sql("SELECT id, name, lat, lon, address FROM stores")}
     bought = {ln["product"]["id"] for r in bask(chosen)["recipes"] for ln in r["lines"]}
     _sql("DELETE FROM store_products WHERE product_id = :p AND store_id = 2", p=TUNA)
     body = _stores({**chosen, "settings": {"stores_off": [3], "max_km": 5}})
     assert body["v"] == 1 and body["products_total"] == len(bought)
+    cfg = settings()
+    assert (body["origin"], body["max_km"], body["synthetic"]) == (
+        {"lat": cfg.default_lat, "lon": cfg.default_lon}, 5, True)
     got = body["stores"]
     assert [s["id"] for s in got] == sorted(
         stores, key=lambda i: (_km(stores[i]["lat"], stores[i]["lon"]), i))
     for s in got:
-        km = _km(stores[s["id"]]["lat"], stores[s["id"]]["lon"])
-        assert (s["name"], s["distance_km"], s["in_range"], s["off"], s["address"]) == (
-            stores[s["id"]]["name"], km, km <= 5, s["id"] == 3, None)
+        row = stores[s["id"]]
+        km = _km(row["lat"], row["lon"])
+        assert (s["name"], s["distance_km"], s["in_range"], s["off"]) == (
+            row["name"], km, km <= 5, s["id"] == 3)
+        assert (s["address"], s["lat"], s["lon"]) == (row["address"], row["lat"], row["lon"])
         stocked = {r["product_id"] for r in _sql(
             "SELECT product_id FROM store_products WHERE store_id = :s", s=s["id"])}
         assert s["sells"] == len(bought & stocked)
@@ -946,17 +953,35 @@ def test_the_stores_count_the_pins_and_leave_out_what_the_origin_rule_holds_back
     assert held["products_total"] == plain["products_total"] - 1
 
 
-def test_a_stores_address_shows_only_where_the_stores_are_real(chosen, monkeypatch):
-    from pantry_planner import config
+def test_every_stores_address_is_given_and_synthetic_says_they_are_demo_stores(chosen,
+                                                                               monkeypatch):
+    """The console labels the addresses of synthetic stores as demo ones; the calendar export
+    keeps its own policy and still never writes them."""
+    from pantry_planner import calendar_api, config
 
+    table = {r["id"]: r["address"] for r in _sql("SELECT id, address FROM stores")}
+    assert all(table.values())
+    demo = _stores(chosen)
+    assert demo["synthetic"] is True and calendar_api._addresses() is None
+    assert {s["id"]: s["address"] for s in demo["stores"]} == table
     monkeypatch.setenv("STORES_SYNTHETIC", "false")
     config.settings.cache_clear()
     try:
-        got = {s["id"]: s["address"] for s in _stores(chosen)["stores"]}
+        real = _stores(chosen)
+        assert calendar_api._addresses() is not None
     finally:
         monkeypatch.delenv("STORES_SYNTHETIC")
         config.settings.cache_clear()
-    assert got == {r["id"]: r["address"] for r in _sql("SELECT id, address FROM stores")}
+    assert real["synthetic"] is False
+    assert {s["id"]: s["address"] for s in real["stores"]} == table
+
+
+def test_the_stores_answer_the_plans_own_shopping_point_and_no_limit(chosen):
+    body = _stores({**chosen, "settings": {"lat": 49.25, "lon": -123.1}})
+    assert (body["origin"], body["max_km"]) == ({"lat": 49.25, "lon": -123.1}, None)
+    assert all(s["in_range"] for s in body["stores"])
+    dist = [s["distance_km"] for s in body["stores"]]
+    assert dist == sorted(dist)
 
 
 def test_the_stores_route_refuses_what_the_schedule_refuses(chosen, monkeypatch):

@@ -5,9 +5,13 @@ Every store, nearest first from the plan's shopping point (schedule.shopping_poi
 as the price matrix measures it; in_range against the plan's max_km; off from
 settings.stores_off; and how many of the basket's products each one stocks, the products the
 draft buys (basket.purchases: the resolve's picks, the shopper's pins, less what the origin
-exclusion holds back), so the shopper sees what turning a store off would cost them. A
-store's street address is shown only where the stores are real, as the calendar export's
-address policy has it.
+exclusion holds back), so the shopper sees what turning a store off would cost them.
+
+Each store's street address, lat and lon are the stores table's, for the list and the map, with
+synthetic (STORES_SYNTHETIC) saying whether they are the demo's fictional stores, for the
+console to label them demo stores. The calendar export keeps its own policy: it never writes a
+synthetic store's address (calendar_api._addresses). origin and max_km are the plan's shopping
+point and distance limit, the map's centre and range.
 """
 from __future__ import annotations
 
@@ -21,7 +25,7 @@ from .. import db
 from ..config import settings
 from ..nlsearch.sql_builder import build_store_distances_sql
 from . import basket, schedule
-from .models import MealPlanDraft, PlanStore, PlanStores
+from .models import GeoPoint, MealPlanDraft, PlanStore, PlanStores
 
 
 def stores(draft: MealPlanDraft) -> PlanStores:
@@ -35,12 +39,11 @@ def stores(draft: MealPlanDraft) -> PlanStores:
     sql, params = build_store_distances_sql(lat, lon)
     with Session(db.engine()) as s:
         rows = [dict(r) for r in s.execute(text(sql), params).mappings()]
-    real = not settings().stores_synthetic
     off = set(draft.settings.stores_off)
     return PlanStores(stores=[PlanStore(
-        id=r["store_id"], name=r["store_name"],
-        address=(r["address"] or None) if real else None,
-        distance_km=round(math.sqrt(max(r["dist_km2"], 0.0)), 1),
+        id=r["store_id"], name=r["store_name"], address=r["address"] or None, lat=r["lat"],
+        lon=r["lon"], distance_km=round(math.sqrt(max(r["dist_km2"], 0.0)), 1),
         in_range=max_km is None or r["dist_km2"] <= max_km * max_km,
         off=r["store_id"] in off, sells=stocked[r["store_id"]] if ids else None)
-        for r in rows], products_total=len(ids))
+        for r in rows], products_total=len(ids), synthetic=settings().stores_synthetic,
+        origin=GeoPoint(lat=lat, lon=lon), max_km=max_km)

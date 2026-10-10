@@ -23,7 +23,7 @@ products 166-169 are synthetic demo data, and say so.
 | `POST /mealplan/alternatives` | Options for one trip line (or, with no trip date, for every line buying a product): ranked products and what each does to the plan | no | 60/min |
 | `POST /mealplan/catalog` | The wizard's recipes: slot, diets, contains, fit and a cost estimate per meal | no | 60/min |
 | `POST /mealplan/basket` | The wizard's ingredients: each chosen recipe's products, stores, prices and origins | no | 120/min |
-| `POST /mealplan/stores` | The stores to turn off and on: nearest first, in range, off, and how many of the basket's products each sells | no | 120/min |
+| `POST /mealplan/stores` | The stores to turn off and on: nearest first, where each is, in range, off, and how many of the basket's products each sells | no | 120/min |
 | `GET /mealplan/starters` | The 13 demo starter recipes, labelled "demo recipe" | no | none |
 | `GET /shelf-life?product_id=` | Cited storage and thaw rows per product | no | none |
 
@@ -191,14 +191,18 @@ and both kinds of Options list read the price matrix without them
 (`build_price_matrix_sql(..., exclude_stores=)`). Resolve ignores them, and so do the
 catalog's cached picks, so turning a store off or on never resolves a recipe again.
 
-**`POST /mealplan/stores`** takes `{draft}` and answers `{v, stores[], products_total}`
-(`mealplan/stores.py`), each store `{id, name, address, distance_km, in_range, off,
-sells}`: every store, nearest first from the plan's shopping point (measured as the price
-matrix measures it), `in_range` within `max_km`, `off` from `stores_off`, and `sells` how many
-of the basket's products it stocks, whatever its distance (null while the plan buys nothing).
-`products_total` counts those products: the draft's chosen ones, pins included, less any the
-origin exclusion holds back (`basket.purchases`). `address` follows the calendar export's
-policy: null while the stores are synthetic (`STORES_SYNTHETIC`, the default).
+**`POST /mealplan/stores`** takes `{draft}` and answers `{v, stores[], products_total,
+synthetic, origin, max_km}` (`mealplan/stores.py`), each store `{id, name, address, lat, lon,
+distance_km, in_range, off, sells}`: every store, nearest first from the plan's shopping point
+(measured as the price matrix measures it), `in_range` within `max_km`, `off` from
+`stores_off`, and `sells` how many of the basket's products it stocks, whatever its distance
+(null while the plan buys nothing). `products_total` counts those products: the draft's chosen
+ones, pins included, less any the origin exclusion holds back (`basket.purchases`). `address`,
+`lat` and `lon` are the stores table's, always, for the console's list and map; `synthetic` is
+`STORES_SYNTHETIC` (on by default: the stores and their addresses are made up), so the console
+labels them demo stores. The calendar export's policy is unchanged: it never writes a
+synthetic store's address. `origin` is the plan's shopping point `{lat, lon}` (its own, or the
+server's) and `max_km` its distance limit (null: none), the map's centre and range.
 
 **Diets.** Every demo starter says its `slot`, its `diets` (which of vegan, vegetarian and
 pescatarian it satisfies) and `contains`; the library's are the starters file's

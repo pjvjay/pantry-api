@@ -659,26 +659,39 @@ class BasketRecipe(BaseModel):
 
 
 class PlanStore(BaseModel):
-    """One store for the Ingredients stage's store list. address only where the stores are
-    real (STORES_SYNTHETIC off), as the calendar export's policy is; distance_km from the
-    plan's shopping point; in_range within its max_km; off when the shopper turned it off;
-    sells how many of the basket's products it stocks (None while the plan buys nothing)."""
+    """One store for the Ingredients stage's store list and map. address, lat and lon are the
+    stores table's (address None when it has none), whether or not the stores are synthetic:
+    PlanStores.synthetic says so, for the console to label them. distance_km from the plan's
+    shopping point; in_range within its max_km; off when the shopper turned it off; sells how
+    many of the basket's products it stocks (None while the plan buys nothing)."""
     id: int
     name: str
     address: str | None
+    lat: float
+    lon: float
     distance_km: float
     in_range: bool
     off: bool
     sells: int | None
 
 
+class GeoPoint(BaseModel):
+    lat: float
+    lon: float
+
+
 class PlanStores(BaseModel):
     """POST /mealplan/stores: every store, nearest first, and how many products the basket
     buys (products_total: the draft's chosen products, pins included, less any the origin
-    exclusion holds back)."""
+    exclusion holds back). synthetic is STORES_SYNTHETIC: the stores are the demo's fictional
+    ones and their addresses made up. origin is the plan's shopping point (its own, or the
+    server's) and max_km its distance limit (None: no limit), for the map's centre and range."""
     v: Literal[1] = 1
     stores: list[PlanStore]
     products_total: int
+    synthetic: bool
+    origin: GeoPoint
+    max_km: float | None
 
 
 class Basket(BaseModel):

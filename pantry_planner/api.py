@@ -908,9 +908,10 @@ def mealplan_basket(req: BasketRequest) -> Basket:
                         Depends(limits.rate_limit("/mealplan/stores"))])
 def mealplan_stores(req: BasketRequest) -> PlanStores:
     """The Ingredients stage's stores: every store nearest first from the plan's shopping
-    point, whether it is in range and turned off, and how many of the basket's products it
-    stocks (sells null while the plan buys nothing). Pure: no LLM, no write. 422 as
-    /mealplan/schedule."""
+    point, with its address and place, whether it is in range and turned off, and how many of
+    the basket's products it stocks (sells null while the plan buys nothing); whether the
+    stores are synthetic, and the plan's shopping point and max_km. Pure: no LLM, no write.
+    422 as /mealplan/schedule."""
     from .mealplan.models import MealPlanError
     from .mealplan.stores import stores
 
