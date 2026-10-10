@@ -363,7 +363,7 @@ def test_without_timing_the_ics_is_byte_for_byte_the_all_day_export():
 
 TIMING = ce.Timing(timezone="America/Vancouver",
                    trips=ce.EventTime(start="18:00", minutes=60),
-                   cooks=ce.EventTime(start="17:30", minutes=45),
+                   cooks=ce.CookTime(start="17:30", minutes=45),
                    reminders=ce.Reminders(trips=[1440, 60, 60], cooks=[30], reminders=[120]))
 
 
@@ -444,6 +444,28 @@ def test_a_timed_event_that_runs_past_midnight_ends_the_next_day():
     assert "DTEND;TZID=Europe/London:20261101T010000" in text
 
 
+def test_each_cook_event_takes_its_slots_time_when_the_shopper_set_one():
+    cooks = [cook(f"cook-{slot}", D, slot=slot) for slot in ("breakfast", "lunch", "dinner",
+                                                             "snack")]
+    s = schedule(cooks=cooks)
+    by_slot = ce.Timing(timezone="UTC", cooks=ce.CookTime(
+        start="17:30", minutes=45, by_slot={"breakfast": "08:00", "lunch": "12:30"}))
+    got = {e.item_id: (e.start_time, e.end_time)
+           for e in ce.build_events(s, timing=by_slot) if e.kind == "cook"}
+    assert got == {"cook-breakfast": ("08:00", "08:45"), "cook-lunch": ("12:30", "13:15"),
+                   "cook-dinner": ("17:30", "18:15"), "cook-snack": ("17:30", "18:15")}
+    assert ce.timing_notes(by_slot)[0] == (
+        "Times are in UTC: cook days at 17:30 for 45 min (breakfast at 08:00, lunch at "
+        "12:30); every other event is all-day.")
+    # without by_slot every cook is at its start, as before
+    plain = ce.Timing(timezone="UTC", cooks=ce.CookTime(start="17:30", minutes=45))
+    assert {e.start_time for e in ce.build_events(s, timing=plain) if e.kind == "cook"} == {
+        "17:30"}
+    assert ce.render_ics(ce.build_events(s, timing=plain), now=NOW) == ce.render_ics(
+        ce.build_events(s, timing=ce.Timing.model_validate(
+            {"timezone": "UTC", "cooks": {"start": "17:30", "minutes": 45}})), now=NOW)
+
+
 @pytest.mark.parametrize("bad", [
     {"timezone": "Mars/Olympus_Mons"}, {"timezone": "../etc/passwd"}, {"timezone": ""},
     {"timezone": "UTC", "trips": {"start": "24:00", "minutes": 30}},
@@ -453,6 +475,10 @@ def test_a_timed_event_that_runs_past_midnight_ends_the_next_day():
     {"timezone": "UTC", "reminders": {"trips": [10, 20, 30, 40]}},
     {"timezone": "UTC", "reminders": {"cooks": [40321]}},
     {"timezone": "UTC", "reminders": {"reminders": [-1]}},
+    {"timezone": "UTC", "cooks": {"start": "17:30", "minutes": 30,
+                                  "by_slot": {"brunch": "10:00"}}},
+    {"timezone": "UTC", "cooks": {"start": "17:30", "minutes": 30,
+                                  "by_slot": {"breakfast": "8:00"}}},
 ])
 def test_timing_is_bounded(bad):
     with pytest.raises(ValidationError):

@@ -538,8 +538,10 @@ nothing reaches a calendar except by the shopper's own click.
   `TRANSP:TRANSPARENT`, no `VTIMEZONE`. Without `timing` this is the whole export, byte for
   byte as before it existed.
 - **Times and reminders.** `timing: {timezone, trips?: {start: "HH:MM", minutes}, cooks?:
-  {start, minutes}, reminders: {trips: [], cooks: [], reminders: []}}` (an IANA zone; minutes
-  before the start, 0 to 40,320, at most three per kind). Trips and cook days get
+  {start, minutes, by_slot?: {breakfast?, lunch?, dinner?, snack?: "HH:MM"}}, reminders:
+  {trips: [], cooks: [], reminders: []}}` (an IANA zone; minutes before the start, 0 to
+  40,320, at most three per kind). A cook day starts at its meal's `by_slot` time, else at
+  `start`. Trips and cook days get
   `DTSTART;TZID=<zone>` and `DTEND;TZID=<zone>` (the zone is named, never converted, so no
   `VTIMEZONE` is written; `TRANSP:OPAQUE`); freeze and thaw reminders stay all-day. Each
   reminder is one `VALARM` (`ACTION:DISPLAY`, `TRIGGER:-PT{n}M`); an all-day event's count

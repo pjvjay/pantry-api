@@ -332,7 +332,7 @@ def test_timing_times_the_trips_and_cooks_and_sets_each_kinds_reminders(frozen):
     _draft, sched = frozen
     a = sched["approved_schedule"]
     timing = {"timezone": "America/Vancouver", "trips": {"start": "10:00", "minutes": 90},
-              "cooks": {"start": "18:00", "minutes": 45},
+              "cooks": {"start": "18:00", "minutes": 45, "by_slot": {"snack": "15:30"}},
               "reminders": {"trips": [60], "cooks": [30, 15], "reminders": [720]}}
     prev = post("/calendar/preview", a, timing=timing).json()
     plain = post("/calendar/preview", a).json()
@@ -340,9 +340,13 @@ def test_timing_times_the_trips_and_cooks_and_sets_each_kinds_reminders(frozen):
     assert [e["uid"] for e in prev["events"]] == [e["uid"] for e in plain["events"]]
     kinds = {e["kind"] for e in prev["events"]}
     assert {"trip", "cook", "freeze", "thaw"} <= kinds
+    slot = {c["item_id"]: c["slot"] for c in a["cooks"]}
+    assert "snack" in slot.values() and "dinner" in slot.values()
     for e in prev["events"]:
         if e["kind"] in ("trip", "cook"):
-            start, end = ("10:00", "11:30") if e["kind"] == "trip" else ("18:00", "18:45")
+            start, end = (("10:00", "11:30") if e["kind"] == "trip"
+                          else ("15:30", "16:15") if slot[e["item_id"]] == "snack"
+                          else ("18:00", "18:45"))
             assert (e["all_day"], e["start_time"], e["end_time"], e["timezone"], e["end"]) == (
                 False, start, end, "America/Vancouver", e["date"])
         else:

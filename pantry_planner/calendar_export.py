@@ -12,7 +12,8 @@ The rules every event keeps:
 
 - all-day: DTSTART;VALUE=DATE with no time and no zone, so an event lands on its plan date in
   every time zone and on both sides of 2026-11-01. A request's optional `timing` gives the
-  trips and the cook days a start time and length in the shopper's time zone instead
+  trips and the cook days (each at its meal's slot time, when the shopper set one) a start
+  time and length in the shopper's time zone instead
   (DTSTART;TZID and DTEND;TZID), and any event reminders (one VALARM each, minutes before its
   start; an all-day event's start is its midnight, as Google counts it). Without `timing` the
   export is the all-day one, byte for byte;
@@ -419,10 +420,18 @@ def _reminder_source(a: Action, thaw_reminder: str) -> ReminderSource | None:
 Minutes = Annotated[int, Field(ge=0, le=MAX_REMINDER_MIN)]
 
 
+HHMM = Annotated[str, Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")]
+
+
 class EventTime(BaseModel):
     """When one kind of event starts, as "HH:MM" in the timing's zone, and how long it is."""
-    start: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    start: HHMM
     minutes: int = Field(ge=1, le=1440)
+
+
+class CookTime(EventTime):
+    """The cook days' time: a meal's slot time from by_slot when it has one, else start."""
+    by_slot: dict[Slot, HHMM] | None = None
 
 
 class Reminders(BaseModel):
@@ -438,7 +447,7 @@ class Timing(BaseModel):
     freeze and thaw reminders always are), and reminders for each kind of event."""
     timezone: str = Field(min_length=1, max_length=64)
     trips: EventTime | None = None
-    cooks: EventTime | None = None
+    cooks: CookTime | None = None
     reminders: Reminders = Field(default_factory=Reminders)
 
     @field_validator("timezone")
@@ -689,18 +698,20 @@ def build_events(s: ApprovedSchedule, *, include: Collection[str] = INCLUDE_ALL,
     events: list[tuple[tuple, CalendarEvent]] = []
 
     def add(item_id: str, kind: EventKind, date: dt.date, title: str, location: str | None,
-            description: str, labels: list[str], slot: int = 0) -> None:
+            description: str, labels: list[str], slot: str | None = None) -> None:
         end = date + dt.timedelta(days=1)
         timed = getattr(timing, _TIMED[kind]) if timing and kind in _TIMED else None
         alarms = (sorted(set(getattr(timing.reminders, _REMINDED[kind]))) if timing else [])
         when: dict = {}
         if timed is not None:
-            h, m = (int(x) for x in timed.start.split(":"))
+            start = (getattr(timed, "by_slot", None) or {}).get(slot) or timed.start
+            h, m = (int(x) for x in start.split(":"))
             days, last = divmod(h * 60 + m + timed.minutes, 1440)
             end = date + dt.timedelta(days=days)
-            when = {"all_day": False, "start_time": timed.start, "end_time": _hhmm(last),
+            when = {"all_day": False, "start_time": start, "end_time": _hhmm(last),
                     "timezone": timing.timezone}
-        events.append(((date, _KIND_ORDER[kind], slot, item_id), CalendarEvent(
+        order = SLOTS.index(slot) if slot else 0
+        events.append(((date, _KIND_ORDER[kind], order, item_id), CalendarEvent(
             uid=event_uid(key, item_id), item_id=item_id, kind=kind, date=date, end=end,
             **when, title=title, location=location, description=description,
             categories=[s.calendar_name, _CATEGORY[kind]], sequence=s.rev, labels=labels,
@@ -738,14 +749,20 @@ def build_events(s: ApprovedSchedule, *, include: Collection[str] = INCLUDE_ALL,
                 labels.append("nutrition not shown")
             if c.recipe_servings is None:
                 labels.append("servings unknown")
-            add(c.item_id, "cook", c.date, title, None, cook_description(c), labels,
-                SLOTS.index(c.slot))
+            add(c.item_id, "cook", c.date, title, None, cook_description(c), labels, c.slot)
     return [e for _, e in sorted(events, key=lambda x: x[0])]
+
+
+def _by_slot(t: EventTime) -> str:
+    """' (breakfast at 08:00, lunch at 12:30)': the cook days' slot times, in slot order."""
+    times = getattr(t, "by_slot", None) or {}
+    return (" (" + ", ".join(f"{slot} at {times[slot]}" for slot in SLOTS if slot in times)
+            + ")") if times else ""
 
 
 def timing_notes(timing: Timing) -> list[str]:
     """IMPORT_NOTES for a timed export: what is timed, in which zone, and the reminders."""
-    timed = [f"{what} at {t.start} for {t.minutes} min" for what, t in
+    timed = [f"{what} at {t.start} for {t.minutes} min" + _by_slot(t) for what, t in
              (("trips", timing.trips), ("cook days", timing.cooks)) if t is not None]
     head = (f"Times are in {timing.timezone}: " + " and ".join(timed)
             + "; every other event is all-day." if timed
