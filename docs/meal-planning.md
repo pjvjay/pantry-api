@@ -183,16 +183,20 @@ Korea, Mexico). A preference only orders products; only the exclusion leaves one
 pescatarian it satisfies) and `contains`; the library's are the starters file's
 `library_meta`, since `recipes.json` is pantry-db's byte for byte. `mealplan/diets.py` is the
 rule: a recipe contains its products' tags, a seafood product's `meat` read as `fish` (its
-aisle, or a fish word in its name or description, as for canned tuna and fish sauce); vegan
-leaves out meat, fish, dairy and egg, vegetarian meat and fish, pescatarian meat. A test
-resolves every recipe in demo mode and checks the file against its products. Salmon and tuna
+aisle, or a fish word in its name or description, as for canned tuna and fish sauce), and
+what its lines' names say whatever the product's tags (milk, cheese, butter, cream, yogurt,
+ghee, paneer, white or milk chocolate are dairy; eggs egg; fish, salmon, tuna, shrimp, prawn,
+anchovy fish; chicken, beef, pork, bacon, ham, pepperoni, sausage, lamb, turkey meat; honey
+`honey`), unless a plant word comes right before ("peanut butter", "coconut milk"). Vegan
+leaves out meat, fish, dairy, egg and honey, vegetarian meat and fish, pescatarian meat. A
+test resolves every recipe in demo mode and checks the file against its products and names. Salmon and tuna
 have no row in `nutrients.json` yet, so the three fish starters' nutrition counts those lines
 as `no_reference`.
 
 | Slot | Recipes (diets: vg vegan, v vegetarian, p pescatarian) |
 | --- | --- |
 | breakfast | Ginger Congee (vg v p), Tomato Garlic Toast (vg v p), Scrambled Eggs on Toast (v p), Yogurt Fruit Bowl (v p), Salmon Scrambled Eggs (p) |
-| lunch | Garlic Broccoli Penne (vg v p), Tomato Pilaf (vg v p), Peanut Butter & Jelly Sandwich (vg v p, as its products are tagged), Grilled Cheese Sandwich (v p), Tuna Melt (p) |
+| lunch | Garlic Broccoli Penne (vg v p), Tomato Pilaf (vg v p), Peanut Butter & Jelly Sandwich (v p: its White Chocolate is dairy), Grilled Cheese Sandwich (v p), Tuna Melt (p) |
 | dinner | Vegetable Stir Fry (vg v p), Tomato Penne (v p), Ginger Soy Salmon (p), Pepperoni Pizza, Chicken Fried Rice, Chicken Biryani, Simple Chicken Curry, Spaghetti Bolognese, Beef & Broccoli Rice Bowl |
 | snack | Mango Milkshake (v p) |
 

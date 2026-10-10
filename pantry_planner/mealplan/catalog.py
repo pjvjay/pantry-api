@@ -181,7 +181,8 @@ def catalog(*, household_servings: int, diet: Diet, avoid: list[Avoid], settings
         if meta is not None:
             known, dts, contains = True, meta["diets"], meta["contains"]
         elif pk.checked and all(ln.line_no in pk.by_line for ln in bought):
-            dts, contains = diets.classify(products[pk.by_line[ln.line_no]] for ln in bought)
+            dts, contains = diets.classify((ln.name, products[pk.by_line[ln.line_no]])
+                                           for ln in bought)
             known = True
         else:
             known, dts, contains = False, [], []

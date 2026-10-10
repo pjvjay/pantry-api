@@ -4,7 +4,7 @@
   "synthetic": true,
   "about": "Demo starter recipes for the example '3 Pepperoni Pizza + 2 Chicken Fried Rice + 3 chicken briyani + 7 mango milkshakes in 2 weeks', and the breakfasts, lunches and dinners the meal plan wizard offers for each diet, made only of products in products.json. Written for the demo: the quantities are demo house amounts, not from a published recipe, and every surface shows them as 'demo recipe'.",
   "aliases_note": "`aliases` are whole alternative names matched at the alias step; `token_aliases` map one recipe-title token to misspellings of it. Plurals are also handled by the singularise rule; the plural aliases are listed so the alias step alone covers the example sentence.",
-  "diets_note": "`slot` is where a recipe is offered; `diets` lists which of vegan, vegetarian and pescatarian it satisfies and `contains` the contains-tags of the products its lines resolve to in demo mode, a seafood product's meat tag read as fish (mealplan/diets.py). `library_meta` says the same of the library recipes, whose recipes.json pantry-db shares byte for byte. tests/test_mealplan_seeds.py checks every entry against those products.",
+  "diets_note": "`slot` is where a recipe is offered; `diets` lists which of vegan, vegetarian and pescatarian it satisfies and `contains` the contains-tags of the products its lines resolve to in demo mode, a seafood product's meat tag read as fish, and what the lines' own names say (a White Chocolate line is dairy whatever its product's tags) (mealplan/diets.py). `library_meta` says the same of the library recipes, whose recipes.json pantry-db shares byte for byte. tests/test_mealplan_seeds.py checks every entry against those products and names.",
   "needs_demo_products": {
     "Instant Yeast": 169,
     "Pepperoni": 167,
@@ -1158,11 +1158,11 @@
     "pbj_sandwich": {
       "slot": "lunch",
       "diets": [
-        "vegan",
         "vegetarian",
         "pescatarian"
       ],
       "contains": [
+        "dairy",
         "gluten",
         "nuts"
       ]

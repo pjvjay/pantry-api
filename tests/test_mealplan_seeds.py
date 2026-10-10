@@ -164,7 +164,8 @@ def test_every_starter_and_library_recipe_has_a_slot_diets_and_contains():
         assert m["diets"] == [d for d in ("vegan", "vegetarian", "pescatarian")
                               if d in m["diets"]], key
         assert m["contains"] == sorted(set(m["contains"])), key
-        assert set(m["contains"]) <= {"dairy", "egg", "fish", "gluten", "meat", "nuts", "soy"}
+        assert set(m["contains"]) <= {"dairy", "egg", "fish", "gluten", "honey", "meat", "nuts",
+                                      "soy"}
 
 
 def test_the_wizard_has_enough_recipes_in_each_section_for_each_diet():
@@ -190,7 +191,8 @@ def demo_db(tmp_path_factory):
 def test_each_recipes_diets_and_contains_are_those_of_the_products_it_resolves_to(demo_db):
     """In demo mode (resolve_one, no LLM), every line a recipe buys resolves to a catalog
     product in its pack's unit, and the file's diets and contains are what those products' tags
-    say: diets.classify for the rule, and the tags themselves for what does not depend on it."""
+    and the lines' names say: diets.classify for the rule, and the tags and the name guard
+    themselves for what does not depend on it."""
     from pantry_planner import db
     from pantry_planner.mealplan import diets
     from pantry_planner.mealplan.models import RecipeRef
@@ -210,14 +212,20 @@ def test_each_recipes_diets_and_contains_are_those_of_the_products_it_resolves_t
             # in its pack's unit, so the catalog prices it and a trip counts its packs
             assert ln.product_id is None or ln.need_uom == catalog[ln.product_id]["unit_uom"], (
                 key, ln.name)
-        bought = [ln.product_id for ln in r.lines if ln.product_id is not None]
-        assert diets.classify(products[pid] for pid in bought) == (m["diets"], m["contains"])
-        tags = {t for pid in bought for t in catalog[pid]["dietary_tags"].split(",") if t}
-        assert tags - {"meat"} <= set(m["contains"]), key
-        assert ("meat" in tags) == bool({"meat", "fish"} & set(m["contains"])), key
-        assert ("vegan" in m["diets"]) == (not tags & {"meat", "dairy", "egg"}), key
-        assert ("vegetarian" in m["diets"]) == ("meat" not in tags), key
-        assert ("pescatarian" in m["diets"]) == ("meat" not in m["contains"]), key
+        lines = [(ln.name, ln.product_id) for ln in r.lines if ln.product_id is not None]
+        assert diets.classify((n, products[pid]) for n, pid in lines) == (
+            m["diets"], m["contains"])
+        tags = {t for _n, pid in lines for t in catalog[pid]["dietary_tags"].split(",") if t}
+        named = {t for n, _pid in lines for t in diets.name_contains(n)}
+        contains = set(m["contains"])
+        assert (tags - {"meat"}) | named <= contains, key
+        assert ("meat" in tags) <= bool({"meat", "fish"} & contains), key
+        assert ("vegan" in m["diets"]) == (not contains & {"meat", "fish", "dairy", "egg",
+                                                           "honey"}), key
+        assert ("vegan" in m["diets"]) <= (not tags & {"meat", "dairy", "egg"}), key
+        assert ("vegetarian" in m["diets"]) == ("meat" not in tags | named
+                                               and "fish" not in contains), key
+        assert ("pescatarian" in m["diets"]) == ("meat" not in contains), key
 
 
 def test_seafood_is_read_as_fish_and_every_other_meat_as_meat():
@@ -240,6 +248,28 @@ def test_seafood_is_read_as_fish_and_every_other_meat_as_meat():
         False, "contains fish, gluten and dairy")
     assert diets.fits(["meat"], "pescatarian", []) == (False, "contains meat")
     assert diets.fits(["dairy"], "any", ["nuts"]) == (True, None)
+
+
+def test_a_lines_name_says_what_its_product_tags_leave_out():
+    """The PB&J's White Chocolate is bought as a chocolate with no dairy tag: its name makes
+    the sandwich dairy, so it is vegetarian and not vegan. A plant word cancels the guard."""
+    from pantry_planner.mealplan import diets
+
+    cases = {"White Chocolate": {"dairy"}, "Milk Chocolate": {"dairy"}, "Dark Chocolate": set(),
+             "Whole Milk": {"dairy"}, "Coconut Milk": set(), "Oat Milk": set(),
+             "Peanut Butter and Jelly Jam": set(), "Butter": {"dairy"}, "Ghee": {"dairy"},
+             "Paneer": {"dairy"}, "Plain Yogurt": {"dairy"}, "Cheddar Cheese": {"dairy"},
+             "Eggs": {"egg"}, "Eggplant": set(), "Canned Tuna": {"fish"},
+             "Anchovies": {"fish"}, "Fish Sauce": {"fish"}, "Raw Shrimp": {"fish"},
+             "Chicken Stock": {"meat"}, "Pepperoni": {"meat"}, "Vegan Sausage": set(),
+             "Beefsteak Tomatoes": set(), "Liquid Honey": {"honey"}}
+    for name, want in cases.items():
+        assert diets.name_contains(name) == want, name
+    assert diets.classify([("Liquid Honey", None)]) == (
+        ["vegetarian", "pescatarian"], ["honey"])
+    assert STARTERS["library_meta"]["pbj_sandwich"] == {
+        "slot": "lunch", "diets": ["vegetarian", "pescatarian"],
+        "contains": ["dairy", "gluten", "nuts"]}
 
 
 def test_the_default_allies_are_countries_the_origin_rules_know():
