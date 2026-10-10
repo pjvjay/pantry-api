@@ -227,10 +227,13 @@ class PlanSettings(BaseModel):
     server's reference point and every store. exclude_origin and preference are the plan's
     origin rules, as /mealplan/resolve takes them: the console resolves with them, and every
     pin and every Options list is checked against them (a product evidenced as from an
-    excluded country is held back)."""
+    excluded country is held back). address is the shopper's own words for lat/lon (an
+    address they searched, or "your current location"): kept with the plan for the console to
+    show, and never read here, so changing it alone changes nothing."""
     lat: float | None = Field(default=None, ge=-90, le=90)
     lon: float | None = Field(default=None, ge=-180, le=180)
     max_km: float | None = Field(default=None, ge=0.5, le=100)
+    address: str | None = Field(default=None, max_length=200)
     exclude_origin: list[Country] = Field(default_factory=list, max_length=MAX_COUNTRIES)
     preference: list[Country] = Field(default_factory=list, max_length=MAX_COUNTRIES)
 

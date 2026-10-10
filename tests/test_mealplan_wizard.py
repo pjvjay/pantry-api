@@ -403,6 +403,19 @@ def test_the_catalog_has_its_own_sixty_a_minute_bucket(monkeypatch):
 
 # ─── The basket ──────────────────────────────────────────────
 
+def test_an_address_is_kept_with_the_plan_and_changes_nothing():
+    """The shopper's words for where they shop travel with the plan; only lat/lon count."""
+    from pantry_planner.mealplan.models import PlanSettings
+
+    s = PlanSettings(lat=49.28, lon=-123.12, address="800 Robson St, Vancouver")
+    assert s.address == "800 Robson St, Vancouver"
+    with pytest.raises(ValueError):
+        PlanSettings(address="x" * 201)
+    plain = cat(settings={"lat": 49.28, "lon": -123.12})
+    named = cat(settings={"lat": 49.28, "lon": -123.12, "address": "800 Robson St, Vancouver"})
+    assert [r["lines"] for r in plain["recipes"]] == [r["lines"] for r in named["recipes"]]
+
+
 def test_a_pinned_line_is_costed_at_the_shoppers_product():
     """The Meals stage costs what the Ingredients stage buys: a plan's pin puts the shopper's
     product on that line of that recipe only, at its own pack price."""
