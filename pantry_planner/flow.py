@@ -801,6 +801,11 @@ def _ingredient_pools(recipe, lat, lon):
             for g in range(len(specs)) if direct.get(g) or relaxed_by_g.get(g)}
 
 
+def candidates_are(n: int) -> str:
+    """'its only candidate is' or 'all 3 candidates are': the subject of an origin reason."""
+    return "its only candidate is" if n == 1 else f"all {n} candidates are"
+
+
 def apply_origin_constraint(products, pools, names, *, exclude, preference,
                             allow_partial: bool = False):
     """Filter `products` on origin and gate per ingredient.
@@ -879,7 +884,7 @@ def apply_origin_constraint(products, pools, names, *, exclude, preference,
 
     def reason(removed):
         countries = sorted({country for _, country, _ in removed})
-        return (f"all {len(removed)} candidate(s) are evidenced as coming from "
+        return (f"{candidates_are(len(removed))} evidenced as coming from "
                 f"{', '.join(countries)}, which this plan excludes")
 
     def suggestions(removed, alts):
