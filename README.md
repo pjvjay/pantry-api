@@ -120,8 +120,8 @@ Every public endpoint is bounded (`pantry_planner/limits.py`), per replica and i
 
 - **A token bucket per client IP and endpoint**: `/plan/nl` and `/plan/spec` 10 a minute,
   `/recipes/parse-lines`, `/plan/alternatives` and `/plan/reprice` 60 a minute,
-  `/mealplan/resolve` and `/mealplan/plan` 6 a minute (burst 3), `/mealplan/schedule` and
-  `/mealplan/basket` 120 a minute, `/mealplan/selection/parse`, `/mealplan/suggest-cook-days`,
+  `/mealplan/resolve` and `/mealplan/plan` 6 a minute (burst 3), `/mealplan/schedule`,
+  `/mealplan/basket` and `/mealplan/stores` 120 a minute, `/mealplan/selection/parse`, `/mealplan/suggest-cook-days`,
   `/mealplan/alternatives` and `/mealplan/catalog` 60 a minute (more endpoints join as they
   land). Over the limit is a
   429 `{"error": "rate_limited", "detail": "Too many requests to ...; retry in N s."}` with
@@ -214,6 +214,7 @@ pantry-planner/
 │   │   ├── options.py     # POST /mealplan/alternatives: Options for a trip line
 │   │   ├── catalog.py     # POST /mealplan/catalog: the wizard's recipes, diets, estimates
 │   │   ├── basket.py      # POST /mealplan/basket: each recipe's products, stores, origins
+│   │   ├── stores.py      # POST /mealplan/stores: the stores to turn off, and what each sells
 │   │   ├── diets.py       # diets and contains-tags from the products a recipe buys
 │   │   ├── warnings.py    # ranked warnings and their remedies
 │   │   ├── lists.py       # the per-trip shopping list text

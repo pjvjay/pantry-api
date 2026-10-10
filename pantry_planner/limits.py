@@ -91,6 +91,7 @@ LIMITS: dict[str, Limit] = {
     # shopping point); its Ingredients stage is pure, as the schedule is.
     "/mealplan/catalog": Limit(per_minute=60, burst=60),
     "/mealplan/basket": Limit(per_minute=120, burst=120),
+    "/mealplan/stores": Limit(per_minute=120, burst=120),
     # Calendar export: pure, no LLM. The dialog previews, then downloads.
     "/calendar/preview": Limit(per_minute=60, burst=60),
     "/calendar/ics": Limit(per_minute=60, burst=60),

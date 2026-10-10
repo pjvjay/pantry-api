@@ -637,6 +637,29 @@ class BasketRecipe(BaseModel):
     lines: list[BasketLine]
 
 
+class PlanStore(BaseModel):
+    """One store for the Ingredients stage's store list. address only where the stores are
+    real (STORES_SYNTHETIC off), as the calendar export's policy is; distance_km from the
+    plan's shopping point; in_range within its max_km; off when the shopper turned it off;
+    sells how many of the basket's products it stocks (None while the plan buys nothing)."""
+    id: int
+    name: str
+    address: str | None
+    distance_km: float
+    in_range: bool
+    off: bool
+    sells: int | None
+
+
+class PlanStores(BaseModel):
+    """POST /mealplan/stores: every store, nearest first, and how many products the basket
+    buys (products_total: the draft's chosen products, pins included, less any the origin
+    exclusion holds back)."""
+    v: Literal[1] = 1
+    stores: list[PlanStore]
+    products_total: int
+
+
 class Basket(BaseModel):
     """POST /mealplan/basket: every chosen recipe's ingredients, each with its product, store,
     price and origin. est_total is what the whole packs cost, each product bought once for

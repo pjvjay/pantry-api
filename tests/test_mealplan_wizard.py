@@ -851,3 +851,83 @@ def test_a_product_sold_in_range_only_at_stores_turned_off_says_so(chosen, resee
                if ln["product"]["id"] == TUNA]
     assert line["unavailable_kind"] == "out_of_range"
     assert "MegaSave Richmond" in line["why_unavailable"]
+
+
+def _stores(draft: dict) -> dict:
+    r = client().post("/mealplan/stores", json={"draft": draft})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _km(lat: float, lon: float) -> float:
+    """The price matrix's equirectangular distance from the server's reference point."""
+    from pantry_planner.config import settings
+
+    cfg = settings()
+    dy = (cfg.default_lat - lat) * 111.0
+    dx = (cfg.default_lon - lon) * 111.0 * math.cos(math.radians(cfg.default_lat))
+    return round(math.sqrt(dx * dx + dy * dy), 1)
+
+
+def test_the_stores_list_every_store_nearest_first_with_what_it_sells(chosen, reseed):
+    stores = {r["id"]: r for r in _sql("SELECT id, name, lat, lon FROM stores")}
+    bought = {ln["product"]["id"] for r in bask(chosen)["recipes"] for ln in r["lines"]}
+    _sql("DELETE FROM store_products WHERE product_id = :p AND store_id = 2", p=TUNA)
+    body = _stores({**chosen, "settings": {"stores_off": [3], "max_km": 5}})
+    assert body["v"] == 1 and body["products_total"] == len(bought)
+    got = body["stores"]
+    assert [s["id"] for s in got] == sorted(
+        stores, key=lambda i: (_km(stores[i]["lat"], stores[i]["lon"]), i))
+    for s in got:
+        km = _km(stores[s["id"]]["lat"], stores[s["id"]]["lon"])
+        assert (s["name"], s["distance_km"], s["in_range"], s["off"], s["address"]) == (
+            stores[s["id"]]["name"], km, km <= 5, s["id"] == 3, None)
+        stocked = {r["product_id"] for r in _sql(
+            "SELECT product_id FROM store_products WHERE store_id = :s", s=s["id"])}
+        assert s["sells"] == len(bought & stocked)
+    assert next(s for s in got if s["id"] == 2)["sells"] == len(bought) - 1
+    # no meal yet: nothing to count
+    empty = _stores({"start_date": "2026-10-09", "days": 7})
+    assert empty["products_total"] == 0 and all(s["sells"] is None for s in empty["stores"])
+
+
+def test_the_stores_count_the_pins_and_leave_out_what_the_origin_rule_holds_back(chosen,
+                                                                                 reseed):
+    pinned = _stores({**chosen, "pins": {BIRYANI: {"1": BONELESS}}})
+    plain = _stores(chosen)
+    assert pinned["products_total"] == plain["products_total"]     # thighs out, boneless in
+    _sql("DELETE FROM store_products WHERE product_id = :p AND store_id = 1", p=BONELESS)
+    near = {s["id"]: s for s in _stores({**chosen, "pins": {BIRYANI: {"1": BONELESS}}})["stores"]}
+    assert near[1]["sells"] == pinned["products_total"] - 1
+    _us_evidence(TUNA)
+    held = _stores({**chosen, "settings": {"exclude_origin": ["United States"]}})
+    assert held["products_total"] == plain["products_total"] - 1
+
+
+def test_a_stores_address_shows_only_where_the_stores_are_real(chosen, monkeypatch):
+    from pantry_planner import config
+
+    monkeypatch.setenv("STORES_SYNTHETIC", "false")
+    config.settings.cache_clear()
+    try:
+        got = {s["id"]: s["address"] for s in _stores(chosen)["stores"]}
+    finally:
+        monkeypatch.delenv("STORES_SYNTHETIC")
+        config.settings.cache_clear()
+    assert got == {r["id"]: r["address"] for r in _sql("SELECT id, address FROM stores")}
+
+
+def test_the_stores_route_refuses_what_the_schedule_refuses(chosen, monkeypatch):
+    from pantry_planner import limits
+
+    bad = {**chosen, "recipes": {**chosen["recipes"], "lib:nope": {
+        "ref": {"key": "lib:nope", "slug": "nope"}, "wanted": 1}}}
+    r = client().post("/mealplan/stores", json={"draft": bad})
+    assert r.status_code == 422 and r.json()["detail"]["error"] == "unknown_recipe_key"
+    big = {"draft": {**chosen, "padding": "x" * 300_000}}
+    assert client().post("/mealplan/stores", json=big).status_code == 413
+    assert limits.LIMITS["/mealplan/stores"] == limits.Limit(per_minute=120, burst=120)
+    monkeypatch.setitem(limits.LIMITS, "/mealplan/stores", limits.Limit(per_minute=60,
+                                                                        burst=1))
+    assert client().post("/mealplan/stores", json={"draft": chosen}).status_code == 200
+    assert client().post("/mealplan/stores", json={"draft": chosen}).status_code == 429
