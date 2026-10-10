@@ -36,6 +36,7 @@ from .mealplan.models import (
     Diet,
     MealPlanDraft,
     MealSchedule,
+    PinMap,
     PlanSettings,
     RecipeRef,
     ResolvedRecipe,
@@ -856,6 +857,8 @@ class MealPlanCatalogRequest(BaseModel):
     settings: PlanSettings = Field(default_factory=PlanSettings)
     slots: list[Slot] | None = Field(default=None, min_length=1, max_length=4)
     recipes: list[RecipeRef] = Field(default_factory=list, max_length=MAX_OWN_RECIPES)
+    # the plan's pins, as MealPlanDraft.pins: a pinned line is costed at the shopper's product
+    pins: PinMap = Field(default_factory=dict, max_length=MAX_OWN_RECIPES)
 
 
 @app.post("/mealplan/catalog", response_model=Catalog,
@@ -873,7 +876,7 @@ def mealplan_catalog(req: MealPlanCatalogRequest) -> Catalog:
     try:
         return catalog(household_servings=req.household_servings, diet=req.diet,
                        avoid=req.avoid, settings=req.settings, slots=req.slots,
-                       own=req.recipes)
+                       own=req.recipes, pins=req.pins)
     except MealPlanError as e:
         raise _meal_plan_error(e) from e
 

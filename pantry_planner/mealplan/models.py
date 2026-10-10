@@ -208,6 +208,9 @@ class ApprovedTrip(BaseModel):
 Country = Annotated[str, Field(min_length=1, max_length=100)]
 LineNo = Annotated[str, Field(min_length=1, max_length=4)]
 ProductId = Annotated[int, Field(ge=1, le=MAX_PRODUCT_ID)]
+# The shopper's own product for a recipe line: recipe_key -> {line_no: product_id}.
+PinMap = dict[Annotated[str, Field(min_length=1, max_length=100)],
+              Annotated[dict[LineNo, ProductId], Field(max_length=MAX_PINS_PER_RECIPE)]]
 
 # The meal plan wizard's default origin rules, which the shopper edits in its first stage:
 # products evidenced as from the United States are excluded, and the preference is Canada,
@@ -261,9 +264,7 @@ class MealPlanDraft(BaseModel):
     recipes: dict[str, DraftRecipe] = Field(default_factory=dict, max_length=MAX_RECIPES)
     resolved: dict[str, ResolvedRecipe] = Field(default_factory=dict, max_length=MAX_RECIPES)
     meals: list[Meal] = Field(default_factory=list, max_length=MAX_MEALS)
-    pins: dict[Annotated[str, Field(min_length=1, max_length=100)],
-               Annotated[dict[LineNo, ProductId], Field(max_length=MAX_PINS_PER_RECIPE)]] = \
-        Field(default_factory=dict, max_length=MAX_RECIPES)
+    pins: PinMap = Field(default_factory=dict, max_length=MAX_RECIPES)
     trips: list[ApprovedTrip] = Field(default_factory=list, max_length=MAX_DAYS)
     dismissed_dates: list[dt.date] = Field(default_factory=list, max_length=MAX_DAYS)
     fixed_dates: list[dt.date] = Field(default_factory=list, max_length=MAX_DAYS)

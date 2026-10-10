@@ -403,6 +403,24 @@ def test_the_catalog_has_its_own_sixty_a_minute_bucket(monkeypatch):
 
 # ─── The basket ──────────────────────────────────────────────
 
+def test_a_pinned_line_is_costed_at_the_shoppers_product():
+    """The Meals stage costs what the Ingredients stage buys: a plan's pin puts the shopper's
+    product on that line of that recipe only, at its own pack price."""
+    plain = by_key(cat())["lib:tomato_penne"]
+    oil = next(ln for ln in plain["lines"] if ln["ingredient"] == "Olive Oil")
+    other = 16 if oil["product_id"] != 16 else 62
+    pinned = by_key(cat(pins={"lib:tomato_penne": {"4": other}}))
+    line = next(ln for ln in pinned["lib:tomato_penne"]["lines"] if ln["ingredient"] == "Olive Oil")
+    assert line["product_id"] == other and line["pack_qty"] == PRODUCTS[other]["unit_qty"]
+    assert line["pack_price"] is not None and line["pack_price"] != oil["pack_price"]
+    others = [ln for ln in pinned["lib:tomato_penne"]["lines"] if ln["ingredient"] != "Olive Oil"]
+    assert others == [ln for ln in plain["lines"] if ln["ingredient"] != "Olive Oil"]
+    assert pinned["lib:spaghetti_bolognese"] == by_key(cat())["lib:spaghetti_bolognese"]
+    # a pin to a product nobody sells is the pick again, not an error
+    assert by_key(cat(pins={"lib:tomato_penne": {"4": 9999}}))["lib:tomato_penne"]["lines"] \
+        == plain["lines"]
+
+
 COUNTS = {"pepperoni_pizza": 3, "chicken_biryani": 2, "tuna_melt": 2}
 
 

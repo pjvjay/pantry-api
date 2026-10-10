@@ -205,7 +205,8 @@ as `no_reference`.
 | snack | Mango Milkshake (v p) |
 
 **`POST /mealplan/catalog`** takes `{household_servings, diet, avoid, settings, slots?,
-recipes?}` (`recipes`: the shopper's own refs, at most 24) and answers `{v, recipes[],
+recipes?, pins?}` (`recipes`: the shopper's own refs, at most 24; `pins`: the plan's, as the
+draft holds them, so a pinned line is costed at the shopper's product) and answers `{v, recipes[],
 est_basis, latency_ms}`, each recipe `{key, ref, title, slot, diets, contains, servings,
 fits, why_not, est_cost_per_meal, lines_total, lines_priced, unavailable, held_back,
 lines[]}`, ordered by slot then title (`mealplan/catalog.py`). Each line's product is the

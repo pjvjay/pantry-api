@@ -215,11 +215,40 @@ def _share(line, product: Product, price: float, scale: float) -> float | None:
     return need[0] * scale / product.unit_qty * price
 
 
+def _with_pins(found: dict[str, Picks], pins: dict[str, dict[str, int]],
+               products: dict[int, Product], s: PlanSettings) -> dict[str, dict[int, int]]:
+    """Each recipe's product per line, the shopper's pin in place of the pick. A pin to a
+    product the catalog does not know, or one the origin exclusion holds back, is ignored
+    here: the schedule's pin check says why."""
+    from .. import alternatives
+    from ..origins import filter_pool
+
+    pinned = {int(pid) for by_line in pins.values() for pid in by_line.values()}
+    pinned &= products.keys()
+    held: set[int] = set()
+    if pinned and s.exclude_origin:
+        origins, _demo = alternatives._evidence(sorted(pinned), products)
+        _kept, dropped = filter_pool([products[pid] for pid in sorted(pinned)],
+                                     exclude=list(s.exclude_origin), origins=origins)
+        held = {p.id for p, _country, _fld in dropped}
+    out: dict[str, dict[int, int]] = {}
+    for key, pk in found.items():
+        chosen = dict(pk.by_line)
+        for no, pid in (pins.get(key) or {}).items():
+            if pid in pinned and pid not in held and no.isdigit():
+                chosen[int(no)] = pid
+        out[key] = chosen
+    return out
+
+
 def catalog(*, household_servings: int, diet: Diet, avoid: list[Avoid], settings: PlanSettings,
-            slots: list[Slot] | None = None, own: list[RecipeRef] | None = None) -> Catalog:
+            slots: list[Slot] | None = None, own: list[RecipeRef] | None = None,
+            pins: dict[str, dict[str, int]] | None = None) -> Catalog:
     """Every recipe in the given slots (all of them by default), with its diets, whether it
-    fits, and its estimate. Raises MealPlanError (unknown_recipe_key) for a library slug or
-    starter the shopper's list names that does not exist."""
+    fits, and its estimate. pins (the plan's, as MealPlanDraft.pins) put the shopper's product
+    on a line, so the Meals stage costs what the Ingredients stage will buy. Raises
+    MealPlanError (unknown_recipe_key) for a library slug or starter the shopper's list names
+    that does not exist."""
     t0 = time.perf_counter()
     refs = _recipes(own or [])
     metas = {ref.key: diets.seed_meta(ref) for ref in refs}
@@ -228,8 +257,10 @@ def catalog(*, household_servings: int, diet: Diet, avoid: list[Avoid], settings
     docs = {ref.key: recipe_doc(ref) for ref in refs}
     found = {ref.key: cached_picks(ref, docs[ref.key], settings) for ref in refs}
     products = {p.id: p for p in db.load_all_products()}
+    chosen = _with_pins(found, pins or {}, products, settings)
     lat, lon, max_km = schedule.shopping_point(settings)
-    ids = sorted({pid for pk in found.values() for pid in pk.by_line.values()} & products.keys())
+    ids = sorted({pid for by_line in chosen.values() for pid in by_line.values()}
+                 & products.keys())
     offers = flow._cheapest_offers(schedule._offers(ids, lat, lon, max_km), "spec")
 
     out = []
@@ -242,7 +273,7 @@ def catalog(*, household_servings: int, diet: Diet, avoid: list[Avoid], settings
         held_back: list[str] = []
         lines: list[CatalogLine] = []
         for ln in bought:
-            pid = pk.by_line.get(ln.line_no)
+            pid = chosen[ref.key].get(ln.line_no)
             p = products.get(pid)
             offer = offers.get(pid) if p is not None else None
             held = pk.left_out.get(ln.line_no, ("",))[0] == ORIGIN_EXCLUDED
@@ -267,8 +298,8 @@ def catalog(*, household_servings: int, diet: Diet, avoid: list[Avoid], settings
                 shares.append(share)
         if meta is not None:
             known, dts, contains = True, meta["diets"], meta["contains"]
-        elif pk.checked and all(ln.line_no in pk.by_line for ln in bought):
-            dts, contains = diets.classify((ln.name, products[pk.by_line[ln.line_no]])
+        elif pk.checked and all(ln.line_no in chosen[ref.key] for ln in bought):
+            dts, contains = diets.classify((ln.name, products[chosen[ref.key][ln.line_no]])
                                            for ln in bought)
             known = True
         else:
