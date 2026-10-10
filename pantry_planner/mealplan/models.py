@@ -518,7 +518,9 @@ class CatalogRecipe(BaseModel):
     known (a shopper's recipe whose lines do not all have a product): a known recipe that
     satisfies no diet always contains something. est_cost_per_meal is one meal for the
     household, each priced line's share of its pack price; None when no line is priced.
-    unavailable names the ingredients with no offer in range."""
+    unavailable names the ingredients with no offer in range; held_back those of them the
+    plan's origin exclusion left out (every candidate in range is evidenced as from an excluded
+    country)."""
     key: str
     ref: RecipeRef
     title: str
@@ -532,6 +534,7 @@ class CatalogRecipe(BaseModel):
     lines_total: int
     lines_priced: int
     unavailable: list[str]
+    held_back: list[str]
 
 
 class Catalog(BaseModel):
@@ -571,7 +574,9 @@ class BasketLine(BaseModel):
     """One ingredient of one recipe and the product the plan buys for it. need is the
     recipe's amount for all its meals; price is one pack at the store; cost_for_need is this
     recipe's share of what the whole packs of that product cost (None when the packs are not
-    known). shared_with names the other recipes buying the same product."""
+    known). shared_with names the other recipes buying the same product. unavailable_kind says
+    why an unavailable line is: origin_excluded, out_of_range or not_stocked (None when it is
+    available, or no product was chosen for another reason)."""
     line_no: int
     ingredient: str
     need: str
@@ -583,6 +588,7 @@ class BasketLine(BaseModel):
     pinned: bool
     shared_with: list[str]
     available: bool
+    unavailable_kind: Literal["origin_excluded", "not_stocked", "out_of_range"] | None
     why_unavailable: str | None
 
 

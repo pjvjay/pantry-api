@@ -18,6 +18,12 @@ can buy more packs; the Shop stage has their figures.
 
 The plan's origin exclusion applies as everywhere else (origins.filter_pool): a product
 evidenced as from an excluded country is not available and is never priced.
+
+An unavailable line says why, as unavailable_kind: origin_excluded (its product, or every
+candidate in range, is evidenced as from an excluded country), out_of_range (sold, but by no
+store in range) or not_stocked (no store sells it). For a line the resolve bought nothing for,
+the kind and the reason are the planner's own (catalog.cached_picks: the same retrieval under
+the same rules); a line left without a product for any other reason has no kind.
 """
 from __future__ import annotations
 
@@ -32,7 +38,7 @@ from ..models import Product
 from ..nlsearch.units import is_non_purchase, normalize_quantity, tokens
 from ..origins import _match_preference, filter_pool
 from ..packs import pack_count
-from . import diets, place, schedule
+from . import catalog, diets, place, schedule
 from .models import (
     SLOTS,
     Basket,
@@ -150,6 +156,10 @@ def basket(draft: MealPlanDraft) -> Basket:
         resolved = draft.resolved.get(key)
         lines: list[BasketLine] = []
         left = _left_out(resolved)
+        planner = (catalog.cached_picks(draft.recipes[key].ref, doc, s)
+                   if key in usable and any(chosen[key].get(ln.line_no) is None
+                                            and not is_non_purchase(ln.name)
+                                            for ln in doc.lines) else None)
         pins = draft.pins.get(key) or {}
         planned = {ln.line_no: ln.product_id for ln in resolved.lines} if resolved else {}
         for ln in (doc.lines if key in usable else []):
@@ -164,18 +174,24 @@ def basket(draft: MealPlanDraft) -> Basket:
                     "shared_with": sorted({k for k, _no in buying.get(pid, []) if k != key}),
                     "product": None, "store": None, "price": None, "cost_for_need": None,
                     "origin": _origin(origins.get(pid), pid in demo, list(s.preference)),
-                    "available": False, "why_unavailable": None}
+                    "available": False, "unavailable_kind": None, "why_unavailable": None}
             if pid is None:
-                line["why_unavailable"] = left.get(ln.name, NO_PRODUCT)
+                kind, why = planner.left_out.get(ln.line_no, (None, None)) if planner else (
+                    None, None)
+                line.update(unavailable_kind=kind,
+                            why_unavailable=why or left.get(ln.name, NO_PRODUCT))
             else:
                 line["product"] = _product(products[pid])
                 if pid in held:
                     country, fld = held[pid]
-                    line["why_unavailable"] = (f"{products[pid].name} is evidenced as "
-                                               f"{alternatives._where(country, fld)}, which "
-                                               "this plan excludes")
+                    line.update(unavailable_kind=catalog.ORIGIN_EXCLUDED, why_unavailable=(
+                        f"{products[pid].name} is evidenced as "
+                        f"{alternatives._where(country, fld)}, which this plan excludes"))
                 elif pid not in stocked:
-                    line["why_unavailable"] = _not_in_range(max_km, nearest.get(pid))
+                    near = nearest.get(pid)
+                    line.update(unavailable_kind=(catalog.OUT_OF_RANGE if near
+                                                  else catalog.NOT_STOCKED),
+                                why_unavailable=_not_in_range(max_km, near))
                 else:
                     row = offer[store_of[pid], pid]
                     line.update(

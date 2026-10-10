@@ -31,7 +31,7 @@ from tests.mealplan_fixtures import (
 SEED = json.loads((SEEDS_DIR / "mealplan_starters.json").read_text(encoding="utf-8"))
 LIBRARY = {r["slug"]: r for r in json.loads((SEEDS_DIR / "recipes.json").read_text())}
 SLOTS = ("breakfast", "lunch", "dinner", "snack")
-TUNA, CHEDDAR, THIGHS, BONELESS, SALT = 48, 23, 11, 46, 122
+TUNA, CHEDDAR, THIGHS, BONELESS, SALT, GARLIC = 48, 23, 11, 46, 122, 13
 WHEAT_BREAD, OTHER_WHEAT_BREAD = 2, 1     # Wheat Bread 2, the resolve's pick, and Wheat Bread 1
 FAR_STORE = 4        # MegaSave Richmond, about 14 km from the server's reference point
 TUNA_MELT, BIRYANI, PIZZA = "starter:tuna_melt", "starter:chicken_biryani", \
@@ -245,7 +245,7 @@ def test_an_excluded_product_is_never_picked_or_priced(reseed):
     rules = {"exclude_origin": ["United States"]}
     excl = by_key(cat(settings=rules))
     melt = excl[TUNA_MELT]
-    assert melt["unavailable"] == ["Canned Tuna"]
+    assert melt["unavailable"] == melt["held_back"] == ["Canned Tuna"]
     assert (melt["lines_total"], melt["lines_priced"]) == (4, 3)
     picks = _resolved(TUNA_MELT, exclude=["United States"])
     assert TUNA not in picks.values() and WHEAT_BREAD not in picks.values()
@@ -267,6 +267,7 @@ def test_an_ingredient_no_store_in_range_sells_is_unavailable(reseed):
     _changed()
     near = by_key(cat(settings={"max_km": 5}))
     assert near[TUNA_MELT]["unavailable"] == ["Canned Tuna", "Cheddar Cheese"]
+    assert near[TUNA_MELT]["held_back"] == []           # no origin rule: they are out of range
     assert near[TUNA_MELT]["lines_priced"] == 2
     # the library path picks from the whole catalog, then finds no offer in range
     assert near["lib:grilled_cheese"]["unavailable"] == ["Cheddar Cheese"]
@@ -274,6 +275,29 @@ def test_an_ingredient_no_store_in_range_sells_is_unavailable(reseed):
     anywhere = by_key(cat())
     assert anywhere[TUNA_MELT]["unavailable"] == [] == anywhere["lib:grilled_cheese"][
         "unavailable"]
+
+
+def test_held_back_names_what_the_origin_rule_left_out_not_what_is_out_of_range(reseed):
+    """Garlic's only candidate evidenced as from the United States: with the exclusion, every
+    recipe with garlic has it unavailable and held back, the library's (whose planner leaves an
+    ingredient out only for the origin rule) and the starters' (whose planner leaves one out
+    of range for either reason, told apart by the same retrieval without the rule). Tuna sold
+    only out of range is unavailable and not held back, rule or not."""
+    _us_evidence(GARLIC)
+    _sql("DELETE FROM store_products WHERE product_id = :p AND store_id <> :far", p=TUNA,
+         far=FAR_STORE)
+    _changed()
+    got = by_key(cat(settings={"exclude_origin": ["United States"], "max_km": 5}))
+    for key in ("lib:tomato_penne", "starter:tomato_pilaf", "starter:ginger_soy_salmon"):
+        assert "Garlic" in got[key]["unavailable"], key
+        assert got[key]["held_back"] == ["Garlic"], key
+    melt = got[TUNA_MELT]
+    assert (melt["unavailable"], melt["held_back"]) == (["Canned Tuna"], [])
+    for r in got.values():
+        assert set(r["held_back"]) <= set(r["unavailable"]), r["key"]
+    plain = by_key(cat(settings={"max_km": 5}))
+    assert all(r["held_back"] == [] for r in plain.values())
+    assert plain["starter:tomato_pilaf"]["unavailable"] == []
 
 
 def _doc(key: str, title: str, lines: list[tuple[str, float, str]], servings: int | None = 2,
@@ -465,6 +489,7 @@ def test_an_excluded_product_is_not_available_and_never_priced(chosen, reseed):
                if ln["product"]["id"] == THIGHS]
     assert (line["available"], line["price"], line["store"], line["cost_for_need"]) == (
         False, None, None, None)
+    assert line["unavailable_kind"] == "origin_excluded"
     assert line["why_unavailable"] == ("Chicken Thighs Bone-In is evidenced as United States "
                                        "(made or packed there), which this plan excludes")
     assert line["origin"] == {"country": "United States", "claim": "United States: processed "
@@ -484,10 +509,45 @@ def test_a_product_no_store_in_range_sells_names_the_nearest_offer(chosen, resee
     body = bask({**chosen, "settings": {"max_km": 5}})
     (line,) = [ln for r in body["recipes"] for ln in r["lines"] if ln["product"]["id"] == TUNA]
     assert not line["available"] and line["price"] is None and line["store"] is None
+    assert line["unavailable_kind"] == "out_of_range"
     assert line["why_unavailable"].startswith(
         "no store within 5 km sells it; the nearest offer is MegaSave Richmond, ")
     assert line["why_unavailable"].endswith(f"km away, at ${far['price']:.2f}")
     assert body["unavailable_count"] == 1
+
+
+def test_a_line_the_resolve_left_out_says_which_rule_left_it_out(reseed):
+    """Resolved under the exclusion, the pilaf buys no garlic: the line is unavailable
+    because of the origin rule, in the planner's words, not "not sold nearby"."""
+    from pantry_planner.mealplan.models import RecipeRef
+    from pantry_planner.mealplan.resolve import resolve_one
+
+    _us_evidence(GARLIC)
+    _changed()
+    rules = {"exclude_origin": ["United States"]}
+    ref = RecipeRef(key="starter:tomato_pilaf", starter="tomato_pilaf")
+    resolved = resolve_one(ref, exclude=["United States"])
+    draft = {"start_date": "2026-10-09", "days": 7, "settings": rules,
+             "recipes": {ref.key: {"ref": ref.model_dump(mode="json"), "wanted": 2,
+                                   "slot": "lunch"}},
+             "resolved": {ref.key: resolved.model_dump(mode="json")}}
+    body = bask(draft)
+    (garlic,) = [ln for r in body["recipes"] for ln in r["lines"] if ln["ingredient"] == "Garlic"]
+    assert (garlic["product"], garlic["available"], garlic["unavailable_kind"]) == (
+        None, False, "origin_excluded")
+    assert garlic["why_unavailable"] == ("its only candidate is evidenced as coming from "
+                                         "United States, which this plan excludes")
+    assert body["unavailable_count"] == 1
+    assert all(ln["unavailable_kind"] is None for r in body["recipes"] for ln in r["lines"]
+               if ln["available"])
+
+
+def test_a_product_no_store_sells_at_all_is_not_stocked(chosen, reseed):
+    _sql("DELETE FROM store_products WHERE product_id = :p", p=TUNA)
+    (line,) = [ln for r in bask(chosen)["recipes"] for ln in r["lines"]
+               if ln["product"]["id"] == TUNA]
+    assert (line["unavailable_kind"], line["why_unavailable"]) == ("not_stocked",
+                                                                   "no store sells it")
 
 
 def test_origin_evidence_and_the_preference_order(chosen, reseed):

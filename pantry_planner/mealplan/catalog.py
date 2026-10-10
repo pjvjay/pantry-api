@@ -56,40 +56,81 @@ def est_basis(servings: int) -> str:
             "packs, so they cost more.")
 
 
+# Why a line has no product: no store sells it, no store in range does, or the plan's origin
+# exclusion holds back every candidate in range.
+ORIGIN_EXCLUDED, NOT_STOCKED, OUT_OF_RANGE = "origin_excluded", "not_stocked", "out_of_range"
+_GATE_KIND = {"excluded_by_origin": ORIGIN_EXCLUDED, "missing_ingredients": NOT_STOCKED,
+              "unavailable_within_constraints": OUT_OF_RANGE}
+
+
 @dataclass
 class Picks:
-    """One recipe's demo-mode picks, line_no -> product id; a line the resolve's retrieval
-    left out (not stocked, out of range, held back by the origin exclusion) has none. checked
-    is False when the recipe could not be planned at all (an unconfirmed or empty recipe), so
-    nothing about its lines is known."""
+    """One recipe's demo-mode picks, line_no -> product id. A line the resolve's retrieval
+    left out has none, and left_out says why: line_no -> (kind, the planner's reason), kind
+    one of ORIGIN_EXCLUDED, NOT_STOCKED, OUT_OF_RANGE. checked is False when the recipe could
+    not be planned at all (an unconfirmed or empty recipe), so nothing about its lines is
+    known."""
     by_line: dict[int, int] = field(default_factory=dict)
+    left_out: dict[int, tuple[str, str]] = field(default_factory=dict)
     checked: bool = True
+
+
+def _retrieve(ref: RecipeRef, doc: RecipeDoc, s: PlanSettings, exclude: list[str]) -> State:
+    """The resolve's retrieval and origin filter, as its flow runs them."""
+    if ref.slug is not None:
+        _r, st = flow.load_recipe(State(), recipe_slug=ref.slug)
+        _r, st = flow.load_products(st, exclude=exclude, preference=list(s.preference),
+                                    allow_partial=True)
+        return st
+    parsed = ParsedInput(recipe=to_spec(doc), constraints=Constraints())
+    _r, st = flow.parse_and_retrieve(
+        State(), recipe_text=to_recipe_text(doc), lat=s.lat, lon=s.lon, exclude=exclude,
+        preference=list(s.preference), max_km=s.max_km, allow_partial=True, parsed=parsed)
+    return st
+
+
+def _lines_left_out(doc: RecipeDoc, by_line: dict[int, int],
+                    why: dict[str, tuple[str, str]]) -> dict[int, tuple[str, str]]:
+    return {ln.line_no: why[ln.name] for ln in doc.lines
+            if ln.line_no not in by_line and ln.name in why}
 
 
 def picks(ref: RecipeRef, doc: RecipeDoc, s: PlanSettings) -> Picks:
     """What resolve buys for each line in demo mode, under the plan's shopping point and origin
-    rules, with no LLM in either mode."""
-    exclude, preference = list(s.exclude_origin), list(s.preference)
+    rules, with no LLM in either mode, and why a line it leaves out is left out. A library
+    recipe's planner leaves a line out only for the origin exclusion; a RecipeDoc's leaves one
+    out of range for either reason, so the same retrieval without the exclusion tells them
+    apart: what it keeps, the exclusion emptied."""
+    exclude = list(s.exclude_origin)
     try:
-        if ref.slug is not None:
-            _r, st = flow.load_recipe(State(), recipe_slug=ref.slug)
-            _r, st = flow.load_products(st, exclude=exclude, preference=preference,
-                                        allow_partial=True)
-        else:
-            parsed = ParsedInput(recipe=to_spec(doc), constraints=Constraints())
-            _r, st = flow.parse_and_retrieve(
-                State(), recipe_text=to_recipe_text(doc), lat=s.lat, lon=s.lon,
-                exclude=exclude, preference=preference, max_km=s.max_km, allow_partial=True,
-                parsed=parsed)
+        st = _retrieve(ref, doc, s, exclude)
     except (UnconfirmedLines, UnparseableRecipe):
         return Picks(checked=False)
-    except PlanAborted:
-        return Picks()          # a gate left nothing to plan: every line is unavailable
+    except PlanAborted as e:
+        # A gate left nothing to plan: every line it names is unavailable, for its reason.
+        alert = e.execution.aborted
+        kind = _GATE_KIND.get(alert.code.value, OUT_OF_RANGE) if alert else OUT_OF_RANGE
+        return Picks(left_out=_lines_left_out(doc, {}, {
+            d["name"]: (kind, d["reason"]) for d in (alert.details if alert else [])}))
     chosen = demomode.select_products(
         st["recipe"].ingredients, st["products"], model="demo-deterministic",
         origins_by_id=st.get("origins") or {}, preference=st.get("preference") or [],
         substitutes=st.get("substitutes"))
-    return Picks(by_line={sel.line_no: sel.product_id for sel in chosen.selections})
+    by_line = {sel.line_no: sel.product_id for sel in chosen.selections}
+    why = {d.ingredient: (NOT_STOCKED, d.reason) for d in st.get("not_stocked") or []}
+    for d in st.get("out_of_range") or []:
+        why.setdefault(d.ingredient,
+                       (ORIGIN_EXCLUDED if ref.slug is not None else OUT_OF_RANGE, d.reason))
+    if ref.slug is None and exclude and any(k == OUT_OF_RANGE for k, _r in why.values()):
+        try:
+            base = _retrieve(ref, doc, s, [])
+            still = {d.ingredient for d in [*(base.get("not_stocked") or []),
+                                            *(base.get("out_of_range") or [])]}
+        except PlanAborted:
+            still = set(why)
+        why = {n: (ORIGIN_EXCLUDED, r) if k == OUT_OF_RANGE and n not in still else (k, r)
+               for n, (k, r) in why.items()}
+    return Picks(by_line=by_line, left_out=_lines_left_out(doc, by_line, why))
 
 
 # Picks depend only on the recipe and the plan's shopping point and origin rules, not on the
@@ -167,12 +208,15 @@ def catalog(*, household_servings: int, diet: Diet, avoid: list[Avoid], settings
         scale = household_servings / doc.servings if doc.servings else None
         shares: list[float] = []
         unavailable: list[str] = []
+        held_back: list[str] = []
         for ln in bought:
             pid = pk.by_line.get(ln.line_no)
             offer = offers.get(pid) if pid in products else None
             if offer is None:
                 if pk.checked:
                     unavailable.append(ln.name)
+                if pk.left_out.get(ln.line_no, ("",))[0] == ORIGIN_EXCLUDED:
+                    held_back.append(ln.name)
                 continue
             share = (None if scale is None
                      else _share(ln, products[pid], offer["price"], scale))
@@ -195,7 +239,8 @@ def catalog(*, household_servings: int, diet: Diet, avoid: list[Avoid], settings
             key=ref.key, ref=ref, title=doc.title, slot=slot_of[ref.key], diets=dts,
             contains=contains, servings=doc.servings, fits=fits, why_not=why_not,
             est_cost_per_meal=round(sum(shares), 2) + 0.0 if shares else None,
-            lines_total=len(bought), lines_priced=len(shares), unavailable=unavailable))
+            lines_total=len(bought), lines_priced=len(shares), unavailable=unavailable,
+            held_back=held_back))
     out.sort(key=lambda r: (SLOTS.index(r.slot), r.title.casefold(), r.key))
     return Catalog(recipes=out, est_basis=est_basis(household_servings),
                    latency_ms=int((time.perf_counter() - t0) * 1000))
