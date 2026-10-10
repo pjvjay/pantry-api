@@ -471,9 +471,11 @@ The meal plan wizard's stages read two more pure endpoints. `POST /mealplan/cata
 every library recipe, demo starter and recipe of the shopper's with its slot, the diets it
 satisfies and its contains-tags, whether it fits the shopper's diet and what they avoid, and
 an estimate of one meal's cost (each line's share of its pack price, the product resolve
-picks in demo mode, no model call even live). `POST /mealplan/basket` lists each chosen
+picks in demo mode, no model call even live), and its lines, so the console costs any
+selection by whole packs as the basket does. `POST /mealplan/basket` lists each chosen
 recipe's ingredients with the draft's product, its store and distance, price, share of the
-whole packs, origin evidence and labels, and what is not available nearby and why. The
+whole packs, origin evidence and labels, and what is not available nearby and why (the
+origin rule, out of range, or not stocked). The
 draft's prefs carry a budget, and the schedule warns `over_budget` (should fix) when a
 strategy's total passes it. Details, sources and the JSON contracts:
 `docs/meal-planning.md`.
