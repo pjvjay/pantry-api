@@ -12,13 +12,16 @@ committed seeds that pantry-api reads at request time with no model call.
              and the demo starters, its exact, substitute and unrelated product types
              (Gemini), and its EmbeddingGemma query vector
   review     the review page (one row per product, flagged rows first)
+  golden     evals/substitutes_golden.json: a Gemini judge labels each seed ingredient's top
+             candidates, old word matching and new matching together, Exact / Substitute /
+             Complement / Irrelevant (evals/substitutes_eval.py scores them)
 
 Every Gemini reply is cached on disk under --cache-dir by a hash of what it was asked: a
 profile by its product's name, description, category, subcategory, size and contains-tags, a
-check by that and the profile, and a mapping by the ingredient name and the catalog's types.
-A rerun asks only for what changed, and costs no call when nothing did. Every HTTP attempt is
-counted in <cache-dir>/calls.jsonl, and no call is made once --budget attempts have been
-spent.
+check by that and the profile, a mapping by the ingredient name and the catalog's types, a
+judgement by the ingredient and its candidates. A rerun asks only for what changed, and costs
+no call when nothing did. Every HTTP attempt is counted in <cache-dir>/calls.jsonl, and no call
+is made once --budget attempts have been spent.
 
 The profiles are reviewed by hand after `check`; a fix is recorded on the profile ("fixes":
 field, from, to, why) and re-applied on every rerun, so a fix is never lost to the cache.
@@ -45,11 +48,13 @@ from pantry_planner.matching import embed as emb  # noqa: E402
 from pantry_planner.matching import seeds as mseeds  # noqa: E402
 
 SEEDS = ROOT / "seeds"
+GOLDEN = ROOT / "evals" / "substitutes_golden.json"
 MODEL = "gemini:gemini-flash-latest"
 PROMPT_VERSION = "1"
 PROFILE_BATCH = 43
 CHECK_BATCH = 85
 TYPES_BATCH = 48
+GOLDEN_BATCH = 24
 FORMS = ["fresh", "frozen", "canned", "dried", "ground", "whole", "block", "shredded",
          "sliced", "liquid", "paste", "powder", "flakes", "jarred", "bottled", "baked",
          "cured", "raw"]
@@ -577,12 +582,88 @@ types by {types_model} (seeds/ingredient_types.json). Fixed by hand after review
 """
 
 
+# ─── golden set ──────────────────────────────────────────────
+
+JUDGE_SYSTEM = """You judge grocery search results for recipe ingredients, with the labels of \
+Amazon's Shopping Queries dataset (ESCI). For each ingredient you get the products a matcher \
+offered for it. Label every product:
+
+- E (exact): it is the ingredient; a shopper buying for this recipe line accepts it as the \
+item itself (another brand, size or plain variant still counts).
+- S (substitute): it is not the ingredient, but a cook could use it instead in this line.
+- C (complement): it goes with the ingredient (same dish or meal) but cannot replace it.
+- I (irrelevant): none of these.
+
+Judge what the product is, from its name and description, not how its words look."""
+
+JUDGE_TOOL = {
+    "name": "submit_labels",
+    "description": "One label per (ingredient, product) given.",
+    "input_schema": {
+        "type": "object", "required": ["labels"],
+        "properties": {"labels": {"type": "array", "items": {
+            "type": "object", "required": ["ingredient", "id", "label"],
+            "properties": {
+                "ingredient": {"type": "string"},
+                "id": {"type": "integer"},
+                "label": {"type": "string", "enum": ["E", "S", "C", "I"]},
+            }}}},
+    },
+}
+
+
+def cmd_golden(g: Gemini, args) -> None:
+    from evals import substitutes_eval
+
+    rows = {p["id"]: p for p in _products()}
+    pools = substitutes_eval.candidate_pools(depth=args.depth)
+
+    def key(name: str, ids: list[int]) -> str:
+        # The judge's model is part of the key: one golden set is labelled by one judge.
+        body = json.dumps([PROMPT_VERSION, MODEL, name, [_row(rows[i]) for i in ids]],
+                          sort_keys=True)
+        return hashlib.sha256(body.encode()).hexdigest()
+
+    todo = [(n, ids) for n, ids in pools.items() if g.get("judge", key(n, ids)) is None]
+    print(f"golden: {len(pools) - len(todo)} cached, {len(todo)} to ask "
+          f"({sum(len(v) for v in pools.values())} pairs)")
+    for i, batch in enumerate(_batches(todo, GOLDEN_BATCH)):
+        if not batch:
+            continue
+        user = json.dumps({"ingredients": [
+            {"ingredient": n, "products": [{"id": r["id"], "name": r["name"],
+                                            "description": r["description"]}
+                                           for r in (_row(rows[i]) for i in ids)]}
+            for n, ids in batch]}, ensure_ascii=False)
+        reply = g.call(f"golden {i + 1}", JUDGE_SYSTEM, user, JUDGE_TOOL,
+                       max_tokens=25 * sum(len(ids) for _, ids in batch) + 1000)
+        got: dict[str, dict[int, str]] = {}
+        for r in reply["input"].get("labels", []):
+            got.setdefault(r["ingredient"].lower(), {})[int(r["id"])] = r["label"]
+        for n, ids in batch:
+            labels = got.get(n.lower(), {})
+            if all(i in labels for i in ids):
+                g.put("judge", key(n, ids), {str(i): labels[i] for i in ids})
+            else:
+                print(f"  {n}: {len([i for i in ids if i not in labels])} unlabelled; rerun")
+    out = {}
+    for n, ids in pools.items():
+        labels = g.get("judge", key(n, ids))
+        if labels is not None:
+            out[n] = {"labels": {i: labels[i] for i in sorted(labels, key=int)}}
+    _write(GOLDEN, {"v": 1, "judge": MODEL, "labels": "E exact, S substitute, C complement, "
+                    "I irrelevant (ESCI)", "gains": substitutes_eval.GAINS,
+                    "depth": args.depth, "about": substitutes_eval.GOLDEN_ABOUT,
+                    "ingredients": out})
+    print(f"wrote {len(out)} ingredients to {GOLDEN.relative_to(ROOT)}")
+
+
 # ─── main ────────────────────────────────────────────────────
 
 def main(argv: list[str] | None = None) -> None:
     global MODEL
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("step", choices=["profiles", "check", "embed", "types", "review",
+    ap.add_argument("step", choices=["profiles", "check", "embed", "types", "review", "golden",
                                      "spent"])
     ap.add_argument("--cache-dir", type=Path,
                     default=Path("~/.cache/pantry-matching").expanduser())
@@ -591,6 +672,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     ap.add_argument("--embedding-model", default="embeddinggemma")
     ap.add_argument("--out", default="~/Downloads/pantry-design/product-profiles-review.html")
+    ap.add_argument("--depth", type=int, default=20, help="golden: candidates per method")
     ap.add_argument("--model", default=MODEL, help="a Gemini flash model, gemini:<name>")
     ap.add_argument("--retries", type=int, default=2, help="tries after a 429 or 5xx, 90 s "
                     "apart")
@@ -602,7 +684,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"{g.spent()} of {args.budget} Gemini calls spent")
         return
     {"profiles": cmd_profiles, "check": cmd_check, "embed": cmd_embed, "types": cmd_types,
-     "review": cmd_review}[args.step](g, args)
+     "review": cmd_review, "golden": cmd_golden}[args.step](g, args)
     print(f"Gemini calls spent so far: {g.spent()} of {args.budget}")
 
 
