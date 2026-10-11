@@ -555,8 +555,10 @@ class AltRating(BaseModel):
 class RankedAlternative(BaseModel):
     """One candidate product for the line. `current` marks the cart's own
     pick. `tier`: same (the ingredient, at the exact, form or generic level),
-    other (shares the head noun, or a same-aisle substitute) or outside (the
-    cart's pick when it matches none of the line's words). `packs` is what
+    other (shares the head noun, a same-aisle substitute, or matches the
+    words but is another food from another aisle, as peanut butter is for
+    butter) or outside (the cart's pick when it matches none of the line's
+    words). `packs` is what
     the cart would buy; `pack_fit` whether that covers the recipe's need;
     `cost_for_need` the price of enough packs for the need (None when the
     need or the pack size is unknown or in another unit), at the price a

@@ -422,8 +422,11 @@ cart and keeps them away from its model.
   `AlternativeRanking` (`alternatives.py`). Candidates are the line at the exact, equivalent
   form, form and generic levels plus its head word (one options query), and same-aisle
   substitutes from stores in range when the pool is thin (the planner's t4 lookup; price ties
-  go to the lower id). Order (`ORDER`): same ingredient first, then
-  `alternatives.closeness` (the demo selector's `units.semantic_key`, with its head test read
+  go to the lower id). A product that matches the words but is another food (not mainly the
+  line's ingredient word, and from another aisle than the pick's) is not the same ingredient:
+  for "butter", Canadian Peanut Butter Cream is "Mentions butter, but it is peanut butter",
+  while Extra Virgin Olive Oil stays the same ingredient for "olive oil". Order (`ORDER`): same
+  ingredient first, then `alternatives.closeness` (the demo selector's `units.semantic_key`, with its head test read
   from the line's ingredient word, so "cumin powder" is about cumin, not powder; for a line
   that ends in its ingredient word it only breaks semantic_key's ties), pack fit for the
   recipe's amount, origin preference only when the plan had one, the trip total after the

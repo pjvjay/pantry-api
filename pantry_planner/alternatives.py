@@ -268,6 +268,42 @@ def closeness(line_name: str, product: Product) -> tuple[int, int, int, int]:
             0 if head_noun(product.name) == word else 1)
 
 
+def _aisle_of(word: str, pick: Product | None, found: dict[int, str],
+              catalog: dict[int, Product]) -> str | None:
+    """The aisle the ingredient `word` is in: the pick's subcategory, or with no pick the one
+    most of the same-ingredient candidates mainly about `word` share (ties by name); None
+    when that is not known."""
+    if pick is not None:
+        return pick.subcategory or None
+    shared = Counter(catalog[pid].subcategory for pid, m in found.items()
+                     if _TIER[m] == "same" and pid in catalog and catalog[pid].subcategory
+                     and head_noun(catalog[pid].name) == word)
+    return min(shared.items(), key=lambda kv: (-kv[1], kv[0]))[0] if shared else None
+
+
+def _another_food(product: Product, word: str, aisle: str | None) -> bool:
+    """A product that matches the line's words but is another food: not mainly the
+    ingredient (its head noun is not the line's ingredient word) and from another aisle than
+    the ingredient's. Canadian Peanut Butter Cream for butter is; Extra Virgin Olive Oil for
+    olive oil, Boneless Skinless Chicken Breast for chicken breast, Tomato Paste for canned
+    tomatoes (the canned aisle) are not."""
+    return (bool(word) and aisle is not None and head_noun(product.name) != word
+            and (product.subcategory or None) != aisle)
+
+
+def _what_it_is(product: Product, word: str) -> str:
+    """What a product that mentions `word` is instead: the word with the one before it in
+    the product's name ("peanut butter"), its own head noun when the name starts with the
+    word ("mainly sauce"), or its name when only its description mentions it."""
+    toks = tokens(product.name)
+    if word not in toks:
+        return product.name
+    if toks.index(word) > 0:
+        return f"{toks[toks.index(word) - 1]} {word}"
+    head = head_noun(product.name)
+    return f"mainly {head}" if head else product.name
+
+
 def _spec(line: BasisLine, name: str | None = None) -> IngredientSpec:
     if name is not None:      # the head noun alone: no purchase form to require
         return IngredientSpec(name=name, quantity=line.quantity, unit=line.unit)
@@ -797,6 +833,10 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
         reach = _out_of_reach(basis, reach, catalog, effect.stores_off)
 
     synthetic = settings().offers_synthetic
+    # A row whose words match but which is another food moves to the other tier.
+    word = _strong_head(planned[line_no].name)
+    aisle = _aisle_of(word, catalog.get(current_id) if current_id is not None else None,
+                      g.pools[line_no].found, catalog)
     needs = [effect.needs.get(n) for n in group] if effect else _needs(basis, group)
     lines = [planned[n] for n in group]
     library = basis.path == "library"
@@ -826,7 +866,9 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
                   if st is not None and st[1] > 0 and st[0] is not None else None)
         pref = preference_rank(g.origins.get(pid), basis.preference) if use_pref else worst
         rows.append(_Row(
-            product=p, match=match, tier=_TIER[match], current=pid == current_id,
+            product=p, match=match,
+            tier=("other" if _TIER[match] == "same" and _another_food(p, word, aisle)
+                  else _TIER[match]), current=pid == current_id,
             offer=offer, packs=cart_packs, pack_fit=fit, cost_for_need=cost,
             pack_reason=pack_reason, unit_price=unit_price, unit_basis=unit_basis,
             origin=_alt_origin(g.origins.get(pid), pid in g.demo),
@@ -1026,6 +1068,10 @@ def _reasons(r: _Row, line: BasisLine, located: bool, synthetic: bool,
                           text="The cart's pick; it matches none of the recipe's words",
                           tone="info"),
     }[r.match]
+    if r.tier == "other" and _TIER[r.match] == "same":
+        word = _strong_head(line.name)
+        match = Reason(code="match", text=f"Mentions {word}, but it is "
+                       f"{_what_it_is(p, word)}; not the same ingredient", tone="minus")
     o = r.origin
     origin_text = o.label + (f': "{o.verbatim}"' if o.verbatim else "") + (
         " (demo label photo)" if o.demo else "")
