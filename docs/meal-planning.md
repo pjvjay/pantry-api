@@ -162,7 +162,15 @@ every word of the name in its own makes it the same item, ranked after the profi
    nothing at or above 0.50 the line is not stocked. The floors are measured: a name and its
    own type score 0.53-0.71, an unstocked name's nearest type 0.37-0.59, so a weak nearest
    type is offered as working instead, never as the same item ("unsalted butter", 0.53, is
-   bought as salted butter, labelled a substitution; "cream cheese" is never cheddar).
+   bought as salted butter, labelled a substitution; "cream cheese" is never cheddar). Such a
+   name's form and variant are read from the catalog's own: a form among its words prefers a
+   type within 0.05 of the nearest whose products have it ("cumin powder" is cumin, ground,
+   though cumin seeds are a little nearer), and the variant is the longest of a candidate
+   type's variants all of whose words it has ("extra-virgin olive oil" asks for extra virgin,
+   "crushed tomatoes" for crushed, "boneless skinless chicken thighs" for boneless skinless).
+   When a seed ingredient names its type as the same item, what works instead is that seed's
+   list (Gemini's labels) rather than the type's embedding neighbours: pasta sauce does not
+   work instead of "penne pasta".
 2. *Candidates.* Every product whose type is the same item (**Same item**) or works instead
    (**Works instead**), and the 20 products nearest the name's vector at or above 0.47 whose
    type is neither unrelated nor already in a group (**Looser match**, Options only).

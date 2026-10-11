@@ -260,7 +260,7 @@ pantry-planner/
 ├── docs/nutrition.md      # nutrition: sources, the rules, endpoints, shapes, targets
 ├── skills/recipe-shopper/ # Agent Skill: recipe link → cheapest basket nearby
 ├── scripts/matching_seeds.py # the offline matching pipeline (Gemini + Ollama, cached)
-├── tests/                 # pytest (1,375 tests), LLM and embedder mocked
+├── tests/                 # pytest (1,376 tests), LLM and embedder mocked
 ├── evals/                 # golden sets + comparison harness (substitutes_eval.py: matching)
 └── ARCHITECTURE.md
 ```

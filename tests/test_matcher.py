@@ -178,3 +178,33 @@ def test_an_unreachable_ollama_is_not_asked_again_for_a_minute(tmp_path):
         with pytest.raises(embed.EmbedderUnavailableError, match="unreachable"):
             e.embed([name], "query")
     assert len(calls) == 1
+
+
+def test_an_embedded_name_asks_for_its_form_and_variant():
+    """The catalog's own forms and variants, found in a name no seed knows: "extra-virgin
+    olive oil" asks for extra virgin (that bottle ranks first of the olive oils), "cumin
+    powder" for the ground form (cumin, ground, before cumin seeds a little nearer), and what
+    works instead of olive oil is the olive oil seed's list, not the embedding's neighbours."""
+    from pantry_planner.matching import embed, matcher, seeds
+    from tests.fake_embedder import unit
+
+    cents = seeds.load().centroids
+    between = unit([0.55 * a + 0.45 * b for a, b in zip(cents["cumin seeds"], cents["cumin"],
+                                                         strict=True)])
+    fake = FakeEmbedder.mapping(**{"extra-virgin olive oil": "olive oil",
+                                   "crushed tomatoes": "canned tomatoes"})
+    fake.table["cumin powder"] = between
+    embed.set_embedder(fake)
+    oil = matcher.meaning_of("extra-virgin olive oil")
+    assert (oil.exact, oil.variant) == (("olive oil",), "extra virgin")
+    assert oil.substitutes == seeds.load().ingredients["olive oil"].substitute_types
+    ranked = [r for r in matcher.rank_pool(oil, list(_catalog().values()))
+              if r.group == "same_item"]
+    assert [r.product_id for r in ranked] == [EVOO, OLIVE_OIL_1L]
+    assert matcher.meaning_of("crushed tomatoes").variant == "crushed"
+    cumin = matcher.meaning_of("cumin powder")
+    assert cumin.nearest[0] == "cumin seeds" and (cumin.exact[0], cumin.form) == (
+        "cumin", "ground")
+    assert matcher.asked_form("frozen broccoli florets", None) == "frozen"
+    assert matcher.asked_form("whole milk", None) == ""
+    assert matcher.asked_form("tomatoes", "canned") == "canned"

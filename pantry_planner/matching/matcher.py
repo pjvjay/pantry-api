@@ -10,9 +10,14 @@ related (unrelated: "peanut butter" for "butter"), and the form and variant the 
               Gemini once, offline
   embedding   any other name (imported, pasted, written by the assistant): embedded with
               EmbeddingGemma and compared with every product type's centroid. The nearest type
-              at or above EXACT_FLOOR is the same item (with any type within TIE of it); the
-              other types at or above TYPE_FLOOR work instead (at most MAX_SUBSTITUTES).
-              Nothing at or above TYPE_FLOOR: the name is not stocked.
+              at or above EXACT_FLOOR is the same item (with any type within TIE of it); a
+              form the name asks for (asked_form: "cumin powder") prefers a type within
+              FORM_TIE of the nearest whose products have it. What works instead is a seed's
+              substitutes when a seed ingredient names the same type as the same item, else
+              the other types at or above TYPE_FLOOR (at most MAX_SUBSTITUTES). Nothing at or
+              above TYPE_FLOOR: the name is not stocked. The variant it asks for is the
+              longest variant of a candidate type's products all of whose words it has
+              (asked_variant: "extra-virgin olive oil" asks for extra virgin).
   words       no seed knows the name and the embedder cannot be reached: the caller matches it
               by today's words (nlsearch's token levels), and says so (matching "words")
 
@@ -59,6 +64,7 @@ order with the trip filled in, so the plan and its alternatives agree.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from typing import Literal
 
@@ -86,6 +92,11 @@ WEIGHTS = {"relevance": 0.30, "form_variant": 0.15, "pack_fit": 0.20, "value": 0
            "origin": 0.10, "trip": 0.10}
 # Forms one name and another product call the same thing.
 SAME_FORM = {"powder": "ground", "powdered": "ground", "ground": "ground", "dry": "dried"}
+# The forms an embedded name may ask for in its words (the profiles' forms a recipe names;
+# not "whole", which is whole milk and whole wheat as often as a whole spice).
+ASKED_FORMS = frozenset({"fresh", "frozen", "canned", "dried", "dry", "ground", "powder",
+                         "powdered", "sliced", "shredded", "flakes", "paste"})
+FORM_TIE = 0.05
 
 
 # ─── What a name means ───────────────────────────────────────
@@ -174,16 +185,67 @@ def meaning_of(name: str, form: str | None = None) -> Meaning:
     return meanings([(name, form)])[0]
 
 
+def _words(text: str) -> list[str]:
+    return re.findall(r"[a-z]+", text.lower())
+
+
+def asked_form(name: str, form: str | None) -> str:
+    """The purchase form a name asks for: the parser's, else one of ASKED_FORMS among its
+    words ("frozen broccoli", "cumin powder" -> ground); "" when none."""
+    if form:
+        return SAME_FORM.get(form.lower(), form.lower())
+    for w in _words(name):
+        if w in ASKED_FORMS:
+            return SAME_FORM.get(w, w)
+    return ""
+
+
+def asked_variant(name: str, types: set[str]) -> str:
+    """The variant a name asks for: the longest variant of a product of `types` whose words
+    are all in the name ("extra virgin" for "extra-virgin olive oil", "crushed" for "crushed
+    tomatoes"); "" when none is."""
+    words = set(tokens(" ".join(_words(name))))
+    found = {p.variant for p in seeds.load().profiles.values()
+             if p.product_type in types and p.variant
+             and set(tokens(p.variant)) <= words and tokens(p.variant)}
+    return max(found, key=lambda v: (len(tokens(v)), v)) if found else ""
+
+
 def _embedded(name: str, form: str | None, vector: list[float]) -> Meaning:
     """An unknown name mapped to the nearest product types by cosine (module docstring)."""
-    sims = sorted(((embed.cosine(vector, c), t) for t, c in seeds.load().centroids.items()),
+    s = seeds.load()
+    sims = sorted(((embed.cosine(vector, c), t) for t, c in s.centroids.items()),
                   key=lambda st: (-st[0], st[1]))
+    nearest = (sims[0][1], round(sims[0][0], 4)) if sims else None
+    want = asked_form(name, form)
+    if want and sims:
+        # A form the name asks for chooses between near types: "cumin powder" is cumin
+        # (ground), not cumin seeds, a little nearer.
+        forms: dict[str, set[str]] = {}
+        for p in s.profiles.values():
+            forms.setdefault(p.product_type, set()).add(SAME_FORM.get(p.form, p.form))
+        near = [st for st in sims if st[0] >= sims[0][0] - FORM_TIE]
+        if want not in forms.get(sims[0][1], set()):
+            hit = next((st for st in near if want in forms.get(st[1], set())), None)
+            if hit is not None:
+                sims = [(sims[0][0], hit[1])] + [st for st in sims if st[1] != hit[1]]
     best = sims[0][0] if sims else 0.0
     exact = tuple(t for sim, t in sims if sim >= EXACT_FLOOR and sim >= best - TIE)
-    subs = tuple(t for sim, t in sims if sim >= TYPE_FLOOR and t not in exact)[:MAX_SUBSTITUTES]
+    # What works instead of a type a seed ingredient names as the same item is that seed's
+    # (Gemini's labels, offline) rather than the type's embedding neighbours.
+    seeded = [i for i in s.ingredients.values() if set(i.exact_types) & set(exact)]
+    if seeded:
+        subs = tuple(dict.fromkeys(t for i in seeded for t in i.substitute_types
+                                   if t not in exact))
+        unrelated = tuple(dict.fromkeys(t for i in seeded for t in i.unrelated_types))
+    else:
+        subs = tuple(t for sim, t in sims if sim >= TYPE_FLOOR
+                     and t not in exact)[:MAX_SUBSTITUTES]
+        unrelated = ()
     return Meaning(name=name, source="embedding", exact=exact, substitutes=subs,
-                   form=(form or "").lower(), vector=tuple(vector),
-                   nearest=(sims[0][1], round(sims[0][0], 4)) if sims else None)
+                   unrelated=unrelated, form=want,
+                   variant=asked_variant(name, set(exact) | set(subs)),
+                   vector=tuple(vector), nearest=nearest)
 
 
 # ─── Candidates ──────────────────────────────────────────────
