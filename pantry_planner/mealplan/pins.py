@@ -8,8 +8,9 @@ chat cart's swap goes through: the line is one the plan bought a product for, th
 one of its candidates, the plan's origin exclusion does not hold it back, and a store in
 range sells it.
 
-A pin may also fill a line the resolve bought nothing for: validate_pins' open_lines checks it
-the same way, and the line then buys it everywhere (basket, schedule, catalog).
+A pin may also fill a line the resolve bought nothing for, chosen from that line's Options
+(mealplan/options.py): validate_pins' open_lines checks it the same way, and the line then
+buys it everywhere (basket, schedule, catalog).
 
 validate_pins reads a PlanBasis: what the recipe was planned from. meal_basis rebuilds it on
 the server from the recipe itself (resolve.recipe_doc) exactly as resolve planned it (a

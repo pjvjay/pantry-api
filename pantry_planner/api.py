@@ -16,7 +16,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from . import db, flow, limits
 from .calendar_api import router as calendar_router
@@ -809,16 +809,31 @@ def mealplan_schedule(draft: MealPlanDraft) -> MealSchedule:
         raise _meal_plan_error(e) from e
 
 
+class OptionsLine(BaseModel):
+    """A recipe line that buys nothing, by its recipe's key and its line number."""
+
+    recipe_key: str = Field(min_length=1, max_length=100)
+    line_no: int = Field(ge=1, le=MAX_DOC_LINES)
+
+
 class TripLineOptionsRequest(BaseModel):
     """One trip line: the product bought on `trip_date` under `strategy` (the draft's own
     when omitted), in the plan as `draft` holds it. With no trip_date: every line of the
-    plan that buys the product, before any trip is planned."""
+    plan that buys the product, before any trip is planned. `line` in place of `product_id`
+    (exactly one of the two): a line that buys nothing, and its options."""
 
     draft: MealPlanDraft
     trip_date: dt.date | None = None
-    product_id: int = Field(ge=1, le=2**31 - 1)
+    product_id: int | None = Field(default=None, ge=1, le=2**31 - 1)
+    line: OptionsLine | None = None
     strategy: Literal["fresh", "fewest_trips"] | None = None
     limit: int = Field(default=12, ge=1, le=25)
+
+    @model_validator(mode="after")
+    def _product_or_line(self) -> TripLineOptionsRequest:
+        if (self.product_id is None) == (self.line is None):
+            raise ValueError("name exactly one of product_id or line")
+        return self
 
 
 async def _options_size(request: Request) -> None:
@@ -833,15 +848,20 @@ def mealplan_alternatives(req: TripLineOptionsRequest) -> TripLineOptions:
     for every recipe line the purchase covers, under the plan's shopping point and origin
     rules, each row's trip the plan re-scheduled with that product pinned (no LLM). With no
     trip_date the purchase is every line of the plan buying the product and no row has a
-    trip (plan_total null). The console pins the chosen product on `lines`. 422 as
-    /mealplan/schedule; 409 no_trip_line when nothing buys such a product any more."""
+    trip (plan_total null). With `line` instead of `product_id`: the options for a line that
+    buys nothing and every other such line of the same ingredient (product_id null, no row
+    current; ranking.out_of_reach says what is sold only at stores turned off or beyond the
+    plan's distance). The console pins the chosen product on `lines`. 422 as
+    /mealplan/schedule, and for both or neither of product_id and line; 409 no_trip_line
+    when nothing buys such a product any more, or the line buys something."""
     from . import alternatives as alts
     from .mealplan.models import MealPlanError
     from .mealplan.options import NoTripLineError, options_error, trip_line_options
 
     try:
-        return trip_line_options(req.draft, req.trip_date, req.product_id, req.strategy,
-                                 req.limit)
+        return trip_line_options(
+            req.draft, req.trip_date, req.product_id, req.strategy, req.limit,
+            line=(req.line.recipe_key, req.line.line_no) if req.line else None)
     except (MealPlanError, NoTripLineError, alts.BasisError, alts.PinError) as e:
         status, detail = options_error(e)
         raise HTTPException(status_code=status, detail=detail) from e

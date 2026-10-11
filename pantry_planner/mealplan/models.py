@@ -508,12 +508,18 @@ class TripLineOptions(BaseModel):
     trip_date None: no trip is planned yet (the wizard's Ingredients stage). The ranking is
     for every line of the plan that buys the product, each row's trip is None, its packs are
     what those meals need and cost_for_need those packs at its cheapest offer in range;
-    plan_total is None. `lines` still names every covered line, so choosing pins them all."""
+    plan_total is None. `lines` still names every covered line, so choosing pins them all.
+
+    Asked for by a line that buys nothing (product_id None, product "", stocked False): the
+    ranking is for that line and every other line of the plan with the same ingredient that
+    buys nothing, with no row current; ranking.held_back lists what the origin exclusion holds
+    back, with its evidence, and ranking.out_of_reach what is sold only at stores turned off
+    or beyond the plan's distance. Neither is choosable; choosing a row pins every line."""
     v: Literal[1] = 1
     rev: int
     strategy: Strategy
     trip_date: dt.date | None
-    product_id: int
+    product_id: int | None
     product: str
     stocked: bool
     pinned: bool

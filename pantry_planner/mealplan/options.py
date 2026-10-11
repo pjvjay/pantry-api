@@ -26,6 +26,16 @@ is every line of the plan that buys the product, for all its recipe's meals, as
 /mealplan/basket lists them, and choosing another product still pins them all. No trip is
 worked out: each row's trip is None, with a reason saying so, its packs are what those meals
 need and its cost_for_need those packs at its cheapest offer in range; plan_total is None.
+
+A line that buys nothing (the resolve found no product it may buy, under the origin rule, in
+range or at all, and no pin fills it) has Options too, asked for by the line instead of a
+product: the products that could fill it, ranked the same way with no current pick
+(rank_alternatives' open_lines), for that line and every other line of the plan with the same
+ingredient that buys nothing either. What the origin exclusion holds back is listed with its
+evidence, and what is sold only at stores turned off or beyond the plan's distance is said so
+(ranking.out_of_reach); neither is choosable. Choosing a row pins every covered line, which
+pins.check_pins accepts on such a line (validate_pins' open_lines). With a trip date each
+row's trip is the plan re-scheduled with that product bought for those lines' placed meals.
 """
 from __future__ import annotations
 
@@ -35,9 +45,11 @@ import math
 
 from .. import alternatives, flow
 from ..models import AltBuy, AltMove, AltTrip, Product
+from ..nlsearch.units import is_non_purchase
 from ..packs import pack_count
 from . import place, schedule
 from .models import (
+    SLOTS,
     CoveredLine,
     MealPlanDraft,
     MealPlanError,
@@ -76,6 +88,68 @@ def _basket_needs(draft: MealPlanDraft, pre: schedule.Prepared, product_id: int)
     return out
 
 
+def _same_name(name: str) -> str:
+    return " ".join(name.casefold().split())
+
+
+def _open_lines(draft: MealPlanDraft, pre: schedule.Prepared, key: str,
+                line_no: int) -> list[tuple[str, int]]:
+    """The lines a line's Options cover: that line and every other line of the plan with the
+    same ingredient that buys nothing either (a purchase line of a resolved recipe with a
+    meal, with no product from the resolve or a pin), as /mealplan/basket lists them. Raises
+    MealPlanError for a recipe the plan does not have, and NoTripLineError when the line is
+    not one that buys nothing: the plan changed since the console drew it."""
+    if key not in draft.recipes:
+        raise MealPlanError("unknown_recipe_key", f"the plan has no recipe {key!r}",
+                            recipe_key=key)
+    with_meals = {m.recipe_key for m in place.expand(draft)}
+
+    def open_(k: str) -> dict[int, str]:
+        resolved = draft.resolved.get(k)
+        if k not in with_meals or resolved is None or resolved.status not in USABLE:
+            return {}
+        return {ln.line_no: ln.name for ln in pre.docs[k].lines
+                if ln.line_no not in pre.chosen[k] and not is_non_purchase(ln.name)}
+
+    title = pre.docs[key].title
+    mine = open_(key)
+    if line_no not in mine:
+        doc_line = next((ln for ln in pre.docs[key].lines if ln.line_no == line_no), None)
+        pid = pre.chosen[key].get(line_no)
+        if pid is not None:
+            raise NoTripLineError(f"line {line_no} of {title} buys {pre.products[pid].name} "
+                                  "(the plan changed since): ask for its options by "
+                                  "product_id")
+        why = (f"{title} has no line {line_no}" if doc_line is None
+               else f"{title} has no meal in the plan" if key not in with_meals
+               else f"{title} is not resolved yet, so nothing is bought for it"
+               if key not in draft.resolved or draft.resolved[key].status not in USABLE
+               else f"line {line_no} of {title} ({doc_line.name}) is not bought")
+        raise NoTripLineError(f"{why}; the plan changed since")
+    name = _same_name(mine[line_no])
+    return sorted((k, n) for k in draft.recipes for n, nm in open_(k).items()
+                  if _same_name(nm) == name)
+
+
+def _open_needs(draft: MealPlanDraft, pre: schedule.Prepared, covered: list[tuple[str, int]],
+                placed: bool) -> list[Need]:
+    """What the meals of the covered lines' recipes need of them, as if they were bought
+    (product id 0 until a candidate takes its place): every meal, placed or not, as
+    /mealplan/basket counts them; or, for a trip, the meals on the board, on their day and
+    slot."""
+    lines_of: dict[str, dict[int, int]] = {}
+    for k, n in covered:
+        lines_of.setdefault(k, {})[n] = 0
+    out: list[Need] = []
+    for m in place.expand(draft):
+        if m.recipe_key not in lines_of or (placed and m.id not in pre.cook):
+            continue
+        day, slot = pre.cook[m.id][:2] if placed else (0, place.slot_of(draft, m))
+        out += needs_for_meal(draft, m, day, slot, pre.docs[m.recipe_key],
+                              lines_of[m.recipe_key])
+    return out
+
+
 def _run(draft: MealPlanDraft, pre: schedule.Prepared, needs: list[Need], name: str,
          offers: list[dict]) -> StrategyResult:
     ctx = schedule._Ctx(draft, pre.products, needs, pre.board, pre.cook, offers=offers)
@@ -106,14 +180,17 @@ def _need_note(needs: list[Need], titles: dict[str, str]) -> str:
     return "The recipe's lines give amounts in different units"
 
 
-def trip_line_options(draft: MealPlanDraft, trip_date: dt.date | None, product_id: int,
+def trip_line_options(draft: MealPlanDraft, trip_date: dt.date | None, product_id: int | None,
                       strategy: str | None = None,
-                      limit: int = alternatives.DEFAULT_LIMIT) -> TripLineOptions:
+                      limit: int = alternatives.DEFAULT_LIMIT, *,
+                      line: tuple[str, int] | None = None) -> TripLineOptions:
     """The options for the line buying `product_id` on the trip of `trip_date` under
     `strategy` (the draft's own by default), or, with no trip date, for every line of the plan
-    that buys it, with no trip. Raises MealPlanError for a draft no schedule can be computed
-    for, NoTripLineError when nothing buys such a product, and alternatives.BasisError for a
-    bad limit."""
+    that buys it, with no trip. With `line` (recipe_key, line_no) in place of a product: the
+    options for that line, which buys nothing, and every other line of the same ingredient
+    that buys nothing, with no current pick. Raises MealPlanError for a draft no schedule can
+    be computed for, NoTripLineError when nothing buys such a product (or the line buys
+    something), and alternatives.BasisError for a bad limit."""
     name = strategy or draft.prefs.strategy
     pre = schedule.prepare(draft)
     lat, lon, max_km = schedule._location(draft)
@@ -121,7 +198,16 @@ def trip_line_options(draft: MealPlanDraft, trip_date: dt.date | None, product_i
     offers = schedule._offers(sorted(pre.products), lat, lon, max_km, draft.settings.stores_off)
     base: StrategyResult | None = None
     trip: Trip | None = None
-    if trip_date is None:
+    mine: list[Need] = []            # a line that buys nothing: its needs, as if bought
+    opened: list[tuple[str, int]] = []
+    if line is not None:
+        opened = _open_lines(draft, pre, *line)
+        mine = _open_needs(draft, pre, opened, trip_date is not None)
+        bought, meals = mine, {n.meal_id for n in mine}
+        if trip_date is not None:
+            base = _run(draft, pre, pre.needs, name, offers)
+            trip = _trip_on(base, trip_date)
+    elif trip_date is None:
         bought = _basket_needs(draft, pre, product_id)
         if not bought:
             raise NoTripLineError(f"no line of the plan buys product {product_id}; the plan "
@@ -137,7 +223,7 @@ def trip_line_options(draft: MealPlanDraft, trip_date: dt.date | None, product_i
                 f"{STRATEGY_NAMES.get(name, name)}; the plan changed since")
         meals = {m.meal_id for ln in here for m in ln.for_meals}
         bought = [n for n in pre.needs if n.product_id == product_id and n.meal_id in meals]
-    covered = sorted({(n.recipe_key, n.line_no) for n in bought})
+    covered = opened or sorted({(n.recipe_key, n.line_no) for n in bought})
     cover_set = set(covered)
     titles = {key: doc.title for key, doc in pre.docs.items()}
 
@@ -163,8 +249,13 @@ def trip_line_options(draft: MealPlanDraft, trip_date: dt.date | None, product_i
     shared: dict[int, list[str]] = {}
 
     def effect(pid: int) -> tuple[AltTrip | None, int | None, float | None, str]:
-        trial = [dataclasses.replace(n, product_id=pid)
-                 if (n.recipe_key, n.line_no) in cover_set else n for n in pre.needs]
+        if line is not None:            # bought for those lines, where nothing was
+            trial = sorted([*pre.needs, *(dataclasses.replace(n, product_id=pid)
+                                          for n in mine)],
+                           key=lambda n: (n.day, SLOTS.index(n.slot), n.meal_id, n.line_no))
+        else:
+            trial = [dataclasses.replace(n, product_id=pid)
+                     if (n.recipe_key, n.line_no) in cover_set else n for n in pre.needs]
         after = _run(draft, pre, trial, name, offers)
         found: list[tuple[Trip, TripLine]] = [
             (t, ln) for t in after.trips for ln in t.lines
@@ -193,7 +284,8 @@ def trip_line_options(draft: MealPlanDraft, trip_date: dt.date | None, product_i
             shared[pid] = others
         store = got[0].store
         row = unit.get((store, pid)) if store else None
-        before = {ln.product.id: (ln.product.name, ln.store) for ln in trip.lines}
+        before = {ln.product.id: (ln.product.name, ln.store)
+                  for ln in (trip.lines if trip else [])}
         now = {ln.product.id: ln.store for ln in t_after.lines} if t_after.date == trip_date \
             else {}
         moved = [AltMove(product_id=q, product=nm, from_store=a, to_store=now[q])
@@ -220,10 +312,12 @@ def trip_line_options(draft: MealPlanDraft, trip_date: dt.date | None, product_i
                    if o is not None and n_packs is not None else None)
         return None, n_packs, charged, NO_TRIP
 
-    ranking = alternatives.rank_alternatives(basis, 1, limit, effect=alternatives.TripEffect(
-        needs=needs, on_trip=set(trip.stores) if trip else set(), packs=packs,
-        effect=effect if trip else no_trip, where=WHERE,
-        stores_off=frozenset(draft.settings.stores_off)))
+    asked = covered.index(line) + 1 if line is not None else 1
+    ranking = alternatives.rank_alternatives(
+        basis, asked, limit, open_lines=line is not None, effect=alternatives.TripEffect(
+            needs=needs, on_trip=set(trip.stores) if trip else set(), packs=packs,
+            effect=effect if base is not None else no_trip, where=WHERE,
+            stores_off=frozenset(draft.settings.stores_off)))
 
     # The meal plan's words where the cart's would mislead: the ingredient once per name, the
     # reason an amount is unknown, and a purchase the product would share with other meals.
@@ -248,8 +342,8 @@ def trip_line_options(draft: MealPlanDraft, trip_date: dt.date | None, product_i
             pinned_product_id=(pins.get(key) or {}).get(str(line_no))))
     return TripLineOptions(
         rev=draft.rev, strategy=name, trip_date=trip_date, product_id=product_id,
-        product=pre.products[product_id].name,
-        stocked=any(r["product_id"] == product_id for r in offers),
+        product=pre.products[product_id].name if product_id is not None else "",
+        stocked=product_id is not None and any(r["product_id"] == product_id for r in offers),
         pinned=any(c.pinned_product_id is not None
                    and c.pinned_product_id != c.planner_product_id for c in out_lines),
         lines=out_lines, plan_total=base.total_cost if base else None, ranking=ranking)

@@ -551,6 +551,122 @@ def test_a_pin_may_fill_a_line_the_resolve_bought_nothing_for(onions):
         "detail"]
 
 
+def _line_options(draft: dict, key: str = PILAF, **extra) -> dict:
+    r = client().post("/mealplan/alternatives", json={
+        "draft": draft, "line": {"recipe_key": key, "line_no": ONION_LINES[key]}, **extra})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_a_line_that_buys_nothing_has_options_and_a_row_chosen_makes_it_available(onions):
+    """The Yellow Onion lines buy nothing (the US rule holds every yellow onion back). Their
+    Options rank what could fill both at once, with no current pick; choosing a row pins both
+    lines, and the basket then buys it for them."""
+    _grown_in_the_us(*YELLOW_ONIONS)
+    draft = _no_yellow_onion()
+    before = _onion_lines(client().post("/mealplan/basket", json={"draft": draft}).json())
+    assert {k: (ln["product"], ln["unavailable_kind"]) for k, ln in before.items()} == {
+        k: (None, "origin_excluded") for k in ONION_LINES}
+
+    opts = _line_options(draft)
+    assert (opts["product_id"], opts["product"], opts["stocked"], opts["pinned"]) == (
+        None, "", False, False)
+    assert (opts["trip_date"], opts["plan_total"]) == (None, None)
+    assert [(c["recipe_key"], c["line_no"], c["ingredient"], c["planner_product_id"],
+             c["pinned_product_id"]) for c in opts["lines"]] == [
+        (k, ONION_LINES[k], "Yellow Onion", None, None) for k in sorted(ONION_LINES)]
+    ranking = opts["ranking"]
+    assert ranking["lines"] == [1, 2] and ranking["line_no"] == 2      # the pilaf's, asked for
+    grams = sum(ln["quantity"] * 2 * 2 / STARTERS[k]["servings"]
+                for k in ("tomato_pilaf", "chicken_biryani")
+                for ln in STARTERS[k]["lines"] if ln["name"] == "Yellow Onion")
+    assert ranking["need"] == f"{grams:g} g"
+    items = ranking["items"]
+    assert [it["product_id"] for it in items] == [RED_ONION, GREEN_ONIONS]
+    assert not any(it["current"] for it in items) and {it["match"] for it in items} == {
+        "related"}
+    held = {h["product_id"]: h for h in ranking["held_back"]}
+    assert held[12]["country"] == "United States" and held[12]["verbatim"] == "Grown in USA"
+    assert not set(held) & {it["product_id"] for it in items}
+    assert ranking["out_of_reach"] == []
+
+    chosen = pinned(draft, opts, RED_ONION)
+    assert chosen["pins"] == {k: {str(n): RED_ONION} for k, n in ONION_LINES.items()}
+    after = _onion_lines(client().post("/mealplan/basket", json={"draft": chosen}).json())
+    assert {k: (ln["product"]["id"], ln["available"], ln["pinned"])
+            for k, ln in after.items()} == {k: (RED_ONION, True, True) for k in ONION_LINES}
+    # with a trip date, each row's trip is the plan re-scheduled with it bought for them
+    trip = strategy(schedule(draft), "fresh")["trips"][0]
+    on_trip = _line_options(draft, trip_date=trip["date"])
+    row = next(it for it in on_trip["ranking"]["items"] if it["product_id"] == RED_ONION)
+    assert on_trip["plan_total"] == strategy(schedule(draft), "fresh")["total_cost"]
+    assert _cents(row["trip"]["total"]) == _cents(strategy(schedule(chosen), "fresh")[
+        "total_cost"])
+
+
+def test_with_nothing_nearby_but_what_the_us_rule_holds_back_no_row_is_choosable(onions):
+    """Every onion nearby is evidenced as grown in the United States: no row to choose, and
+    held_back lists them with their evidence."""
+    _grown_in_the_us(*YELLOW_ONIONS, RED_ONION, GREEN_ONIONS)
+    draft = _no_yellow_onion()
+    for extra in ({}, {"trip_date": strategy(schedule(draft), "fresh")["trips"][0]["date"]}):
+        ranking = _line_options(draft, **extra)["ranking"]
+        assert (ranking["items"], ranking["total"], ranking["out_of_reach"]) == ([], 0, [])
+        held = {h["product_id"]: h for h in ranking["held_back"]}
+        assert {12, RED_ONION, GREEN_ONIONS} <= set(held)
+        for h in held.values():
+            assert (h["country"], h["verbatim"], h["source"]) == (
+                "United States", "Grown in USA", "label-photo"), h
+
+
+def test_rows_sold_only_at_stores_turned_off_or_beyond_the_distance_say_so(onions):
+    """Red Onion is sold within 5 km only at a store the shopper turned off, Green Onions only
+    at the store 14 km away: neither is choosable, and out_of_reach says why."""
+    _grown_in_the_us(*YELLOW_ONIONS)
+    _sql("DELETE FROM store_products WHERE product_id = :p AND store_id <> 3", p=RED_ONION)
+    _sql("DELETE FROM store_products WHERE product_id = :p AND store_id <> :far",
+         p=GREEN_ONIONS, far=FAR_STORE)
+    draft = _no_yellow_onion(stores_off=[3], max_km=5)
+    ranking = _line_options(draft)["ranking"]
+    assert ranking["items"] == [] and ranking["unavailable"] == 2
+    (store3,) = _sql_rows("SELECT name FROM stores WHERE id = 3")
+    (far,) = _sql_rows("SELECT price FROM store_products WHERE product_id = :p",
+                       p=GREEN_ONIONS)
+    reach = {r["product_id"]: r for r in ranking["out_of_reach"]}
+    assert reach[RED_ONION] == {"product_id": RED_ONION, "product": "Red Onion",
+                                "why": "stores_off", "stores": [store3["name"]],
+                                "nearest": None}
+    green = reach[GREEN_ONIONS]
+    assert (green["why"], green["stores"]) == ("out_of_range", [])
+    assert (green["nearest"]["store"], green["nearest"]["price"]) == (
+        "MegaSave Richmond", far["price"])
+    assert green["nearest"]["distance_km"] > 5
+    # with the store back on, Red Onion is a row again
+    back = _line_options({**draft, "settings": {**draft["settings"], "stores_off": []}})
+    assert [it["product_id"] for it in back["ranking"]["items"]] == [RED_ONION]
+
+
+def test_a_line_is_asked_for_in_place_of_a_product_and_must_buy_nothing(onions):
+    _grown_in_the_us(*YELLOW_ONIONS)
+    draft = _no_yellow_onion()
+    line = {"recipe_key": PILAF, "line_no": ONION_LINES[PILAF]}
+
+    def post(**body) -> dict:
+        r = client().post("/mealplan/alternatives", json={"draft": draft, **body})
+        return {"status": r.status_code, **r.json()}
+
+    assert post(line=line, product_id=RED_ONION)["status"] == 422     # both
+    assert post()["status"] == 422                                     # neither
+    assert post(line={"recipe_key": PILAF, "line_no": 0})["status"] == 422
+    rice = post(line={"recipe_key": PILAF, "line_no": 1})
+    assert rice["status"] == 409 and rice["detail"]["error"] == "no_trip_line"
+    assert "ask for its options by product_id" in rice["detail"]["detail"]
+    nope = post(line={"recipe_key": "starter:nope", "line_no": 1})
+    assert nope["status"] == 422 and nope["detail"]["error"] == "unknown_recipe_key"
+    absent = post(line={"recipe_key": PILAF, "line_no": 40})
+    assert absent["status"] == 409 and "has no line 40" in absent["detail"]["detail"]
+
+
 # ─── The route ───────────────────────────────────────────────
 
 def test_options_call_no_llm_and_answer_the_same_bytes(example, monkeypatch):

@@ -49,6 +49,7 @@ from .models import (
     AltTrip,
     BasisLine,
     HeldBack,
+    OutOfReach,
     Pin,
     PlanBasis,
     Product,
@@ -721,31 +722,43 @@ class TripEffect:
 
 
 def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT, *,
-                      effect: TripEffect | None = None) -> AlternativeRanking:
+                      effect: TripEffect | None = None,
+                      open_lines: bool = False) -> AlternativeRanking:
     """The other products that could fill `line_no`, in ORDER, with the cart's pick always
     included and flagged current. Deterministic for the same basis and database; no LLM,
     no write. Raises BasisError or PinError (a bad basis, an unplanned line, a bad pin).
-    `effect`: another planner's trips stand in for the cart's (TripEffect)."""
+    `effect`: another planner's trips stand in for the cart's (TripEffect).
+
+    `open_lines`: `line_no` may be a line the plan bought nothing for. It then has no
+    current pick: the rows are every product that could fill it (and each unpicked line of
+    the same name, which one choice fills too), none flagged current."""
     from . import flow
     from .origins import preference_rank
 
     check_basis(basis)
     if not 1 <= limit <= MAX_LIMIT:
         raise BasisError(f"limit must be 1..{MAX_LIMIT}, got {limit}")
-    planned = planned_lines(basis)
+    planned = ({ln.line_no: ln for ln in basis.lines} if open_lines
+               else planned_lines(basis))
     if line_no not in planned:
         raise LineNotPlannedError(_not_planned(line_no, planned))
     catalog = _catalog()
     with Session(db.engine()) as s:
         valid = validate_pins(basis, [], catalog=catalog, session=s)
         picks = effective_picks(basis, {n: v.product_id for n, v in valid.items()})
-        current_id = picks[line_no]
-        group = sorted(n for n, pid in picks.items() if pid == current_id)
+        current_id = picks.get(line_no)
+        if current_id is None:
+            name = " ".join(planned[line_no].name.casefold().split())
+            group = sorted(n for n, ln in planned.items() if n not in picks
+                           and " ".join(ln.name.casefold().split()) == name)
+        else:
+            group = sorted(n for n, pid in picks.items() if pid == current_id)
         unknown = sorted({pid for pid in picks.values() if pid not in catalog})
         if unknown:
             raise StaleBasisError(f"product id(s) {unknown} in the basis are no longer in "
                                   "the catalog; plan the recipe again")
-        g = _gather(s, basis, group, catalog, picks, {current_id})
+        g = _gather(s, basis, group, catalog, picks,
+                    set() if current_id is None else {current_id})
         # A shared purchase is swapped for every line it covers, so a candidate must fill
         # each of them; it carries the loosest of its matches.
         found: dict[int, str] = dict(g.pools[group[0]].found)
@@ -756,7 +769,7 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
         held = sorted((pid for pid in g.pools[line_no].found if pid in g.held),
                       key=lambda pid: (catalog[pid].name, pid))
         selectable = {pid: m for pid, m in found.items() if pid not in g.held}
-        if current_id not in selectable:
+        if current_id is not None and current_id not in selectable:
             selectable[current_id] = "outside"
         stats = _stats(s, sorted(selectable))
         located = has_location(basis)
@@ -765,7 +778,7 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
                            effect.stores_off if effect else frozenset()) if located else []
 
     offers = flow._cheapest_offers(rows_all, basis.path) if located else {}
-    if located and current_id not in offers:
+    if located and current_id is not None and current_id not in offers:
         if effect is None:
             raise StaleBasisError(f"{catalog[current_id].name}, the cart's pick for line "
                                   f"{line_no}, has no offer in range any more; plan the "
@@ -776,6 +789,12 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
                    if pid != current_id and not _available(basis, offers.get(pid))]
     for pid in unavailable:
         del selectable[pid]
+    reach = []
+    if effect is not None and located and unavailable:
+        reach = sorted(unavailable, key=lambda pid: (
+            _TIER_RANK[_TIER[found[pid]]], closeness(planned[line_no].name, catalog[pid]),
+            pid))[:limit]
+        reach = _out_of_reach(basis, reach, catalog, effect.stores_off)
 
     synthetic = settings().offers_synthetic
     needs = [effect.needs.get(n) for n in group] if effect else _needs(basis, group)
@@ -855,7 +874,7 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
         need_qty=need[0] if need else None, need_uom=need[1] if need else None,
         order=list(ORDER), ranking_text=RANKING_TEXT,
         items=shown,
-        held_back=[_held(pid, catalog, g) for pid in held],
+        held_back=[_held(pid, catalog, g) for pid in held], out_of_reach=reach,
         total=len(items), unavailable=len(unavailable),
         counts=AltCounts(
             exact=sum(1 for it in items if it.match == "exact"),
@@ -865,6 +884,38 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
             says_organic=sum(1 for it in items if it.says_organic),
             rated=sum(1 for it in items if it.rating is not None)),
         data_note=DATA_NOTE if synthetic else "")
+
+
+def _out_of_reach(basis: PlanBasis, pids: list[int], catalog: dict[int, Product],
+                  stores_off: frozenset[int]) -> list[OutOfReach]:
+    """Why each of these candidates has no offer in range at a store that is on, from every
+    store's offers (one price-matrix query): stores_off when every offer within the plan's
+    distance is at a store the shopper turned off (those stores, nearest first), out_of_range
+    when none is within it (the nearest offer, at a store that is on when one sells it), and
+    not_stocked when no store sells it. One over the price cap at a store in range is left
+    out: it is neither."""
+    with Session(db.engine()) as s:
+        rows = _matrix(s, basis, set(pids), None)
+    by_pid: dict[int, list] = {}
+    for r in sorted(rows, key=lambda r: (r["dist_km2"], r["price"], r["store_id"])):
+        by_pid.setdefault(r["product_id"], []).append(r)
+    reach2 = basis.max_km ** 2 if basis.max_km is not None else math.inf
+    out = []
+    for pid in pids:
+        sold = by_pid.get(pid, [])
+        near = [r for r in sold if r["dist_km2"] <= reach2]
+        if near and all(r["store_id"] in stores_off for r in near):
+            out.append(OutOfReach(product_id=pid, product=catalog[pid].name, why="stores_off",
+                                  stores=list(dict.fromkeys(r["store_name"] for r in near))))
+        elif sold and not near:
+            r = next((r for r in sold if r["store_id"] not in stores_off), sold[0])
+            out.append(OutOfReach(
+                product_id=pid, product=catalog[pid].name, why="out_of_range",
+                nearest=AltBuy(store=r["store_name"], price=r["price"],
+                               distance_km=round(math.sqrt(max(r["dist_km2"], 0.0)), 1))))
+        elif not sold:
+            out.append(OutOfReach(product_id=pid, product=catalog[pid].name, why="not_stocked"))
+    return out
 
 
 def _stats(s: Session, ids: list[int]) -> dict[int, tuple[float | None, int]]:

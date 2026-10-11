@@ -20,7 +20,7 @@ products 166-169 are synthetic demo data, and say so.
 | `POST /mealplan/schedule` | Meals, trips for both strategies, warnings, lists | no | 120/min |
 | `POST /mealplan/plan` | MCP `plan_meals` over REST: counted dishes drafted into a plan, as ops for a console | the selector, when live (new recipes only) | 6/min, burst 3; 503 above the daily LLM ceiling |
 | `POST /mealplan/suggest-cook-days` | A freshness-aware layout, as a proposal | no | 60/min |
-| `POST /mealplan/alternatives` | Options for one trip line (or, with no trip date, for every line buying a product): ranked products and what each does to the plan | no | 60/min |
+| `POST /mealplan/alternatives` | Options for one trip line (or, with no trip date, for every line buying a product; or for a line that buys nothing): ranked products and what each does to the plan | no | 60/min |
 | `POST /mealplan/catalog` | The wizard's recipes: slot, diets, contains, fit and a cost estimate per meal | no | 60/min |
 | `POST /mealplan/basket` | The wizard's ingredients: each chosen recipe's products, stores, prices and origins | no | 120/min |
 | `POST /mealplan/stores` | The stores to turn off and on: nearest first, where each is, in range, off, and how many of the basket's products each sells | no | 120/min |
@@ -116,7 +116,8 @@ point.
 ## Options for a trip line, and pins
 
 Every trip line has the chat cart's Options dialog. `POST /mealplan/alternatives` takes
-`{draft, trip_date?, product_id, strategy?, limit? 1..25 = 12}` and answers
+`{draft, trip_date?, product_id | line, strategy?, limit? 1..25 = 12}` (exactly one of
+`product_id` and `line: {recipe_key, line_no}`, else 422) and answers
 `{rev, strategy, trip_date, product_id, product, stocked, pinned, lines[], plan_total,
 ranking}` (`mealplan/options.py`, no LLM):
 
@@ -145,6 +146,30 @@ ranking}` (`mealplan/options.py`, no LLM):
   every row's `trip` is null with a reason saying so, its `packs` are what those meals need
   and its `cost_for_need` those packs at its cheapest offer in range; `trip_date` and
   `plan_total` are null.
+- **A line that buys nothing** (the basket's rows with no product: the resolve left it out
+  for the origin rule, out of range or not stocked, and no pin fills it) is asked for by
+  `line: {recipe_key, line_no}` instead of a product. The answer has `product_id: null`,
+  `product: ""`, `stocked: false`, and `lines` that line and every other line of the plan with
+  the same ingredient (by name) that buys nothing either, each with `planner_product_id`
+  null. `ranking` is the same ranking with no current pick (`rank_alternatives(...,
+  open_lines=True)`, no new matcher): `items` are the choosable rows (sold in range at a store
+  that is on, not held back), none `current`; `held_back` the products the origin exclusion
+  holds back, with their evidence, never choosable; and `ranking.out_of_reach` the products
+  that would fill it but are sold only at stores turned off or beyond `max_km`, each
+  `{product_id, product, why: "stores_off" | "out_of_range" | "not_stocked", stores[],
+  nearest: {store, price, distance_km} | null}` (`stores` the stores turned off that sell it
+  within the distance, nearest first; `nearest` the nearest offer beyond it, at a store that
+  is on when one sells it), at most `limit` of them, best match first; `unavailable` counts
+  them all. `out_of_reach` is filled for the meal plan's Options only (a chat cart's is
+  empty). Choosing a row pins every covered line, and the line then buys it everywhere
+  (basket, schedule, catalog). With a `trip_date` each row's `trip` is the plan re-scheduled
+  with that product bought for those lines' placed meals, so `trip.delta` is what adding it
+  costs. 409 `no_trip_line` when the line buys a product (ask by `product_id`), is not a
+  line of the recipe, or its recipe has no meal or is not resolved; 422 `unknown_recipe_key`
+  for a recipe the plan does not have. With every yellow onion evidenced as grown in the
+  United States and that country excluded, the pilaf's and the biryani's Yellow Onion lines
+  get Red Onion and Green Onions as "related" rows (they share "onion"); with every onion
+  held back, `items` is empty and `held_back` lists them (tests/test_mealplan_options.py).
 
 Every schedule call checks every pin of a resolved recipe as a cart swap is checked
 (`alternatives.validate_pins`): the line is one of the recipe's (one the resolve bought

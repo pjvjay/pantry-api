@@ -600,6 +600,19 @@ class HeldBack(BaseModel):
     demo: bool = False
 
 
+class OutOfReach(BaseModel):
+    """A product that would fill the line but cannot be bought under the plan's rules, so it
+    is never choosable: `why` is stores_off (sold within the plan's distance only at stores
+    the shopper turned off: `stores`, nearest first), out_of_range (sold only beyond the
+    plan's distance: `nearest`, the nearest offer at a store that is on when one sells it) or
+    not_stocked (no store sells it)."""
+    product_id: int
+    product: str
+    why: Literal["stores_off", "out_of_range", "not_stocked"]
+    stores: list[str] = Field(default_factory=list)
+    nearest: AltBuy | None = None
+
+
 class AltCounts(BaseModel):
     """How many ranked rows have each property, for filter chips."""
     exact: int = 0
@@ -621,7 +634,11 @@ class AlternativeRanking(BaseModel):
     `unavailable` the products matching the line's words (any level, or its
     head word) with no offer in range (or under the price cap); same-aisle
     substitutes are looked up in range only, as the planner's are, so none
-    is counted there. `data_note` labels synthetic offers and reviews."""
+    is counted there. `out_of_reach` says why for the first `limit` of them,
+    best match first, in the meal plan's Options only (TripEffect); a chat
+    cart's is empty. `data_note` labels synthetic offers and reviews. A
+    line the plan bought nothing for (the meal plan's Options for such a
+    line) has no row flagged `current`."""
     line_no: int
     lines: list[int]
     ingredient: str
@@ -633,6 +650,7 @@ class AlternativeRanking(BaseModel):
     ranking_text: str
     items: list[RankedAlternative]
     held_back: list[HeldBack] = Field(default_factory=list)
+    out_of_reach: list[OutOfReach] = Field(default_factory=list)
     total: int
     unavailable: int = 0
     counts: AltCounts = Field(default_factory=AltCounts)
