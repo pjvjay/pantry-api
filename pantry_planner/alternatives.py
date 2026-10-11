@@ -928,6 +928,7 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
     current pick: the rows are every product that could fill it (and each unpicked line of
     the same name, which one choice fills too), none flagged current."""
     from . import flow
+    from .matching import events
     from .origins import preference_rank
 
     check_basis(basis)
@@ -1133,6 +1134,7 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
                            else "looser_match", why=ruled[pid][0], tags=ruled[pid][1],
                            text=f"{catalog[pid].name} {ruled[pid][2]}")
                   for pid in ruled_rows])
+    events.shown(ranking)
     return ranking
 
 

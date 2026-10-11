@@ -1388,6 +1388,12 @@ def reprice(basis: PlanBasis, pins: list | None = None) -> ShoppingPlan:
             excluded_lines=basis.origin_dropped)
         origin_status = "verified" if coverage.meets_floor else "unverified"
     merged = [Pin(line_no=n, product_id=v.product_id) for n, v in sorted(valid.items())]
+    from .matching import events
+
+    for p in pins or []:
+        if p.line_no in valid and valid[p.line_no].product_id == p.product_id:
+            events.picked(planned[p.line_no].name, p.product_id,
+                          was=planned[p.line_no].product_id)
     return ShoppingPlan(
         recipe_slug=basis.recipe_slug, recipe_name=basis.recipe_name,
         line_items=line_items, total_cost=round(sum(li.price for li in line_items), 2),

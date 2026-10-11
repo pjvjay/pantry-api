@@ -9,6 +9,8 @@ values come from the seed files and the catalog, never from the matcher under te
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from tests.fake_embedder import DownEmbedder, FakeEmbedder
@@ -106,3 +108,37 @@ def test_a_plan_with_no_diet_offers_the_dairy_substitute():
     items = {it["product_id"]: it for it in r.json()["ranking"]["items"]}
     assert items[SOUR_CREAM]["group"] == "works_instead"
     assert items[GREEK_YOGURT]["group"] == "same_item" and items[GREEK_YOGURT]["rank"] == 1
+
+
+# ─── Events and health ───────────────────────────────────────
+
+def test_what_was_shown_and_picked_is_logged_without_personal_data(tmp_path, monkeypatch):
+    from pantry_planner import alternatives, config, flow
+    from pantry_planner.matching import events
+    from pantry_planner.models import Pin
+
+    monkeypatch.setenv("PANTRY_DATA_DIR", str(tmp_path))
+    config.settings.cache_clear()
+    events.clear()
+    try:
+        plan = flow.run_nl("Toast (serves 2)\n- 30 g butter\n", lat=49.28, lon=-123.12)
+        ranking = alternatives.rank_alternatives(plan.basis, 1)
+        second = ranking.items[1]
+        flow.reprice(plan.basis, [Pin(line_no=1, product_id=second.product_id)])
+        rows = [json.loads(ln) for ln in
+                (tmp_path / "matching" / "events.jsonl").read_text().splitlines()]
+    finally:
+        monkeypatch.delenv("PANTRY_DATA_DIR")
+        config.settings.cache_clear()
+    shown = [r for r in rows if r["event"] == "shown"]
+    picked = [r for r in rows if r["event"] == "picked"]
+    assert shown and shown[0]["ingredient"] == "butter" and shown[0]["matching"] == "meaning"
+    assert shown[0]["items"][0] == {"product_id": BUTTER, "rank": 1, "group": "same_item",
+                                    "score": ranking.items[0].score, "current": True}
+    (pick,) = picked
+    assert (pick["product_id"], pick["was"], pick["rank"], pick["group"]) == (
+        second.product_id, BUTTER, 2, second.group)
+    assert pick["passed_over"] == [{"product_id": BUTTER, "rank": 1, "group": "same_item"}]
+    text = json.dumps(rows)
+    for private in ("49.28", "123.12", "lat", "lon", "address", "Toast"):
+        assert private not in text
