@@ -12,9 +12,10 @@ from __future__ import annotations
 import pytest
 
 from tests.fake_embedder import DownEmbedder, FakeEmbedder
-from tests.mealplan_fixtures import done_db, use_db
+from tests.mealplan_fixtures import PRODUCTS, client, done_db, starter_draft, use_db
 
 BUTTER = 18
+GREEK_YOGURT, COCONUT_YOGURT, SOUR_CREAM = 20, 42, 117
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -61,3 +62,47 @@ def test_with_the_embedder_down_an_unknown_name_falls_back_to_words_and_says_so(
     assert ranking.matching == "words"
     assert ranking.matching_note.startswith("Matched by words: down-embedder is unreachable")
     assert ranking.order[0] == "tier"                              # the word ranking's keys
+
+
+# ─── Rules ───────────────────────────────────────────────────
+
+def _yogurt_bowl(**prefs) -> dict:
+    return starter_draft({"yogurt_fruit_bowl": 2}, prefs=prefs)
+
+
+@pytest.mark.parametrize("prefs", [{"avoid": ["dairy"]}, {"diet": "vegan"}])
+def test_a_dairy_free_plan_never_sees_a_dairy_substitute(prefs):
+    """The bowl's Plain Yogurt buys Plain Greek Yogurt (the plan's own pick, shown as
+    current). Coconut yogurt works instead; sour cream would too, but it is dairy, which the
+    plan leaves out: never a row, filtered with the reason, and refused as a pin."""
+    from pantry_planner import alternatives
+    from pantry_planner.models import Product
+
+    draft = _yogurt_bowl(**prefs)
+    key = "starter:yogurt_fruit_bowl"
+    line = next(ln for ln in draft["resolved"][key]["lines"] if ln["name"] == "Plain Yogurt")
+    assert line["product_id"] == GREEK_YOGURT
+    r = client().post("/mealplan/alternatives",
+                      json={"draft": draft, "product_id": GREEK_YOGURT})
+    assert r.status_code == 200, r.text
+    ranking = r.json()["ranking"]
+    for it in ranking["items"]:
+        if not it["current"]:
+            p = Product(**{k: v for k, v in PRODUCTS[it["product_id"]].items()
+                           if k in Product.model_fields})
+            assert "dairy" not in alternatives.contains(p), it["product"]
+    assert COCONUT_YOGURT in {it["product_id"] for it in ranking["items"]}
+    held = {f["product_id"]: f for f in ranking["filtered"]}
+    assert (held[SOUR_CREAM]["why"], held[SOUR_CREAM]["tags"]) == ("diet", ["dairy"])
+    pin = client().post("/mealplan/basket", json={"draft": {
+        **draft, "pins": {key: {str(line["line_no"]): SOUR_CREAM}}}})
+    assert pin.status_code == 422
+    assert "contains dairy, which this plan leaves out" in pin.json()["detail"]["detail"]
+
+
+def test_a_plan_with_no_diet_offers_the_dairy_substitute():
+    r = client().post("/mealplan/alternatives",
+                      json={"draft": _yogurt_bowl(), "product_id": GREEK_YOGURT})
+    items = {it["product_id"]: it for it in r.json()["ranking"]["items"]}
+    assert items[SOUR_CREAM]["group"] == "works_instead"
+    assert items[GREEK_YOGURT]["group"] == "same_item" and items[GREEK_YOGURT]["rank"] == 1
