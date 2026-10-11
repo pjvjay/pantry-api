@@ -31,6 +31,61 @@ Why a state machine? Because LLM apps look like functions but behave like
 distributed systems: multiple side-effecting steps, need for observability,
 need for retry from checkpoint. State machines make all that free.
 
+## Product matching: by meaning, then words
+
+Which products can fill a recipe line is a matching problem before it is a
+choice: the selector (Haiku, Sonnet, Gemini or demo mode's stand-in) only
+chooses among the candidates it is shown, and Options rank the same ones.
+Matching was token-AND over a product_terms index, with levels (exact, form,
+generic, head word) and rules to patch what words get wrong; it offered
+Canadian Peanut Butter Cream as the same ingredient as "Butter". It now
+matches by meaning, as grocery platforms do (Instacart's replacement model,
+DoorDash's substitutions and knowledge graph, Amazon's ESCI labels), scaled to
+a ~170-product catalog with no shopper history:
+
+```
+  offline, once (scripts/matching_seeds.py; outputs are seeds)
+    Gemini, batched ──▶ product_profiles.json   what each product IS (type, taxonomy,
+                        (+ a separate check     form, variant, role, diet); flags for
+                         pass, + review by hand) review, never applied; fixes recorded
+    EmbeddingGemma ───▶ product_embeddings.json  256-dim vectors of each profile
+    Gemini ───────────▶ ingredient_types.json   per seed ingredient name: exact,
+                                                 substitute, unrelated types + vector
+  request time (matching/matcher.py, no LLM)
+    name ─▶ seed? ─▶ types        else embed (Ollama) ─▶ nearest type centroids
+                                  else (embedder down) ─▶ today's words, said so
+         ─▶ candidates: Same item ∪ Works instead ∪ k nearest (Looser match)
+         ─▶ hard rules: in range, origin exclusion, no new contains-tag, diet
+         ─▶ score within group: weighted sum, ties by id
+```
+
+Three choices worth stating:
+
+1. **LLM at build time, embeddings at request time.** Gemini writes each
+   product's profile once (a JSON schema via a forced tool call, batched, every
+   reply cached by a hash of its input); a second, separate pass checks it and
+   only flags; a person reviews it. At request time nothing calls a model
+   except the local embedding model, and only for a name no seed knows. A plan
+   or Options stay deterministic and free, and the seeds are reviewable files.
+2. **Groups before scores.** ESCI-style groups (Same item, Works instead,
+   Looser match) come first; a weighted sum only orders products inside a
+   group. So price or pack size can never make peanut butter outrank butter,
+   and the weights (relevance, form and variant, pack fit, unit value, origin
+   preference, trip total) are a documented trade-off inside a group, tuned on
+   a judged golden set (nDCG@3, Hit@1; `evals/substitutes_eval.py`), not a
+   rule per failure.
+3. **One order for the plan and its alternatives.** The planner's first pick
+   is the first product of the same order Options show (the demo selector
+   takes it; the live selector is shown each line's candidates), so the
+   current pick is Options' first row. The planner has no trip yet, so the
+   trip term reads what the product adds to the trip's spend; Options use the
+   real trip total, which moves by exactly that unless a stop changes.
+
+Words remain as the fallback for a name no seed knows when the embedding
+model is down (the answer says `matching: "words"`), and for products the
+catalog gained since the seeds were made. The details are in
+`docs/meal-planning.md`, "Matching by meaning".
+
 ## Structured output via tool use
 
 The main selector prompt doesn't ask Claude to "return JSON in this format" —

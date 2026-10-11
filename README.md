@@ -25,8 +25,16 @@ way (see [How it deploys](#how-it-deploys)).
   - `three_phase`: deterministic pre-scoring (Phase A) + a
     meta-cognitive Haiku classifier (Phase B) + weighted threshold
     (Phase C) picks the model before the main call.
+- **Product matching by meaning** — which products ARE an ingredient, which
+  work instead and which are only near it, from product profiles Gemini wrote
+  once and EmbeddingGemma vectors (local Ollama), ranked by a documented
+  weighted score; the plan's first pick and its Options share one order, and
+  a name the matcher cannot place falls back to word matching, saying so
+  (`pantry_planner/matching/`, docs/meal-planning.md "Matching by meaning").
 - **Eval harness** — golden set with precision-at-k; comparison report
-  across models and routing strategies committed to the repo.
+  across models and routing strategies committed to the repo; a judged
+  golden set scoring word matching against matching by meaning (nDCG@3,
+  Hit@1).
 
 ## Quickstart
 
@@ -91,6 +99,10 @@ Everything's env-var driven. Defaults in `pantry_planner/config.py`.
 | `LLM_DAILY_COST_CAP_USD`     | *(unset: no ceiling)*            | Estimated LLM spend per replica per UTC day above which LLM-calling endpoints answer 503 |
 | `OFFERS_SYNTHETIC`           | `true`                           | Store prices, stock and reviews are the seeded demo data; the alternatives ranking labels them so (`data_note`, "(demo)" ratings). Set false only for real offers |
 | `STORES_SYNTHETIC`           | `true`                           | The stores are fictional: a calendar export names each as "<store> (demo store)" and never gives its seeded address, and `/mealplan/stores` says `synthetic: true` so the console labels them demo stores |
+| `OLLAMA_URL`                 | `http://127.0.0.1:11434`         | The local Ollama that embeds an ingredient name no seed knows (product matching); empty = off, and such names are matched by words |
+| `EMBEDDING_MODEL`            | `embeddinggemma`                 | The Ollama embedding model; it must be the one the seeds were made with |
+| `PANTRY_DATA_DIR`            | `~/.pantry-data`                 | The embedding cache and the matching event log (`matching/events.jsonl`) |
+| `MATCHING_EVENTS`            | `1`                              | `0` stops the shown / picked / passed-over log |
 
 The four model settings are **specs**: `gemini:<model>` (e.g.
 `gemini:gemini-flash-latest`) routes that call to Google Gemini through its
@@ -198,6 +210,11 @@ pantry-planner/
 │   ├── packs.py           # pack_count: packs a purchase takes (shared rule)
 │   ├── recipe_doc.py      # RecipeDoc -> RecipeSpec (no parse) / display text
 │   ├── alternatives.py    # rank a plan line's alternatives; pin checks for reprice
+│   ├── matching/          # product matching by meaning (docs/meal-planning.md)
+│   │   ├── matcher.py     # what a name means, candidates by group, the weighted score
+│   │   ├── seeds.py       # product profiles, vectors, ingredient types (seeds/*.json)
+│   │   ├── embed.py       # EmbeddingGemma via Ollama: task prompts, 256 dims, disk cache
+│   │   └── events.py      # shown / picked / passed-over log for learning to rank
 │   ├── nutrition.py       # 8 nutrients per portion from recipe amounts + CNF reference foods
 │   ├── calendar_export.py # ApprovedSchedule -> events (all-day, or timed with reminders),
 │   │                      # RFC 5545 .ics, Google links
@@ -237,12 +254,14 @@ pantry-planner/
 │       └── cascade.py         # CascadeRouter
 ├── seeds/                 # recipes, products and nutrients JSON (copies of pantry-db's); the
 │                          # meal plan's shelf_life, mealplan_starters, recipe_aliases,
-│                          # demo_products
+│                          # demo_products; the matcher's product_profiles,
+│                          # product_embeddings and ingredient_types
 ├── docs/meal-planning.md  # the meal plan: counts, matching, storage times, trips, approval
 ├── docs/nutrition.md      # nutrition: sources, the rules, endpoints, shapes, targets
 ├── skills/recipe-shopper/ # Agent Skill: recipe link → cheapest basket nearby
-├── tests/                 # pytest, LLM mocked
-├── evals/                 # golden set + comparison harness
+├── scripts/matching_seeds.py # the offline matching pipeline (Gemini + Ollama, cached)
+├── tests/                 # pytest (1,375 tests), LLM and embedder mocked
+├── evals/                 # golden sets + comparison harness (substitutes_eval.py: matching)
 └── ARCHITECTURE.md
 ```
 
@@ -272,10 +291,10 @@ model never writes SQL and never composes the plan. Structured per the
 
 | Stage | Template | What it does | Abort gate |
 |---|---|---|---|
-| t1 | `existence_probe` | One batched probe: is every ingredient stocked at all? Four match levels, each tried only when the one before finds nothing: exact (every token, purchase form included), equivalent form (powder/ground swapped — "cumin powder" → Cumin Ground; reported as `form`), form (form dropped), generic (descriptor words such as light/dark/toasted/ground/boneless dropped too — "light brown sugar" → Brown Sugar). Water and ice never reach it: they are skipped, never priced | `missing_ingredients` → 409 listing what's missing + related products (shared words first, then the category hint's cheapest) |
-| t2 | `options_single_pass` | All ingredients resolved in ONE query: per-product cheapest in-range store offer, ranked per ingredient by size-fit then price, under budget/distance constraints. Packs over 6× the need are dropped as catering packs while a pack within 6× exists; when none does (a tablespoon of oil against 250 ml-1.4 L bottles), packs within 6× the smallest stay and price decides | `unavailable_within_constraints` (attribution re-probe names the nearest out-of-range offer and the limit it breaks); `budget_infeasible` (cheapest-basket floor vs budget) |
+| t1 | `existence_probe` | Is every ingredient stocked at all? By meaning first (`matching/`, docs/meal-planning.md): a name is stocked when the catalog has a product that is the same item or works instead; a line stocked only by what works instead is level `generic`. A name the matcher cannot place (no seed, embedder down) is probed by words, one batched probe at four match levels, each tried only when the one before finds nothing: exact (every token, purchase form included), equivalent form (powder/ground swapped — "cumin powder" → Cumin Ground; reported as `form`), form (form dropped), generic (descriptor words such as light/dark/toasted/ground/boneless dropped too — "light brown sugar" → Brown Sugar). Water and ice never reach it: they are skipped, never priced | `missing_ingredients` → 409 listing what's missing + related products (by meaning, its nearest products; by words, shared words first, then the category hint's cheapest) |
+| t2 | `options_single_pass` | All ingredients resolved in ONE query: per-product cheapest in-range store offer, under budget/distance constraints. A line matched by meaning joins its candidates as they are and is ordered by the matcher (group, then its weighted score); a line whose same item is stocked but out of range is out of range, never silently swapped for what works instead. A line matched by words is ranked by size-fit then price. Packs over 6× the need are dropped as catering packs while a pack within 6× exists; when none does (a tablespoon of oil against 250 ml-1.4 L bottles), packs within 6× the smallest stay and price decides | `unavailable_within_constraints` (attribution re-probe names the nearest out-of-range offer and the limit it breaks); `budget_infeasible` (cheapest-basket floor vs budget) |
 | t3 | `brand_stats` | Per-brand price/rating/review aggregates over the retrieved pools — context the selector uses to break ties | — |
-| t4 | `substitute_lookup` | Data-driven: same-subcategory alternatives for thin pools, labeled `substitute`, never silently swapped in | — |
+| t4 | `substitute_lookup` | Data-driven: for a thin pool, what works instead (by meaning, from t2's rows, no query) or same-subcategory alternatives (by words), labeled `substitute`, never silently swapped in | — |
 | t5 | `store_price_matrix` | **Split-trip optimizer** (zero LLM): full store×product matrix for the chosen basket → exhaustive store-subset enumeration with exact home→stores→home loops → stops-vs-cost frontier (`trip_options`, best flagged recommended) | — |
 
 Every step's SQL, row count, timing, and outcome are returned as `plan_trace`
@@ -403,8 +422,9 @@ selector.
   (see the catalog notes above), to show line by line. Plan a library recipe by slug
   (`POST /plan/{slug}`): that path gives the selector each line's category, while
   `/plan/spec` first checks by name alone that each line is stocked, as `/plan/nl` does.
-  Six of the seven library docs plan through `/plan/spec` as well; `pbj_sandwich` is a 409
-  there, because "Peanut Butter and Jelly Jam" and "White Chocolate" find nothing by name.
+  All seven library docs plan through `/plan/spec` as well: matched by meaning, "Peanut
+  Butter and Jelly Jam" is the catalog's PBJ jar and "White Chocolate", which the catalog
+  does not sell, buys a chocolate that works instead (by words, both found nothing).
 
 Every plan carries `basis` (what it was made from: the planned lines, the product chosen for
 each, the constraints and location), `servings` (None when the recipe does not say) and, per
@@ -419,25 +439,29 @@ tools `rank_alternatives` and `reprice_plan` do the same; the demo hub uses them
 cart and keeps them away from its model.
 
 - `POST /plan/alternatives` takes `{basis, line_no, limit? 1..25 = 12}` and returns an
-  `AlternativeRanking` (`alternatives.py`). Candidates are the line at the exact, equivalent
-  form, form and generic levels plus its head word (one options query), and same-aisle
-  substitutes from stores in range when the pool is thin (the planner's t4 lookup; price ties
-  go to the lower id). A product that matches the words but is another food (not mainly the
-  line's ingredient word, and from another aisle than the pick's) is not the same ingredient:
-  for "butter", Canadian Peanut Butter Cream is "Mentions butter, but it is peanut butter",
-  while Extra Virgin Olive Oil stays the same ingredient for "olive oil". Order (`ORDER`): same
-  ingredient first, then `alternatives.closeness` (the demo selector's `units.semantic_key`, with its head test read
-  from the line's ingredient word, so "cumin powder" is about cumin, not powder; for a line
-  that ends in its ingredient word it only breaks semantic_key's ties), pack fit for the
-  recipe's amount, origin preference only when the plan had one, the trip total after the
-  swap, the cost of the recipe's amount, rating only on exact cent ties, catalog id. Each
+  `AlternativeRanking` (`alternatives.py`). Candidates are the matcher's (docs/meal-planning.md,
+  "Matching by meaning"): products that are the **Same item**, that **Work instead** and
+  **Looser matches** near the name in meaning, each row with its `group`, `group_label`,
+  `score` and a one-line `summary` ("butter · 454g covers 80 g · no new allergens"). For
+  "Butter" that is Butter Salted, then ghee, canola and olive oils; Canadian Peanut Butter
+  Cream is not offered at all (peanut butter is not butter, and it adds nuts). Hard rules keep
+  a candidate out and say why in `filtered`: it adds a contains-tag the plan's own product
+  lacks, or contains what the plan excludes. Order (`order`: group, score, id): the group,
+  then a weighted score of relevance, form and variant, pack fit, unit value, origin
+  preference (only when the plan had one) and the trip total after the swap, then catalog
+  id; the plan's own pick is the first row. When a name no seed knows cannot be embedded,
+  the line is matched by words as it always was (`matching: "words"`, with
+  `matching_note`): the exact, equivalent form, form and generic levels plus its head word,
+  same-aisle substitutes when the pool is thin, a product that matches the words but is
+  another food in the other tier, and `ORDER` (tier, closeness, pack fit, preference, trip
+  total, cost, rating on exact cent ties, catalog id). Each
   row's `trip` is computed by the same code as a re-price, so choosing it costs exactly that;
   `trip.buys_at` is the store that trip buys the product at and its price a pack there, which
   the re-priced cart charges and `cost_for_need` and `unit_price` are worked out at (`offer` is
   the lowest price in range, which the trip skips when the stop costs more than it saves);
   `rank_reason` says why it is below the row above. Products the origin exclusion drops are
-  in `held_back` with their evidence and never ranked; products matching the line's words
-  with no offer in range are counted in `unavailable`. Unknowns stay unknown ("Origin not
+  in `held_back` with their evidence and never ranked; candidates with no offer in range are
+  counted in `unavailable`. Unknowns stay unknown ("Origin not
   checked", no rating, pack fit `unknown`), and `data_note` labels the demo offers and reviews
   while `OFFERS_SYNTHETIC` is true.
 - `POST /plan/reprice` takes `{basis, pins? ≤ 40}` (`pins`: `{line_no, product_id}`) and
@@ -451,8 +475,11 @@ cart and keeps them away from its model.
   again).
 
 `tests/test_reprice.py` and `tests/test_alternatives.py` cover the round trip, the trip
-invariant to the cent, the order, the match levels, the honesty cases, exclusion parity, the
-query count and a 300 ms guard.
+invariant to the cent, the order, the groups and the word levels, the hard rules, the honesty
+cases, exclusion parity, the query count and a 300 ms guard. `tests/test_matcher.py` covers
+the matcher and its embedder seam, `tests/test_matching.py` the plan, Options and meal plan
+by meaning and the fallback to words, `tests/test_matching_seeds.py` the committed seeds, and
+`tests/test_substitutes_eval.py` the golden set's floor.
 ## Meal plans (`/mealplan/*`)
 
 A 1-2 week plan from counted dishes ("3 Pepperoni Pizza + 2 Chicken Fried Rice + 3 chicken
@@ -625,7 +652,7 @@ nothing needs a token.
 | --- | --- | --- | --- |
 | `list_recipes`, `get_recipe` | free | only when configured | the recipe library; one `Recipe` |
 | `list_products` | free | only when configured | `ProductPage {items, total, next_offset}` — `search` substring, exact `category`, `limit`/`offset` |
-| `find_product` | free | only when configured | `ProductSearch` — planner-parity retrieval: `match` is `direct`, `generic` (matched once descriptor words such as "light" were dropped — the planner selects these too), `relaxed` (same-aisle alternatives the planner would only offer) or `none`; each hit priced at its cheapest in-range store |
+| `find_product` | free | only when configured | `ProductSearch` — the planner's word retrieval (its fallback for a name it cannot match by meaning): `match` is `direct`, `generic` (matched once descriptor words such as "light" were dropped — the planner selects these too), `relaxed` (same-aisle alternatives the planner would only offer) or `none`; each hit priced at its cheapest in-range store |
 | `get_product` | free | only when configured | `ProductDetail` — every store offer, the resolved origin (`status` first), the evidence rows behind it, pending submissions, reviews |
 | `get_product_origins` | free | only when configured | `OriginPage {items, total, by_status, next_offset}` — `by_status` counts the whole selection before paging |
 | `rank_products_by_origin` | free | only when configured | `OriginRanking` — `ranked` / `excluded` / `unranked` kept separate |

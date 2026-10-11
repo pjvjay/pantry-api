@@ -113,6 +113,144 @@ The draft's `settings` may carry the plan's origin rules, `exclude_origin` and `
 (at most 50 known countries each), which the console passes to resolve with the shopping
 point.
 
+## Matching by meaning: which products are an ingredient
+
+Products are matched to an ingredient by what they are, the way grocery platforms label
+query-product pairs (Amazon's ESCI labels: Exact, Substitute, Complement, Irrelevant), not by
+the words the two names share: by words, Options for "Butter" offered Canadian Peanut Butter
+Cream as the same ingredient. The code is `pantry_planner/matching/`; the plan's first pick
+and Options both use it, so the plan and its alternatives agree.
+
+**What it knows, made once, offline** (`scripts/matching_seeds.py`, outputs committed as
+seeds, re-runnable: every Gemini reply is cached on disk by a hash of what it was asked, so a
+rerun asks only for what changed):
+
+- `seeds/product_profiles.json`: per product, from Gemini (a flash model, batched, with a JSON
+  schema): `product_type` (what a recipe calls it: "butter", "peanut butter", "olive oil",
+  "canned tomatoes"), `taxonomy` [department, aisle, product_type], `form`, `variant`
+  ("salted", "extra virgin"), `culinary_role`, the diets it suits, and `aka` (the other
+  names the catalog's description gives it, "scallions" on Green Onions). `profile_text` is
+  one sentence templated from those fields, and is what gets embedded. A second, separate
+  Gemini pass answered yes or no to each profile's type, form and diet and to the catalog's
+  contains-tags; every "no" is a `flag` for review, never applied. Gemini never changes the
+  contains-tags (`dietary_tags`). Every profile was then reviewed by hand; fixes are recorded
+  on the profile (`fixes`: field, from, to, why) and re-applied on every rerun. The review
+  page is `~/Downloads/pantry-design/product-profiles-review.html`.
+- `seeds/product_embeddings.json`: EmbeddingGemma vectors of each `profile_text`, asked as its
+  model card says for retrieval (a document, "title: <product_type> | text: ..."), the first
+  256 of 768 dimensions re-normalized (Matryoshka), rounded to 5 decimals.
+- `seeds/ingredient_types.json`: per distinct ingredient name of the library and the demo
+  starters, from Gemini against the catalog's types: `exact_types` (types that ARE it),
+  `substitute_types` (types that work instead, best first), `unrelated_types` (types that
+  only look related: "peanut butter" for "butter"), the form and variant the name asks for,
+  and the name's EmbeddingGemma vector (a query, "task: search result | query: ...").
+
+Each profile and vector carries the hash of the product row it was made from (name,
+description, category, subcategory, size, contains-tags). A product without a current
+profile (one pantry-db added since) is matched by its words until the seeds are made again:
+every word of the name in its own makes it the same item, ranked after the profiled ones.
+
+**At request time** (deterministic, no LLM call; `matching/matcher.py`):
+
+1. *What the name means.* A seed name (compared by its tokens, so "yellow onions" is "Yellow
+   Onion", and with the parser's purchase form, so "tomatoes" bought canned is "Canned
+   Tomatoes") takes its seed. Any other name (imported, pasted, written by the assistant) is
+   embedded with EmbeddingGemma through the local Ollama (`OLLAMA_URL`, `EMBEDDING_MODEL`;
+   cached on disk by text under `PANTRY_DATA_DIR`) and compared with every product type's
+   centroid (the normalized mean of its products' vectors): the nearest type at or above 0.56
+   is the same item, the other types at or above 0.50 work instead (three at most), and with
+   nothing at or above 0.50 the line is not stocked. The floors are measured: a name and its
+   own type score 0.53-0.71, an unstocked name's nearest type 0.37-0.59, so a weak nearest
+   type is offered as working instead, never as the same item ("unsalted butter", 0.53, is
+   bought as salted butter, labelled a substitution; "cream cheese" is never cheddar).
+2. *Candidates.* Every product whose type is the same item (**Same item**) or works instead
+   (**Works instead**), and the 20 products nearest the name's vector at or above 0.47 whose
+   type is neither unrelated nor already in a group (**Looser match**, Options only).
+3. *Hard rules*, never choosable and reported with the reason (as `held_back` and
+   `out_of_reach` already are): sold in range at a store that is on; passes the origin
+   exclusion; adds no contains-tag the plan's own product lacks (for a line it bought nothing
+   for: nothing the recipe's own diets leave out); contains nothing the plan's diet, avoid
+   list or exclusions leave out. A dairy-free plan never sees a dairy product that works
+   instead; butter's Options never offer peanut butter.
+4. *Score within a group*, higher first, ties by catalog id: a weighted sum, each part 0..1:
+   relevance (the cosine of the name's and the product's vectors; for a product that works
+   instead, 10% less per place its type is behind the best substitute) 0.30, form and variant
+   (the share of what the name asks for that the product has) 0.15, pack fit (covering the
+   need exactly 1, falling to 0.6 at 6 times it; a catering pack beyond that 0.25 unless every
+   pack is one; short 0.3; unknown 0.5) 0.20, value (the group's best unit price over its own)
+   0.15, origin preference (only when the shopper gave one) 0.10, and the trip total after the
+   swap against the group's cheapest 0.10 (falling to 0 at $10 more). The planner's first
+   pick has no trip yet, so it reads what the product adds to the trip's spend (its price at
+   its cheapest store in range), which is what the trip total moves by whenever the swap
+   changes no stop.
+5. *Every row keeps short reasons*: the group ("Same item: butter", "Works instead of
+   butter: ghee; not the same item"), the pack, the origin, the trip, the rating, and
+   `summary`, all on one line ("butter · 454g covers 80 g · no new allergens").
+
+**The plan's first pick** uses the same candidates and order. A line is planned from its same
+items; only when the catalog stocks none (White Chocolate) from what works instead, and the
+pick then says "substitution". A line whose same item is stocked but not within the plan's
+distance or price cap is out of range, as by words: what works instead is never silently
+bought for it. Lines of one recipe that mean the same ingredient ("300 g yellow onion", "100 g
+yellow onions") are ranked for their summed need, so they share one purchase. The demo
+selector takes the first product of the order; the live selector chooses among the products
+as before, which are now each line's candidates (a library recipe's selector used to see the
+whole catalog). Every plan line says how it was matched (`matching`) and the group of its
+product (`group`).
+
+**When the embedder is down**, seeds still work (they are precomputed). A name no seed knows
+is matched by today's words (the token levels, the size cap, the word ranking), and the
+answer says so: the plan line's `matching: "words"`, and Options' `matching: "words"` with a
+`matching_note` for the console ("Matched by words: ..."). Ollama is asked at most once a
+minute after a failure. `/health`'s `matching` reports the seeds, the embedder and whether a
+name no seed knows is matched by meaning or by words right now.
+
+**Logging for learning to rank later.** Options served (`shown`: the ingredient, each row's
+product id, rank, group and score) and the shopper's choices (`picked`: a cart swap, or a meal
+plan pin the first time it is seen, with its rank and group and the products ranked above it,
+`passed_over`) are appended to `<PANTRY_DATA_DIR>/matching/events.jsonl` (default
+`~/.pantry-data`). No shopper, address, location or recipe is written, and times are to the
+minute. `MATCHING_EVENTS=0` turns it off.
+
+**Options' added fields** (nothing renamed): each row's `group` (`same_item`,
+`works_instead`, `looser_match`, or `outside` for a cart's pick that is no candidate),
+`group_label` ("Same item", "Works instead", "Looser match", "Not a candidate"), `score` (the
+weighted sum; null when matched by words) and `summary`; the ranking's `matching`
+(`meaning` | `words`), `matching_note`, `filtered` (`{product_id, product, group, why:
+adds_tags | diet | constraints, tags[], text}`), and `counts.same_item`, `works_instead`,
+`looser_match`. By meaning, `order` is `["group", "score", "id"]` and `ranking_text` says the
+weights. The words-era fields stay and agree: a Same item is `tier: "same"`, `match:
+"exact"`; Works instead `other`/`substitute`; a Looser match `other`/`related`. A plan line
+(`PlanLineItem`) adds `matching` and `group`.
+
+**Evaluation** (`python -m evals.substitutes_eval`, report `evals/reports/substitutes.md`).
+For every distinct ingredient name of the library and the starters (47), a Gemini judge
+(gemini-3-flash-preview) labelled the union of both methods' top 20 candidates (321 pairs)
+Exact / Substitute / Complement / Irrelevant (`evals/substitutes_golden.json`). With ESCI's
+gains (1 / 0.1 / 0.01 / 0), on Options' order with no amount, location or preference:
+
+| Method | nDCG@3 | Hit@1 |
+| --- | --- | --- |
+| Words (today's fallback) | 0.924 | 96% |
+| Meaning | 0.966 | 98% |
+
+Words already put the item itself first for most of these names; meaning gains in what comes
+after it ("Butter": ghee and oils instead of Canadian Peanut Butter Cream and Nestles PBJ;
+"Garlic": shallots instead of an onion and ginger) and in the names words could not place
+("Peanut Butter and Jelly Jam"). Both score 0 on "White Chocolate", which the catalog does not
+sell: the judge calls neither chocolate a substitute. `tests/test_substitutes_eval.py` holds
+matching by meaning to at least the words' score and above 0.95 (and Hit@1 above 95%) on the
+committed labels.
+
+**Remaking the seeds** (only when the catalog changes): `GEMINI_API_KEY=... python
+scripts/matching_seeds.py profiles`, then `check`, review the flags and record fixes, then
+`embed`, `types` and `review`; `golden` needs a seeded database (`DB_URL`). Each step prints
+the Gemini calls spent; `--budget` stops it at a ceiling (40 for this catalog's first run, of
+which 33 were used).
+
+**Not matched by meaning yet**: the weekly menu optimizer (`POST /plan/week`) and the MCP
+`lookup_products` tool still match by words.
+
 ## Options for a trip line, and pins
 
 Every trip line has the chat cart's Options dialog. `POST /mealplan/alternatives` takes
@@ -127,8 +265,10 @@ ranking}` (`mealplan/options.py`, no LLM):
   (`pins[recipe_key][line_no]`); a pin equal to `planner_product_id` is no pin, which is how
   "Back to the planner's pick" works.
 - `ranking` is an `AlternativeRanking` from `alternatives.rank_alternatives` over those
-  lines, each rebuilt as resolve planned it (`pins.meal_basis`): the candidates, the
-  held-back products, `unavailable`, the facts, reasons and `ORDER` are the chat cart's. Its
+  lines, each rebuilt as resolve planned it (`pins.meal_basis`): the candidates (by meaning,
+  in their groups, above), the held-back and `filtered` products, `unavailable`, the facts,
+  reasons and order are the chat cart's, and no row contains what the plan's diet or avoid
+  list leaves out, or what the covered recipes' own diets do (`pins.forbidden`). Its
   need is what these meals need on this trip. Each row's `trip` is the plan re-scheduled with
   that product pinned, under the same strategy, by the schedule's own code: `trip.total` and
   `trip.delta` are the strategy's total and its change ("$0.40 less on your plan's trips"),
@@ -152,9 +292,10 @@ ranking}` (`mealplan/options.py`, no LLM):
   `product: ""`, `stocked: false`, and `lines` that line and every other line of the plan with
   the same ingredient (by name) that buys nothing either, each with `planner_product_id`
   null. `ranking` is the same ranking with no current pick (`rank_alternatives(...,
-  open_lines=True)`, no new matcher): `items` are the choosable rows (sold in range at a store
+  open_lines=True)`): `items` are the choosable rows (sold in range at a store
   that is on, not held back), none `current`; `held_back` the products the origin exclusion
-  holds back, with their evidence, never choosable; and `ranking.out_of_reach` the products
+  holds back, with their evidence, never choosable; `filtered` what a hard rule keeps out;
+  and `ranking.out_of_reach` the products
   that would fill it but are sold only at stores turned off or beyond `max_km`, each
   `{product_id, product, why: "stores_off" | "out_of_range" | "not_stocked", stores[],
   nearest: {store, price, distance_km} | null}` (`stores` the stores turned off that sell it
@@ -168,14 +309,17 @@ ranking}` (`mealplan/options.py`, no LLM):
   line of the recipe, or its recipe has no meal or is not resolved; 422 `unknown_recipe_key`
   for a recipe the plan does not have. With every yellow onion evidenced as grown in the
   United States and that country excluded, the pilaf's and the biryani's Yellow Onion lines
-  get Red Onion and Green Onions as "related" rows (they share "onion"); with every onion
-  held back, `items` is empty and `held_back` lists them (tests/test_mealplan_options.py).
+  get Red Onion, Shallots and Green Onions as rows that work instead (the seed's substitute
+  types, in its order); with every one of them held back, `items` is empty and `held_back`
+  lists them (tests/test_mealplan_options.py).
 
 Every schedule call checks every pin of a resolved recipe as a cart swap is checked
 (`alternatives.validate_pins`): the line is one of the recipe's (one the resolve bought
 nothing for included: the pin fills it, and the basket, the schedule and the catalog then buy
-it there), the product is one of its candidates, the plan's origin exclusion does not hold it
-back, and a store in range sells it. Otherwise it is 422 `pin_invalid` with `recipe_key`, `line_no` and the reason
+it there), the product is one of its candidates, no hard rule keeps it out (it adds no
+contains-tag the resolve's product lacks, and contains nothing the plan's diet, avoid list or
+the recipe's diets leave out), the plan's origin exclusion does not hold it back, and a store
+in range sells it. Otherwise it is 422 `pin_invalid` with `recipe_key`, `line_no` and the reason
 ("... is evidenced as United States (made or packed there), which this plan excludes"). A pin
 applies to every meal of its recipe, wherever the meals move. Pins are bounded: at most 40
 lines per recipe, line numbers of at most 4 digits, product ids from 1 to 2^31 - 1. An
