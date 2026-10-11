@@ -25,6 +25,8 @@ from sqlalchemy.orm import Session
 
 from tests.mealplan_fixtures import (
     PRODUCTS,
+    START,
+    STARTERS,
     client,
     done_db,
     index,
@@ -450,6 +452,103 @@ def test_without_a_trip_date_a_product_nothing_buys_is_a_409(example):
     absent = next(pid for pid in sorted(PRODUCTS) if pid not in bought)
     r = client().post("/mealplan/alternatives", json={"draft": example, "product_id": absent})
     assert r.status_code == 409 and r.json()["detail"]["error"] == "no_trip_line"
+
+
+# ─── A pin on a line the resolve bought nothing for ──────────
+
+YELLOW_ONIONS = (12, 162, 163, 164)    # Yellow Onion, and the 3 lb, 10 lb and organic bags
+RED_ONION, GREEN_ONIONS = 147, 142     # the line's "related" products: they share "onion"
+PILAF = "starter:tomato_pilaf"
+ONION_LINES = {f"starter:{k}": next(ln["line_no"] for ln in s["lines"]
+                                    if ln["name"] == "Yellow Onion")
+               for k, s in STARTERS.items() if k in ("tomato_pilaf", "chicken_biryani")}
+
+
+@pytest.fixture()
+def onions():
+    """Each test's own origin evidence and offers; the seed is restored, and what the resolve
+    and the catalog cached forgotten, afterwards."""
+    yield
+    from pantry_planner import db
+    from pantry_planner.db import ProductOriginEvidenceRow
+    from pantry_planner.mealplan import catalog, resolve
+
+    with Session(db.engine()) as s:
+        s.query(ProductOriginEvidenceRow).delete()
+        s.commit()
+    db.seed_from_json()
+    resolve.clear_cache()
+    catalog.clear_cache()
+
+
+def _grown_in_the_us(*pids: int) -> None:
+    from pantry_planner import db
+
+    db.save_origin_evidence([dict(
+        product_id=pid, source="label-photo", source_ref=f"{pid}.jpg", claim_type="grown-in",
+        verbatim="Grown in USA", ingredient_origin="United States", manufactured_in="",
+        confidence="high", importer_only=False, note="", observed_at="") for pid in pids])
+
+
+def _no_yellow_onion(**settings) -> dict:
+    """The pilaf and the biryani, two meals each, resolved under the United States exclusion
+    (demo mode, no LLM): with every yellow onion evidenced as grown there, neither Yellow
+    Onion line buys anything."""
+    from pantry_planner.mealplan import catalog, resolve
+    from pantry_planner.mealplan.models import RecipeRef
+    from pantry_planner.mealplan.resolve import resolve_one
+
+    resolve.clear_cache()
+    catalog.clear_cache()
+    recipes, resolved = {}, {}
+    for key, slot in (("tomato_pilaf", "lunch"), ("chicken_biryani", "dinner")):
+        ref = RecipeRef(key=f"starter:{key}", starter=key)
+        recipes[ref.key] = {"ref": ref.model_dump(mode="json"), "wanted": 2, "slot": slot}
+        resolved[ref.key] = resolve_one(ref, exclude=["United States"]).model_dump(mode="json")
+    return {"start_date": START.isoformat(), "days": 7, "recipes": recipes,
+            "resolved": resolved, "settings": {"exclude_origin": ["United States"], **settings}}
+
+
+def _onion_lines(basket: dict) -> dict[str, dict]:
+    return {r["key"]: ln for r in basket["recipes"] for ln in r["lines"]
+            if ln["ingredient"] == "Yellow Onion"}
+
+
+def test_a_pin_may_fill_a_line_the_resolve_bought_nothing_for(onions):
+    """A product chosen for a line the resolve left out is checked as any pin is, and the
+    line then buys it everywhere: the basket, the schedule's trips and the catalog."""
+    _grown_in_the_us(*YELLOW_ONIONS)
+    draft = _no_yellow_onion()
+    chosen = {**draft, "pins": {k: {str(n): RED_ONION} for k, n in ONION_LINES.items()}}
+    after = _onion_lines(client().post("/mealplan/basket", json={"draft": chosen}).json())
+    assert {k: (ln["product"]["id"], ln["available"], ln["pinned"], ln["unavailable_kind"])
+            for k, ln in after.items()} == {k: (RED_ONION, True, True, None)
+                                            for k in ONION_LINES}
+    assert {m["recipe_key"] for t in strategy(schedule(chosen), "fresh")["trips"]
+            for ln in t["lines"] if ln["product"]["id"] == RED_ONION
+            for m in ln["for_meals"]} == set(ONION_LINES)
+    cat = client().post("/mealplan/catalog", json={
+        "settings": draft["settings"], "pins": chosen["pins"]}).json()
+    pilaf = next(r for r in cat["recipes"] if r["key"] == PILAF)
+    (onion,) = [ln for ln in pilaf["lines"] if ln["ingredient"] == "Yellow Onion"]
+    assert onion["product_id"] == RED_ONION and onion["pack_price"] is not None
+    assert "Yellow Onion" not in pilaf["unavailable"]
+    # what the US rule holds back is refused, as for a line the resolve did buy for
+    r = client().post("/mealplan/schedule", json={**draft, "pins": {PILAF: {
+        str(ONION_LINES[PILAF]): 12}}})
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert (detail["error"], detail["recipe_key"], detail["line_no"]) == (
+        "pin_invalid", PILAF, ONION_LINES[PILAF])
+    assert "evidenced as United States" in detail["detail"]
+    # and so is a product no store in range sells
+    _sql("DELETE FROM store_products WHERE product_id = :p AND store_id <> :far",
+         p=GREEN_ONIONS, far=FAR_STORE)
+    far = {**draft, "settings": {**draft["settings"], "max_km": 5},
+           "pins": {PILAF: {str(ONION_LINES[PILAF]): GREEN_ONIONS}}}
+    r = client().post("/mealplan/basket", json={"draft": far})
+    assert r.status_code == 422 and "no store within 5 km sells it" in r.json()["detail"][
+        "detail"]
 
 
 # ─── The route ───────────────────────────────────────────────

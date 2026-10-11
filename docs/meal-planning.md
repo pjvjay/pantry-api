@@ -147,9 +147,10 @@ ranking}` (`mealplan/options.py`, no LLM):
   `plan_total` are null.
 
 Every schedule call checks every pin of a resolved recipe as a cart swap is checked
-(`alternatives.validate_pins`): the line is one the recipe bought a product for, the product
-is one of its candidates, the plan's origin exclusion does not hold it back, and a store in
-range sells it. Otherwise it is 422 `pin_invalid` with `recipe_key`, `line_no` and the reason
+(`alternatives.validate_pins`): the line is one of the recipe's (one the resolve bought
+nothing for included: the pin fills it, and the basket, the schedule and the catalog then buy
+it there), the product is one of its candidates, the plan's origin exclusion does not hold it
+back, and a store in range sells it. Otherwise it is 422 `pin_invalid` with `recipe_key`, `line_no` and the reason
 ("... is evidenced as United States (made or packed there), which this plan excludes"). A pin
 applies to every meal of its recipe, wherever the meals move. Pins are bounded: at most 40
 lines per recipe, line numbers of at most 4 digits, product ids from 1 to 2^31 - 1. An

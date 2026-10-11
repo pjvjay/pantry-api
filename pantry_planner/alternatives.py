@@ -363,8 +363,8 @@ def _gather(s: Session, basis: PlanBasis, line_nos: list[int], catalog: dict[int
             current: dict[int, int], extra_ids: set[int]) -> _Gathered:
     from .origins import filter_pool
 
-    planned = planned_lines(basis)
-    lines = [planned[n] for n in sorted(set(line_nos))]
+    by_no = {ln.line_no: ln for ln in basis.lines}
+    lines = [by_no[n] for n in sorted(set(line_nos))]
     pools = _fetch_pools(s, basis, lines, catalog, current)
     ids = sorted(({pid for p in pools.values() for pid in p.found} | extra_ids) & set(catalog))
     origins, demo = _evidence(ids, catalog)
@@ -392,16 +392,20 @@ def effective_picks(basis: PlanBasis, pins: dict[int, int] | None = None) -> dic
 
 def validate_pins(basis: PlanBasis, pins: list[Pin] | None = None, *,
                   catalog: dict[int, Product] | None = None,
-                  session: Session | None = None) -> dict[int, ValidPin]:
+                  session: Session | None = None,
+                  open_lines: bool = False) -> dict[int, ValidPin]:
     """The basis's own pins merged with `pins` (a later pin for a line wins), each checked:
     the line is planned, the product exists, it is a candidate for the line (any level,
     or a same-aisle substitute), the plan's origin exclusion does not hold it back, and it
     has an offer in range under the plan's price cap. A pin equal to the plan's own pick
-    is dropped, which is how a swap is undone. Raises PinError naming the problem."""
+    is dropped, which is how a swap is undone. Raises PinError naming the problem.
+    `open_lines`: a pin may also fill a line of the basis the plan bought nothing for (a
+    meal plan's line the resolve left out), checked the same way."""
     pins = list(pins or [])
     if len(pins) > MAX_PINS:
         raise PinError(f"at most {MAX_PINS} pins, got {len(pins)}")
-    planned = planned_lines(basis)
+    planned = ({ln.line_no: ln for ln in basis.lines} if open_lines
+               else planned_lines(basis))
     merged: dict[int, int] = {}
     for p in [*basis.pins, *pins]:
         merged[p.line_no] = p.product_id
