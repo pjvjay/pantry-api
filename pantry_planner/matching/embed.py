@@ -39,6 +39,7 @@ QUERY_PROMPT = "task: search result | query: "
 DOCUMENT_PROMPT = "title: {title} | text: "
 TIMEOUT = httpx.Timeout(20.0, connect=1.5)
 RETRY_AFTER_S = 60.0
+PING_EVERY_S = 30.0
 
 Kind = Literal["query", "document"]
 
@@ -92,6 +93,7 @@ class OllamaEmbedder:
         self._lock = threading.Lock()
         self.down_since: float | None = None
         self.last_error = ""
+        self._ping: tuple[float, tuple[bool, str]] | None = None
 
     # ── disk cache: one JSON line per text, read once ──
     def _cache_file(self) -> Path | None:
@@ -169,6 +171,23 @@ class OllamaEmbedder:
         self.down_since, self.last_error = None, ""
         return out
 
+    def ping(self) -> tuple[bool, str]:
+        """(whether Ollama answers and has the model, why not), from GET /api/tags, at most
+        once every PING_EVERY_S: /health asks on every call."""
+        now = time.monotonic()
+        if self._ping is not None and now - self._ping[0] < PING_EVERY_S:
+            return self._ping[1]
+        try:
+            with httpx.Client(timeout=httpx.Timeout(1.0), transport=self._transport) as client:
+                resp = client.get(f"{self.url}/api/tags")
+            resp.raise_for_status()
+            names = {m.get("name", "") for m in resp.json().get("models", [])}
+            ok = any(n == self.model or n.startswith(f"{self.model}:") for n in names)
+            result = (ok, "" if ok else f"Ollama has no model {self.model!r}")
+        except (httpx.HTTPError, ValueError, AttributeError) as e:
+            result = (False, f"{self.name} is unreachable ({type(e).__name__})")
+        self._ping = (now, result)
+        return result
 
 
 # ─── The process's embedder ──────────────────────────────────

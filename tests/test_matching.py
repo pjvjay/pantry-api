@@ -15,6 +15,7 @@ import pytest
 
 from tests.fake_embedder import DownEmbedder, FakeEmbedder
 from tests.mealplan_fixtures import PRODUCTS, client, done_db, starter_draft, use_db
+from tests.seed_catalog import SEED_PRODUCTS
 
 BUTTER = 18
 GREEK_YOGURT, COCONUT_YOGURT, SOUR_CREAM = 20, 42, 117
@@ -142,3 +143,22 @@ def test_what_was_shown_and_picked_is_logged_without_personal_data(tmp_path, mon
     text = json.dumps(rows)
     for private in ("49.28", "123.12", "lat", "lon", "address", "Toast"):
         assert private not in text
+
+
+def test_health_reports_the_matcher():
+    from pantry_planner.matching import embed
+
+    embed.set_embedder(FakeEmbedder())
+    m = client().get("/health").json()["matching"]
+    assert (m["mode"], m["profiles"], m["embedding_model"], m["dims"]) == (
+        "meaning", len(SEED_PRODUCTS), "embeddinggemma", 256)
+    assert (m["embedder"], m["embedder_up"], m["unknown_names"]) == (
+        "fake-embedder", True, "meaning")
+    embed.set_embedder(DownEmbedder())
+    m = client().get("/health").json()["matching"]
+    assert (m["embedder_up"], m["unknown_names"]) == (False, "words")
+    assert "unreachable" in m["detail"]
+    embed.set_embedder(None)
+    m = client().get("/health").json()["matching"]
+    assert (m["embedder_up"], m["unknown_names"]) == (False, "words")
+    assert "OLLAMA_URL is empty" in m["detail"]

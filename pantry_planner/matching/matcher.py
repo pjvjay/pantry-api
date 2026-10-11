@@ -374,3 +374,26 @@ def rank_pool(m: Meaning, pool: list[Product], *, need: tuple[float, str] | None
 
 def _price(p: Product) -> float:
     return p.store_price if p.store_price is not None else p.price
+
+
+# ─── State, for /health ──────────────────────────────────────
+
+def state() -> dict:
+    """What the matcher knows and whether it can embed a name no seed knows: `mode` is
+    "meaning" with seeds, `unknown_names` how a name no seed knows is matched right now
+    ("meaning" when the embedder answers, else "words")."""
+    s = seeds.load()
+    e = embed.get_embedder()
+    if e is None:
+        up, detail = False, "no embedding model is configured (OLLAMA_URL is empty)"
+    elif hasattr(e, "ping"):
+        up, detail = e.ping()
+    else:
+        up, detail = True, ""
+    return {"mode": "meaning" if s.profiles else "words", "profiles": len(s.profiles),
+            "product_types": len(s.centroids), "seed_ingredients": len(s.ingredients),
+            "embedding_model": s.model, "dims": s.dims,
+            "embedder": getattr(e, "name", None), "embedder_up": up,
+            "unknown_names": "meaning" if up and s.centroids else "words",
+            "detail": detail,
+            "floors": {"exact": EXACT_FLOOR, "type": TYPE_FLOOR, "looser": LOOSER_FLOOR}}
