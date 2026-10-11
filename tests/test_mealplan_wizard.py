@@ -32,6 +32,7 @@ SEED = json.loads((SEEDS_DIR / "mealplan_starters.json").read_text(encoding="utf
 LIBRARY = {r["slug"]: r for r in json.loads((SEEDS_DIR / "recipes.json").read_text())}
 SLOTS = ("breakfast", "lunch", "dinner", "snack")
 TUNA, CHEDDAR, THIGHS, BONELESS, SALT, GARLIC = 48, 23, 11, 46, 122, 13
+CHEDDAR_SHREDDED = 44
 WHEAT_BREAD, OTHER_WHEAT_BREAD = 2, 1     # Wheat Bread 2, the resolve's pick, and Wheat Bread 1
 FAR_STORE = 4        # MegaSave Richmond, about 14 km from the server's reference point
 TUNA_MELT, BIRYANI, PIZZA = "starter:tuna_melt", "starter:chicken_biryani", \
@@ -296,8 +297,9 @@ def test_an_excluded_product_is_never_picked_or_priced(reseed):
 
 
 def test_an_ingredient_no_store_in_range_sells_is_unavailable(reseed):
-    _sql("DELETE FROM store_products WHERE product_id IN (:a, :b) AND store_id <> :far",
-         a=TUNA, b=CHEDDAR, far=FAR_STORE)
+    # Both cheddars: matched by meaning, the shredded one is the same item as the block.
+    _sql("DELETE FROM store_products WHERE product_id IN (:a, :b, :c) AND store_id <> :far",
+         a=TUNA, b=CHEDDAR, c=CHEDDAR_SHREDDED, far=FAR_STORE)
     _changed()
     near = by_key(cat(settings={"max_km": 5}))
     assert near[TUNA_MELT]["unavailable"] == ["Canned Tuna", "Cheddar Cheese"]

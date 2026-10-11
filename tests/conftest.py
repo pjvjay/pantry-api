@@ -43,3 +43,17 @@ def _fresh_limits():
 
     limits.reset()
     yield
+
+
+@pytest.fixture
+def by_words(monkeypatch):
+    """Every name matched by words, as one no seed knows is when the embedder is down: the
+    word fallback's own tests (its levels, the size cap, its tiers) run on seed names too."""
+    from pantry_planner.matching import matcher
+
+    def words(items):
+        return [matcher.Meaning(name=name, source="words", form=(form or "").lower(),
+                                why_words="matched by words for this test")
+                for name, form in items]
+
+    monkeypatch.setattr(matcher, "meanings", words)

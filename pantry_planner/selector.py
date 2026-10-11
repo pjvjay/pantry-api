@@ -81,6 +81,7 @@ def call_selector(
     origins_by_id: dict | None = None,
     preference: list[str] | None = None,
     substitutes: dict[int, list[int]] | None = None,
+    order: dict[int, list[tuple[int, str]]] | None = None,
 ) -> SelectorResult:
     """Make one main-selector call. Returns structured selections.
 
@@ -92,6 +93,11 @@ def call_selector(
     them out of that line's choice only. The live payload is unchanged: a
     product is flagged "substitute" there when it substitutes for every
     line that retrieved it (planner.union_of_pools).
+
+    `order`: recipe line_no -> (product id, group) in the matcher's order, for
+    the lines matched by meaning (matching/matcher.py). The demo selector picks
+    the first of them it is offered; the live selector chooses among the
+    products as before, which for those lines are the matcher's candidates.
     """
     cfg = settings()
     if cfg.demo_mode:                       # public demo: no API key, no cost
@@ -101,7 +107,7 @@ def call_selector(
                                         constraints=constraints,
                                         origins_by_id=origins_by_id,
                                         preference=preference,
-                                        substitutes=substitutes)
+                                        substitutes=substitutes, order=order)
     payload: dict = {
         "recipe_ingredients": _serialize_ingredients(ingredients),
         "available_products": _serialize_products(products, origins_by_id),

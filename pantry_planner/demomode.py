@@ -14,9 +14,10 @@ code that runs identically in both modes. Responses are labeled
 model_used="demo-deterministic" and the /health endpoint reports
 demo_mode so the UI can say so honestly.
 
-The stand-ins are deliberately simple (regex recipe parse; token-overlap
-+ price product ranking): good enough to drive the demo, visibly not
-the point of the project.
+The stand-ins are deliberately simple (regex recipe parse; the product
+choice takes the matcher's first candidate, or, for a line matched by words,
+the token-overlap + price ranking): good enough to drive the demo, visibly
+not the point of the project.
 """
 from __future__ import annotations
 
@@ -81,10 +82,19 @@ def select_products(ingredients: list[RecipeIngredient],
                     constraints: dict | None = None,
                     origins_by_id: dict | None = None,
                     preference: list[str] | None = None,
-                    substitutes: dict[int, list[int]] | None = None) -> SelectorResult:
-    """Token-overlap, then "fresh" when the ingredient says it, then head
-    noun, then origin preference, then offer price; direct matches before
-    t4 substitutes. Confidence is fixed at 0.9
+                    substitutes: dict[int, list[int]] | None = None,
+                    order: dict[int, list[tuple[int, str]]] | None = None) -> SelectorResult:
+    """A line matched by meaning (`order`: line_no -> (product id, group) in the
+    matcher's order, matching/matcher.rank_pool) takes the first product of its
+    order that it is offered: the same item before what works instead, then
+    the matcher's score (relevance, form and variant, pack fit, value, origin
+    preference). A pick that only works instead says "substitution".
+
+    Any other line (matched by words): token-overlap, then "fresh" when the
+    ingredient says it, then head noun, then origin preference, then offer
+    price; direct matches before t4 substitutes.
+
+    Confidence is fixed at 0.9
     — above the cascade threshold, so demo mode never triggers a (would-be)
     escalation.
 
@@ -104,7 +114,21 @@ def select_products(ingredients: list[RecipeIngredient],
     origins_by_id = origins_by_id or {}
     preference = [c for c in (preference or []) if c.strip()]
     selections: list[Selection] = []
+    offered = {p.id for p in products}
     for ing in ingredients:
+        ranked = (order or {}).get(ing.line_no)
+        if ranked is not None:
+            pick_group = next(((pid, g) for pid, g in ranked if pid in offered), None)
+            if pick_group is None:
+                continue
+            pid, group = pick_group
+            why = ("demo mode: matched by meaning, the same item the matcher ranks first"
+                   if group == "same_item" else
+                   "demo mode: matched by meaning; no same item is offered, so a "
+                   "substitution: the product that works instead the matcher ranks first")
+            selections.append(Selection(line_no=ing.line_no, product_id=pid, confidence=0.9,
+                                        reasoning=why))
+            continue
         if substitutes is None:
             pool = [p for p in products if not p.substitute] or products
         else:

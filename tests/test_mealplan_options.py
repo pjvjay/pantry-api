@@ -457,7 +457,9 @@ def test_without_a_trip_date_a_product_nothing_buys_is_a_409(example):
 # ─── A pin on a line the resolve bought nothing for ──────────
 
 YELLOW_ONIONS = (12, 162, 163, 164)    # Yellow Onion, and the 3 lb, 10 lb and organic bags
-RED_ONION, GREEN_ONIONS = 147, 142     # the line's "related" products: they share "onion"
+# What works instead of a yellow onion, as its seed lists them (red onion, shallots, green
+# onions): the line's Options when every yellow onion is held back.
+RED_ONION, SHALLOTS, GREEN_ONIONS = 147, 148, 142
 PILAF = "starter:tomato_pilaf"
 ONION_LINES = {f"starter:{k}": next(ln["line_no"] for ln in s["lines"]
                                     if ln["name"] == "Yellow Onion")
@@ -582,9 +584,10 @@ def test_a_line_that_buys_nothing_has_options_and_a_row_chosen_makes_it_availabl
                 for ln in STARTERS[k]["lines"] if ln["name"] == "Yellow Onion")
     assert ranking["need"] == f"{grams:g} g"
     items = ranking["items"]
-    assert [it["product_id"] for it in items] == [RED_ONION, GREEN_ONIONS]
+    assert [it["product_id"] for it in items] == [RED_ONION, SHALLOTS, GREEN_ONIONS]
     assert not any(it["current"] for it in items) and {it["match"] for it in items} == {
-        "related"}
+        "substitute"}
+    assert {it["group"] for it in items} == {"works_instead"} and ranking["matching"] == "meaning"
     held = {h["product_id"]: h for h in ranking["held_back"]}
     assert held[12]["country"] == "United States" and held[12]["verbatim"] == "Grown in USA"
     assert not set(held) & {it["product_id"] for it in items}
@@ -605,30 +608,31 @@ def test_a_line_that_buys_nothing_has_options_and_a_row_chosen_makes_it_availabl
 
 
 def test_with_nothing_nearby_but_what_the_us_rule_holds_back_no_row_is_choosable(onions):
-    """Every onion nearby is evidenced as grown in the United States: no row to choose, and
-    held_back lists them with their evidence."""
-    _grown_in_the_us(*YELLOW_ONIONS, RED_ONION, GREEN_ONIONS)
+    """Every onion nearby (and the shallots that work instead of one) is evidenced as grown in
+    the United States: no row to choose, and held_back lists them with their evidence."""
+    _grown_in_the_us(*YELLOW_ONIONS, RED_ONION, SHALLOTS, GREEN_ONIONS)
     draft = _no_yellow_onion()
     for extra in ({}, {"trip_date": strategy(schedule(draft), "fresh")["trips"][0]["date"]}):
         ranking = _line_options(draft, **extra)["ranking"]
         assert (ranking["items"], ranking["total"], ranking["out_of_reach"]) == ([], 0, [])
         held = {h["product_id"]: h for h in ranking["held_back"]}
-        assert {12, RED_ONION, GREEN_ONIONS} <= set(held)
+        assert {12, RED_ONION, SHALLOTS, GREEN_ONIONS} <= set(held)
         for h in held.values():
             assert (h["country"], h["verbatim"], h["source"]) == (
                 "United States", "Grown in USA", "label-photo"), h
 
 
 def test_rows_sold_only_at_stores_turned_off_or_beyond_the_distance_say_so(onions):
-    """Red Onion is sold within 5 km only at a store the shopper turned off, Green Onions only
-    at the store 14 km away: neither is choosable, and out_of_reach says why."""
+    """Red Onion is sold within 5 km only at a store the shopper turned off, Green Onions and
+    Shallots only at the store 14 km away: none is choosable, and out_of_reach says why."""
     _grown_in_the_us(*YELLOW_ONIONS)
     _sql("DELETE FROM store_products WHERE product_id = :p AND store_id <> 3", p=RED_ONION)
-    _sql("DELETE FROM store_products WHERE product_id = :p AND store_id <> :far",
-         p=GREEN_ONIONS, far=FAR_STORE)
+    for far_only in (GREEN_ONIONS, SHALLOTS):
+        _sql("DELETE FROM store_products WHERE product_id = :p AND store_id <> :far",
+             p=far_only, far=FAR_STORE)
     draft = _no_yellow_onion(stores_off=[3], max_km=5)
     ranking = _line_options(draft)["ranking"]
-    assert ranking["items"] == [] and ranking["unavailable"] == 2
+    assert ranking["items"] == [] and ranking["unavailable"] == 3
     (store3,) = _sql_rows("SELECT name FROM stores WHERE id = 3")
     (far,) = _sql_rows("SELECT price FROM store_products WHERE product_id = :p",
                        p=GREEN_ONIONS)
@@ -641,6 +645,7 @@ def test_rows_sold_only_at_stores_turned_off_or_beyond_the_distance_say_so(onion
     assert (green["nearest"]["store"], green["nearest"]["price"]) == (
         "MegaSave Richmond", far["price"])
     assert green["nearest"]["distance_km"] > 5
+    assert reach[SHALLOTS]["why"] == "out_of_range"
     # with the store back on, Red Onion is a row again
     back = _line_options({**draft, "settings": {**draft["settings"], "stores_off": []}})
     assert [it["product_id"] for it in back["ranking"]["items"]] == [RED_ONION]

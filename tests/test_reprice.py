@@ -186,20 +186,22 @@ def test_a_product_from_another_aisle_is_named_a_substitution():
 
 def test_choosing_another_lines_product_makes_one_purchase_with_summed_packs():
     """Red onion swapped for the yellow onion line 1 already buys: one purchase covering
-    both lines, with packs for 300 g + 200 g of a 200 g onion."""
+    both lines, with packs for 200 g + 200 g of a 200 g onion. (200 g, where this test once
+    had 300 g: matched by meaning, 300 g of yellow onion buys a pack that covers it, the
+    3 lb bag, which red onion's words do not reach.)"""
     import math
 
     from pantry_planner import flow
     from pantry_planner.models import Pin
 
-    plan = flow.run_nl(ONIONS)
+    plan = flow.run_nl("Onions\n- 200g yellow onion\n- 200g red onion\n")
     yellow = _id("Yellow Onion")
     assert [li.product_id for li in plan.line_items if li.line_no == 1] == [yellow]
     again = flow.reprice(plan.basis, [Pin(line_no=2, product_id=yellow)])
     (li,) = again.line_items
     assert (li.line_no, li.also_lines, li.product_id) == (1, [2], yellow)
-    assert li.packs == math.ceil((300 + 200) / 200)
-    assert (li.need_qty, li.need_uom) == (500.0, "g")
+    assert li.packs == math.ceil((200 + 200) / 200)
+    assert (li.need_qty, li.need_uom) == (400.0, "g")
     assert _accounted(again) == again.ingredient_count == 2
 
 
@@ -283,6 +285,17 @@ def test_a_product_that_is_no_option_says_why():
     with pytest.raises(PinError, match=r"Whole Milk 1L is not an option for line 2 \(garlic\): "
                                        r"it contains dairy, which this plan excludes"):
         flow.reprice(plan.basis, [Pin(line_no=garlic.line_no, product_id=_id("Whole Milk 1L"))])
+    with pytest.raises(PinError, match=r"it is not the same item as 'penne', does not work "
+                                       r"instead, and is not near it in meaning"):
+        flow.reprice(plan.basis, [Pin(line_no=1, product_id=_id("Fresh Ginger"))])
+
+
+def test_a_product_that_is_no_option_by_words_says_so(by_words):
+    from pantry_planner import flow
+    from pantry_planner.alternatives import PinError
+    from pantry_planner.models import Pin
+
+    plan = flow.run_nl(PASTA)
     with pytest.raises(PinError, match=r"it does not match the words of 'penne'"):
         flow.reprice(plan.basis, [Pin(line_no=1, product_id=_id("Fresh Ginger"))])
 
