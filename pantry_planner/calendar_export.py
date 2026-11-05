@@ -11,7 +11,12 @@ here and only ever opened by the shopper.
 The rules every event keeps:
 
 - all-day: DTSTART;VALUE=DATE with no time and no zone, so an event lands on its plan date in
-  every time zone and on both sides of 2026-11-01 (timed events are decision D9);
+  every time zone and on both sides of 2026-11-01. A request's optional `timing` gives the
+  trips and the cook days (each at its meal's slot time, when the shopper set one) a start
+  time and length in the shopper's time zone instead
+  (DTSTART;TZID and DTEND;TZID), and any event reminders (one VALARM each, minutes before its
+  start; an all-day event's start is its midnight, as Google counts it). Without `timing` the
+  export is the all-day one, byte for byte;
 - identity: the UID hashes the plan id with the item (a trip's strategy and date, a meal's id,
   a reminder's kind, meal or trip and product), so exporting again gives the same UIDs; the
   SEQUENCE is the plan's revision, which only counts up;
@@ -33,12 +38,14 @@ import datetime as dt
 import hashlib
 import html
 import math
+import re
+import zoneinfo
 from collections.abc import Callable, Collection
 from fractions import Fraction
 from typing import Annotated, Any, Literal
 from urllib.parse import quote, urlencode
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .mealplan import shelf
 from .mealplan.models import (
@@ -70,6 +77,12 @@ DEMO_BADGE = "demo amounts"
 MAX_TEXT = 60_000
 # Generous: the 512 KB body cap is the real bound, and the emission must never fail a schedule.
 MAX_ITEMS = 5000
+# Reminders: minutes before an event's start, at most four weeks, and three per kind of event.
+MAX_REMINDER_MIN = 40_320
+MAX_REMINDERS = 3
+# An IANA zone name ("America/Vancouver", "UTC"): checked against the server's time zone
+# database when it has one, and by its shape when it has none.
+_ZONE = re.compile(r"[A-Za-z][A-Za-z0-9_+\-]*(/[A-Za-z0-9_+\-]+){0,2}")
 
 EventKind = Literal["trip", "cook", "freeze", "thaw"]
 Include = Literal["trips", "cooks", "reminders"]
@@ -402,31 +415,102 @@ def _reminder_source(a: Action, thaw_reminder: str) -> ReminderSource | None:
     return None
 
 
+# ─── Times and reminders ─────────────────────────────────────
+
+Minutes = Annotated[int, Field(ge=0, le=MAX_REMINDER_MIN)]
+
+
+HHMM = Annotated[str, Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")]
+
+
+class EventTime(BaseModel):
+    """When one kind of event starts, as "HH:MM" in the timing's zone, and how long it is."""
+    start: HHMM
+    minutes: int = Field(ge=1, le=1440)
+
+
+class CookTime(EventTime):
+    """The cook days' time: a meal's slot time from by_slot when it has one, else start."""
+    by_slot: dict[Slot, HHMM] | None = None
+
+
+class Reminders(BaseModel):
+    """Minutes before the start of each kind of event: trips, cook days, and the freeze and
+    thaw reminders."""
+    trips: list[Minutes] = Field(default_factory=list, max_length=MAX_REMINDERS)
+    cooks: list[Minutes] = Field(default_factory=list, max_length=MAX_REMINDERS)
+    reminders: list[Minutes] = Field(default_factory=list, max_length=MAX_REMINDERS)
+
+
+class Timing(BaseModel):
+    """The shopper's times: trips and cook days at a time of day (None keeps them all-day;
+    freeze and thaw reminders always are), and reminders for each kind of event."""
+    timezone: str = Field(min_length=1, max_length=64)
+    trips: EventTime | None = None
+    cooks: CookTime | None = None
+    reminders: Reminders = Field(default_factory=Reminders)
+
+    @field_validator("timezone")
+    @classmethod
+    def _known_zone(cls, name: str) -> str:
+        if not known_zone(name):
+            raise ValueError(f"unknown time zone {name!r}: an IANA name such as "
+                             "'America/Vancouver'")
+        return name
+
+
+def known_zone(name: str) -> bool:
+    """An IANA zone name the server's time zone database has, or, on a server with none, a
+    name of that shape. Nothing here converts a time: the calendar does, from the name."""
+    if not _ZONE.fullmatch(name):
+        return False
+    try:
+        zoneinfo.ZoneInfo(name)
+        return True
+    except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+        return not zoneinfo.available_timezones()
+
+
+_TIMED = {"trip": "trips", "cook": "cooks"}
+_REMINDED = {"trip": "trips", "cook": "cooks", "freeze": "reminders", "thaw": "reminders"}
+
+
+def _hhmm(minutes: int) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
 # ─── Events ──────────────────────────────────────────────────
 
 class CalendarEvent(BaseModel):
-    """One all-day event. end is exclusive (the day after), as DTEND;VALUE=DATE and Google's
-    dates= both read it. labels are the console's chips (store hours unknown, demo store, demo
-    amounts, cited, your setting)."""
+    """One event. An all-day event's end is exclusive (the day after), as DTEND;VALUE=DATE and
+    Google's dates= both read it. A timed one starts at start_time on its date and ends at
+    end_time on `end` (the next day when it runs past midnight), both in `timezone`.
+    reminders_min are minutes before the start, one alarm each. labels are the console's
+    chips (store hours unknown, demo store, demo amounts, cited, your setting)."""
     uid: str
     item_id: str
     kind: EventKind
     date: dt.date
     end: dt.date
-    all_day: Literal[True] = True
+    all_day: bool = True
+    start_time: str | None = None
+    end_time: str | None = None
+    timezone: str | None = None
     title: str
     location: str | None
     description: str
     categories: list[str]
     sequence: int
     labels: list[str]
+    reminders_min: list[int] = Field(default_factory=list)
     google_url: str
 
 
 class CalendarPreview(BaseModel):
-    """POST /calendar/preview: the events the .ics would hold, in date order."""
+    """POST /calendar/preview: the events the .ics would hold, in date order. all_day is True
+    when every event is."""
     calendar_name: str
-    all_day: Literal[True] = True
+    all_day: bool = True
     events: list[CalendarEvent]
     counts: dict[str, int]
     filename: str
@@ -601,23 +685,40 @@ def _check_rules(s: ApprovedSchedule, rules: Callable[[str], dict]) -> None:
 
 def build_events(s: ApprovedSchedule, *, include: Collection[str] = INCLUDE_ALL,
                  addresses: dict[str, str] | None = None,
-                 rules: Callable[[str], dict] = shelf.rule) -> list[CalendarEvent]:
+                 rules: Callable[[str], dict] = shelf.rule,
+                 timing: Timing | None = None) -> list[CalendarEvent]:
     """The events for an approved schedule, in date order. Raises CalendarExportError: 409
     while a trip is not approved as it stands, 422 for a reminder citing an unknown rule.
-    addresses is None while the stores are synthetic (LOCATION '<store> (demo store)')."""
+    addresses is None while the stores are synthetic (LOCATION '<store> (demo store)').
+    timing (None: every event all-day, no reminders) times the trips and cook days and sets
+    each kind's reminders."""
     check_exportable(s)
     _check_rules(s, rules)
     key = plan_key(s)
     events: list[tuple[tuple, CalendarEvent]] = []
 
     def add(item_id: str, kind: EventKind, date: dt.date, title: str, location: str | None,
-            description: str, labels: list[str], slot: int = 0) -> None:
+            description: str, labels: list[str], slot: str | None = None) -> None:
         end = date + dt.timedelta(days=1)
-        events.append(((date, _KIND_ORDER[kind], slot, item_id), CalendarEvent(
+        timed = getattr(timing, _TIMED[kind]) if timing and kind in _TIMED else None
+        alarms = (sorted(set(getattr(timing.reminders, _REMINDED[kind]))) if timing else [])
+        when: dict = {}
+        if timed is not None:
+            start = (getattr(timed, "by_slot", None) or {}).get(slot) or timed.start
+            h, m = (int(x) for x in start.split(":"))
+            days, last = divmod(h * 60 + m + timed.minutes, 1440)
+            end = date + dt.timedelta(days=days)
+            when = {"all_day": False, "start_time": start, "end_time": _hhmm(last),
+                    "timezone": timing.timezone}
+        order = SLOTS.index(slot) if slot else 0
+        events.append(((date, _KIND_ORDER[kind], order, item_id), CalendarEvent(
             uid=event_uid(key, item_id), item_id=item_id, kind=kind, date=date, end=end,
-            title=title, location=location, description=description,
+            **when, title=title, location=location, description=description,
             categories=[s.calendar_name, _CATEGORY[kind]], sequence=s.rev, labels=labels,
-            google_url=google_template_url(title, date, end, description, location))))
+            reminders_min=alarms,
+            google_url=google_template_url(title, date, end, description, location,
+                                           times=(when["start_time"], when["end_time"],
+                                                  when["timezone"]) if when else None))))
 
     if "trips" in include:
         for t in s.trips:
@@ -648,15 +749,42 @@ def build_events(s: ApprovedSchedule, *, include: Collection[str] = INCLUDE_ALL,
                 labels.append("nutrition not shown")
             if c.recipe_servings is None:
                 labels.append("servings unknown")
-            add(c.item_id, "cook", c.date, title, None, cook_description(c), labels,
-                SLOTS.index(c.slot))
+            add(c.item_id, "cook", c.date, title, None, cook_description(c), labels, c.slot)
     return [e for _, e in sorted(events, key=lambda x: x[0])]
 
 
-def preview(s: ApprovedSchedule, events: list[CalendarEvent]) -> CalendarPreview:
+def _by_slot(t: EventTime) -> str:
+    """' (breakfast at 08:00, lunch at 12:30)': the cook days' slot times, in slot order."""
+    times = getattr(t, "by_slot", None) or {}
+    return (" (" + ", ".join(f"{slot} at {times[slot]}" for slot in SLOTS if slot in times)
+            + ")") if times else ""
+
+
+def timing_notes(timing: Timing) -> list[str]:
+    """IMPORT_NOTES for a timed export: what is timed, in which zone, and the reminders."""
+    timed = [f"{what} at {t.start} for {t.minutes} min" + _by_slot(t) for what, t in
+             (("trips", timing.trips), ("cook days", timing.cooks)) if t is not None]
+    head = (f"Times are in {timing.timezone}: " + " and ".join(timed)
+            + "; every other event is all-day." if timed
+            else "Every event is all-day, on its plan date in any time zone.")
+    r = timing.reminders
+    alarms = [f"{what} {', '.join(str(n) for n in sorted(set(mins)))} min before"
+              for what, mins in (("trips", r.trips), ("cook days", r.cooks),
+                                 ("freeze and thaw reminders", r.reminders)) if mins]
+    out = [head]
+    if alarms:
+        out.append("Reminders: " + "; ".join(alarms)
+                   + " (an all-day event's start is its midnight).")
+    return out + IMPORT_NOTES[1:]
+
+
+def preview(s: ApprovedSchedule, events: list[CalendarEvent],
+            timing: Timing | None = None) -> CalendarPreview:
     counts = {k: sum(1 for e in events if e.kind == k) for k in _KIND_ORDER}
-    return CalendarPreview(calendar_name=s.calendar_name, events=events, counts=counts,
-                           filename=ics_filename(s, events), notes=IMPORT_NOTES)
+    return CalendarPreview(calendar_name=s.calendar_name,
+                           all_day=all(e.all_day for e in events), events=events,
+                           counts=counts, filename=ics_filename(s, events),
+                           notes=IMPORT_NOTES if timing is None else timing_notes(timing))
 
 
 def ics_filename(s: ApprovedSchedule, events: list[CalendarEvent]) -> str:
@@ -697,23 +825,38 @@ def _ics_date(d: dt.date) -> str:
     return d.strftime("%Y%m%d")
 
 
+def _ics_time(d: dt.date, hhmm: str) -> str:
+    return f"{_ics_date(d)}T{hhmm.replace(':', '')}00"
+
+
 def render_ics(events: list[CalendarEvent], *, calendar_name: str = CALENDAR_NAME,
                now: dt.datetime | None = None) -> str:
-    """An RFC 5545 calendar of all-day events: CRLF line endings, lines folded at 75 octets,
-    DTSTART/DTEND as VALUE=DATE (no TZID, so no VTIMEZONE is needed), a stable UID and the
-    plan's revision as SEQUENCE. DTSTAMP is when the file was made (UTC)."""
+    """An RFC 5545 calendar: CRLF line endings, lines folded at 75 octets, a stable UID and the
+    plan's revision as SEQUENCE. DTSTAMP is when the file was made (UTC). An all-day event's
+    DTSTART/DTEND are VALUE=DATE and it is TRANSPARENT; a timed one's carry the shopper's
+    TZID, an IANA name the calendar resolves (no VTIMEZONE is written), and it is OPAQUE.
+    Each reminder is one VALARM: ACTION:DISPLAY, TRIGGER:-PT{n}M before the start."""
     stamp = (now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
     lines = ["BEGIN:VCALENDAR", "VERSION:2.0", f"PRODID:{PRODID}", "CALSCALE:GREGORIAN",
              f"X-WR-CALNAME:{escape_text(calendar_name)}"]
     for e in events:
-        lines += ["BEGIN:VEVENT", f"UID:{e.uid}", f"DTSTAMP:{stamp}", f"SEQUENCE:{e.sequence}",
-                  f"DTSTART;VALUE=DATE:{_ics_date(e.date)}",
-                  f"DTEND;VALUE=DATE:{_ics_date(e.end)}", f"SUMMARY:{escape_text(e.title)}"]
+        lines += ["BEGIN:VEVENT", f"UID:{e.uid}", f"DTSTAMP:{stamp}", f"SEQUENCE:{e.sequence}"]
+        if e.all_day:
+            lines += [f"DTSTART;VALUE=DATE:{_ics_date(e.date)}",
+                      f"DTEND;VALUE=DATE:{_ics_date(e.end)}"]
+        else:
+            lines += [f"DTSTART;TZID={e.timezone}:{_ics_time(e.date, e.start_time)}",
+                      f"DTEND;TZID={e.timezone}:{_ics_time(e.end, e.end_time)}"]
+        lines.append(f"SUMMARY:{escape_text(e.title)}")
         if e.location:
             lines.append(f"LOCATION:{escape_text(e.location)}")
         lines += [f"DESCRIPTION:{escape_text(e.description)}",
                   f"CATEGORIES:{','.join(escape_text(c) for c in e.categories)}",
-                  "TRANSP:TRANSPARENT", "STATUS:CONFIRMED", "END:VEVENT"]
+                  f"TRANSP:{'TRANSPARENT' if e.all_day else 'OPAQUE'}", "STATUS:CONFIRMED"]
+        for n in e.reminders_min:
+            lines += ["BEGIN:VALARM", "ACTION:DISPLAY", f"DESCRIPTION:{escape_text(e.title)}",
+                      f"TRIGGER:-PT{n}M", "END:VALARM"]
+        lines.append("END:VEVENT")
     lines.append("END:VCALENDAR")
     return "".join(fold(ln) + "\r\n" for ln in lines)
 
@@ -721,16 +864,22 @@ def render_ics(events: list[CalendarEvent], *, calendar_name: str = CALENDAR_NAM
 # ─── Google add-event links ──────────────────────────────────
 
 def google_template_url(title: str, start: dt.date, end: dt.date, details: str,
-                        location: str | None) -> str:
-    """Google Calendar's add-event page for one all-day event (dates=YYYYMMDD/YYYYMMDD, end
-    exclusive). No key, no account on our side: the shopper opens it while signed in. The
-    format is community-documented, not an official API. details are HTML-escaped and cut at
-    GOOGLE_DETAILS_MAX characters with a pointer to the .ics."""
+                        location: str | None,
+                        times: tuple[str, str, str] | None = None) -> str:
+    """Google Calendar's add-event page for one event: all-day (dates=YYYYMMDD/YYYYMMDD, end
+    exclusive), or with `times` (start "HH:MM", end "HH:MM", zone) a timed one
+    (dates=YYYYMMDDTHHMMSS/YYYYMMDDTHHMMSS, ctz the zone). No key, no account on our side:
+    the shopper opens it while signed in. The format is community-documented, not an official
+    API. details are HTML-escaped and cut at GOOGLE_DETAILS_MAX characters with a pointer to
+    the .ics."""
     if len(details) > GOOGLE_DETAILS_MAX:
         details = details[:GOOGLE_DETAILS_MAX - len(GOOGLE_CUT)].rstrip() + GOOGLE_CUT
-    params = [("action", "TEMPLATE"), ("text", title),
-              ("dates", f"{_ics_date(start)}/{_ics_date(end)}"),
+    dates = (f"{_ics_date(start)}/{_ics_date(end)}" if times is None
+             else f"{_ics_time(start, times[0])}/{_ics_time(end, times[1])}")
+    params = [("action", "TEMPLATE"), ("text", title), ("dates", dates),
               ("details", html.escape(details, quote=False))]
     if location:
         params.append(("location", location))
+    if times is not None:
+        params.append(("ctz", times[2]))
     return f"{GOOGLE_TEMPLATE}?{urlencode(params, quote_via=quote, safe='/')}"

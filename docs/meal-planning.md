@@ -20,8 +20,11 @@ products 166-169 are synthetic demo data, and say so.
 | `POST /mealplan/schedule` | Meals, trips for both strategies, warnings, lists | no | 120/min |
 | `POST /mealplan/plan` | MCP `plan_meals` over REST: counted dishes drafted into a plan, as ops for a console | the selector, when live (new recipes only) | 6/min, burst 3; 503 above the daily LLM ceiling |
 | `POST /mealplan/suggest-cook-days` | A freshness-aware layout, as a proposal | no | 60/min |
-| `POST /mealplan/alternatives` | Options for one trip line: ranked products and what each does to the plan | no | 60/min |
-| `GET /mealplan/starters` | The 4 demo starter recipes, labelled "demo recipe" | no | none |
+| `POST /mealplan/alternatives` | Options for one trip line (or, with no trip date, for every line buying a product; or for a line that buys nothing): ranked products and what each does to the plan | no | 60/min |
+| `POST /mealplan/catalog` | The wizard's recipes: slot, diets, contains, fit and a cost estimate per meal | no | 60/min |
+| `POST /mealplan/basket` | The wizard's ingredients: each chosen recipe's products, stores, prices and origins | no | 120/min |
+| `POST /mealplan/stores` | The stores to turn off and on: nearest first, where each is, in range, off, and how many of the basket's products each sells | no | 120/min |
+| `GET /mealplan/starters` | The 13 demo starter recipes, labelled "demo recipe" | no | none |
 | `GET /shelf-life?product_id=` | Cited storage and thaw rows per product | no | none |
 
 `schedule` also carries nutrition: each day's `nutrition` (one person's day, one serving of
@@ -75,6 +78,10 @@ milkshakes" is seven snack occasions at household servings.
    every input word are offered as candidates ("chicken curry" offers Simple Chicken Curry;
    it is not matched).
 
+A match carries its recipe's slot: a starter's own, a library recipe's from the starters
+file's `library_meta` (the grilled cheese and the PB&J are lunches), and the shopper's own
+recipe's as the console sends it (dinner when it sends none).
+
 Only exact and plural matches may be accepted without asking. Alias and fuzzy matches come
 back with `needs_confirmation: true`, and the console shows "chicken briyani → Chicken
 Biryani (demo starter)?" with Use or Not this.
@@ -109,7 +116,8 @@ point.
 ## Options for a trip line, and pins
 
 Every trip line has the chat cart's Options dialog. `POST /mealplan/alternatives` takes
-`{draft, trip_date, product_id, strategy?, limit? 1..25 = 12}` and answers
+`{draft, trip_date?, product_id | line, strategy?, limit? 1..25 = 12}` (exactly one of
+`product_id` and `line: {recipe_key, line_no}`, else 422) and answers
 `{rev, strategy, trip_date, product_id, product, stocked, pinned, lines[], plan_total,
 ranking}` (`mealplan/options.py`, no LLM):
 
@@ -132,11 +140,42 @@ ranking}` (`mealplan/options.py`, no LLM):
   `open_options` remedy opens exactly this.
 - 422 with the schedule's codes for a draft it refuses; 409 `no_trip_line` when the trip buys
   no such product (the plan changed).
+- With no `trip_date` (the wizard's Ingredients stage, before any trip exists) the purchase is
+  every line of the plan that buys the product, for all its recipe's meals, as
+  `/mealplan/basket` lists them, and choosing still pins them all. No trip is worked out:
+  every row's `trip` is null with a reason saying so, its `packs` are what those meals need
+  and its `cost_for_need` those packs at its cheapest offer in range; `trip_date` and
+  `plan_total` are null.
+- **A line that buys nothing** (the basket's rows with no product: the resolve left it out
+  for the origin rule, out of range or not stocked, and no pin fills it) is asked for by
+  `line: {recipe_key, line_no}` instead of a product. The answer has `product_id: null`,
+  `product: ""`, `stocked: false`, and `lines` that line and every other line of the plan with
+  the same ingredient (by name) that buys nothing either, each with `planner_product_id`
+  null. `ranking` is the same ranking with no current pick (`rank_alternatives(...,
+  open_lines=True)`, no new matcher): `items` are the choosable rows (sold in range at a store
+  that is on, not held back), none `current`; `held_back` the products the origin exclusion
+  holds back, with their evidence, never choosable; and `ranking.out_of_reach` the products
+  that would fill it but are sold only at stores turned off or beyond `max_km`, each
+  `{product_id, product, why: "stores_off" | "out_of_range" | "not_stocked", stores[],
+  nearest: {store, price, distance_km} | null}` (`stores` the stores turned off that sell it
+  within the distance, nearest first; `nearest` the nearest offer beyond it, at a store that
+  is on when one sells it), at most `limit` of them, best match first; `unavailable` counts
+  them all. `out_of_reach` is filled for the meal plan's Options only (a chat cart's is
+  empty). Choosing a row pins every covered line, and the line then buys it everywhere
+  (basket, schedule, catalog). With a `trip_date` each row's `trip` is the plan re-scheduled
+  with that product bought for those lines' placed meals, so `trip.delta` is what adding it
+  costs. 409 `no_trip_line` when the line buys a product (ask by `product_id`), is not a
+  line of the recipe, or its recipe has no meal or is not resolved; 422 `unknown_recipe_key`
+  for a recipe the plan does not have. With every yellow onion evidenced as grown in the
+  United States and that country excluded, the pilaf's and the biryani's Yellow Onion lines
+  get Red Onion and Green Onions as "related" rows (they share "onion"); with every onion
+  held back, `items` is empty and `held_back` lists them (tests/test_mealplan_options.py).
 
 Every schedule call checks every pin of a resolved recipe as a cart swap is checked
-(`alternatives.validate_pins`): the line is one the recipe bought a product for, the product
-is one of its candidates, the plan's origin exclusion does not hold it back, and a store in
-range sells it. Otherwise it is 422 `pin_invalid` with `recipe_key`, `line_no` and the reason
+(`alternatives.validate_pins`): the line is one of the recipe's (one the resolve bought
+nothing for included: the pin fills it, and the basket, the schedule and the catalog then buy
+it there), the product is one of its candidates, the plan's origin exclusion does not hold it
+back, and a store in range sells it. Otherwise it is 422 `pin_invalid` with `recipe_key`, `line_no` and the reason
 ("... is evidenced as United States (made or packed there), which this plan excludes"). A pin
 applies to every meal of its recipe, wherever the meals move. Pins are bounded: at most 40
 lines per recipe, line numbers of at most 4 digits, product ids from 1 to 2^31 - 1. An
@@ -152,6 +191,131 @@ no line on a trip has a price, its total is unknown (`total_cost: null`, "Total 
 line has a price yet)"), never $0.00, and so is the strategy's when no trip has one. A
 `must_fix` warning offers `set_servings`. The answer is stored as `recipes[key].servings`
 (or `ref.servings` when resolving) and labelled `servings_basis: "your_setting"`.
+
+## The wizard: budget, diets, catalog and basket
+
+The Meal plan tab's six stages (Basics, Meals, Ingredients, Schedule, Shopping plan, Calendar)
+read the endpoints above and two more, both pure code with no model call in demo mode or live.
+
+**Prefs.** `prefs` gains `budget` (groceries for the whole plan, 0 < budget ≤ 10,000; null
+for none), `diet` (`any`, `pescatarian`, `vegetarian` or `vegan`) and `avoid` (any of
+`dairy`, `gluten`, `nuts`, `soy`, `egg`: the products' own tags). All three have defaults, so
+a draft saved before them loads. The schedule warns `over_budget` (should fix) for each
+strategy whose known total is more than the budget, naming both ("at least" when a line has
+no price), with the other strategy as a remedy when it is within the budget and a budget
+that covers the total; there is no warning without a budget.
+
+**Origin rules.** The wizard's defaults are to exclude the United States and to prefer
+Canada, then `DEFAULT_ALLIES` (mealplan/models.py: United Kingdom, France, Germany, Italy,
+Spain, Netherlands, Ireland, Denmark, Norway, Sweden, Australia, New Zealand, Japan, South
+Korea, Mexico). A preference only orders products; only the exclusion leaves one out.
+
+**Stores turned off.** `settings.stores_off` (store ids, at most 50) are stores the shopper
+turned off in the Ingredients stage. No offer of theirs is priced or put on a trip: the
+catalog's `pack_price`, the basket, the schedule's trips (and so the calendar's store names)
+and both kinds of Options list read the price matrix without them
+(`build_price_matrix_sql(..., exclude_stores=)`). Resolve ignores them, and so do the
+catalog's cached picks, so turning a store off or on never resolves a recipe again.
+
+**`POST /mealplan/stores`** takes `{draft}` and answers `{v, stores[], products_total,
+synthetic, origin, max_km}` (`mealplan/stores.py`), each store `{id, name, address, lat, lon,
+distance_km, in_range, off, sells}`: every store, nearest first from the plan's shopping point
+(measured as the price matrix measures it), `in_range` within `max_km`, `off` from
+`stores_off`, and `sells` how many of the basket's products it stocks, whatever its distance
+(null while the plan buys nothing). `products_total` counts those products: the draft's chosen
+ones, pins included, less any the origin exclusion holds back (`basket.purchases`). `address`,
+`lat` and `lon` are the stores table's, always, for the console's list and map; `synthetic` is
+`STORES_SYNTHETIC` (on by default: the stores and their addresses are made up), so the console
+labels them demo stores. The calendar export's policy is unchanged: it never writes a
+synthetic store's address. `origin` is the plan's shopping point `{lat, lon}` (its own, or the
+server's) and `max_km` its distance limit (null: none), the map's centre and range.
+
+**Diets.** Every demo starter says its `slot`, its `diets` (which of vegan, vegetarian and
+pescatarian it satisfies) and `contains`; the library's are the starters file's
+`library_meta`, since `recipes.json` is pantry-db's byte for byte. `mealplan/diets.py` is the
+rule: a recipe contains its products' tags, a seafood product's `meat` read as `fish` (its
+aisle, or a fish word in its name or description, as for canned tuna and fish sauce), and
+what its lines' names say whatever the product's tags (milk, cheese, butter, cream, yogurt,
+ghee, paneer, white or milk chocolate are dairy; eggs egg; fish, salmon, tuna, shrimp, prawn,
+anchovy fish; chicken, beef, pork, bacon, ham, pepperoni, sausage, lamb, turkey meat; honey
+`honey`), unless a plant word comes right before ("peanut butter", "coconut milk"). Vegan
+leaves out meat, fish, dairy, egg and honey, vegetarian meat and fish, pescatarian meat. A
+test resolves every recipe in demo mode and checks the file against its products and names. Salmon and tuna
+have no row in `nutrients.json` yet, so the three fish starters' nutrition counts those lines
+as `no_reference`.
+
+| Slot | Recipes (diets: vg vegan, v vegetarian, p pescatarian) |
+| --- | --- |
+| breakfast | Ginger Congee (vg v p), Tomato Garlic Toast (vg v p), Scrambled Eggs on Toast (v p), Yogurt Fruit Bowl (v p), Salmon Scrambled Eggs (p) |
+| lunch | Garlic Broccoli Penne (vg v p), Tomato Pilaf (vg v p), Peanut Butter & Jelly Sandwich (v p: its White Chocolate is dairy), Grilled Cheese Sandwich (v p), Tuna Melt (p) |
+| dinner | Vegetable Stir Fry (vg v p), Tomato Penne (v p), Ginger Soy Salmon (p), Pepperoni Pizza, Chicken Fried Rice, Chicken Biryani, Simple Chicken Curry, Spaghetti Bolognese, Beef & Broccoli Rice Bowl |
+| snack | Mango Milkshake (v p) |
+
+**`POST /mealplan/catalog`** takes `{household_servings, diet, avoid, settings, slots?,
+recipes?, pins?}` (`recipes`: the shopper's own refs, at most 24; `pins`: the plan's, as the
+draft holds them, so a pinned line is costed at the shopper's product) and answers `{v, recipes[],
+est_basis, latency_ms}`, each recipe `{key, ref, title, image, slot, diets, contains,
+servings, fits, why_not, est_cost_per_meal, lines_total, lines_priced, unavailable, held_back,
+lines[]}`, ordered by slot then title (`mealplan/catalog.py`). Each line's product is the
+one resolve picks in demo mode: the resolve's own retrieval and origin filter, then the demo
+selector; live, the resolve's model may pick another product later.
+
+- `est_cost_per_meal` prices each line at its product's cheapest offer in range as its share
+  of the pack (what the recipe uses for the household over the pack size); `lines_priced` of
+  `lines_total` (water and ice are not bought) are. It is a per-meal figure, well under what
+  whole packs cost.
+- `lines` are `{ingredient, product_id, pack_price, pack_qty, pack_uom, need_per_meal,
+  held_back}`, `need_per_meal` in the pack's unit for one meal for the household. The console
+  costs any selection from them by **whole packs**: per product, the total need (meals ×
+  `need_per_meal`) over `pack_qty` rounded up, and at least one pack (one in all, however many
+  lines share it) when a line's need or the pack size is unknown, at `pack_price`; a line with no `pack_price` is not bought.
+  `/mealplan/basket`'s `est_total` counts the same way (`catalog.whole_packs`), so stage 2's
+  budget bar and stage 3's total agree.
+- An ingredient no store in range sells, or that the origin exclusion empties, is in
+  `unavailable` and never priced; `held_back` names those the origin rule left out (every
+  candidate in range evidenced as from an excluded country), so the console never calls them
+  "not sold nearby".
+- `why_not` names the diet's tags first, then the avoided ones ("contains fish and gluten").
+  A shopper's own recipe is classified from its picks and line names when every line has a
+  product; otherwise `diets` and `contains` are empty and it fits only with no diet and
+  nothing avoided.
+
+The picks are cached in process per recipe and shopping point, so a diet or household change
+answers from the cache.
+
+**Pictures.** A catalog or basket recipe names its picture as `image`, and never holds one:
+
+- `{"kind": "wiki", "title"}` for a demo starter or library recipe: its `image_wiki` in the
+  starters file (`library_meta` for the library), the English Wikipedia article whose lead
+  image shows the dish or the closest one ("Congee", "Biryani", "Melt sandwich" for the Tuna
+  Melt, "Pa amb tomàquet" for the Tomato Garlic Toast). The console shows that image through
+  the demo hub (`GET /hub/images/wiki?title=`), credited to Wikipedia and linked back. Each
+  title was checked by hand to be an article with a lead image; the tests never call Wikipedia.
+- `{"kind": "url", "url"}` for a shopper's own recipe whose doc has `source.image_url`: the
+  link to the preview image of the page it was imported from (its schema.org Recipe image or
+  `og:image`, a video's thumbnail; an absolute http(s) URL of at most 2,000 characters), shown
+  through the hub's guarded `GET /hub/images/remote?url=`, credited to the site.
+- `null` otherwise (a pasted recipe, a page with no preview image).
+
+**`POST /mealplan/basket`** takes `{draft}` and answers `{v, rev, recipes[],
+unavailable_count, est_total, budget, latency_ms}` for every recipe with a meal
+(`mealplan/basket.py`): `{key, title, image, status, meals, lines[]}` (`image` as the
+catalog's), each line `{line_no, ingredient, need, product, store, price, cost_for_need,
+origin, pinned, shared_with, available, unavailable_kind, why_unavailable}`. Products are the
+draft's (resolved, then pinned, checked as the schedule checks them); a recipe not resolved yet
+lists no lines. Each product is bought once for every meal at its cheapest offer in range
+(`store`, and `price` one pack there: the catalog's `pack_price`), by the whole-pack rule
+above; each line's `cost_for_need` is its share of the packs by need (one pack for a line of
+unknown need), so the lines add up to `est_total`. Trips that buy on several dates can buy
+more; stage 5 shows theirs. `origin` is `{country, claim, status: evidenced | conflicting | unknown,
+preferred_rank}`: `claim` in plain words ("From Thailand", "Made in Canada, ingredients may
+be imported", "Origin unclear: sources disagree", "Origin unknown"), and `preferred_rank` the
+place (1 first) of the preference entry it matches. An excluded product is not available and never
+priced; a product no store in range sells names the nearest offer. `unavailable_kind` is
+`origin_excluded`, `stores_off` ("Sold only at stores you turned off: ..."), `out_of_range` or
+`not_stocked` (null when available); for a line the
+resolve bought nothing for, the kind and the reason are the planner's ("its only candidate
+is evidenced as coming from United States, which this plan excludes").
 
 ## Storage times: sources, day semantics, safety and quality
 
@@ -243,6 +407,7 @@ warnings that `fewest_trips` does not.
 | Level | Codes |
 | --- | --- |
 | must_fix | `unplaced`, `fridge_window_exceeded`, `meal_before_trip`, `needs_servings`, `no_longer_stocked` |
+| should_fix | `over_budget` |
 | decide | `needs_review`, `not_stocked`, `buy_ahead_exceeded`, `trip_cap_exceeded`, `unresolved_recipe` |
 | note | `amount_unknown`, `shelf_life_unknown`, `price_changed` |
 

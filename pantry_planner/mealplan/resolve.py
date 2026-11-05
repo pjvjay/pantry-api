@@ -42,6 +42,11 @@ def starters_file() -> dict:
     return json.loads(STARTERS_FILE.read_text(encoding="utf-8"))
 
 
+def library_slots() -> dict[str, str]:
+    """slug -> the slot a library recipe is offered in (the starters file's library_meta)."""
+    return {slug: m["slot"] for slug, m in starters_file().get("library_meta", {}).items()}
+
+
 def starter_doc(key: str) -> RecipeDoc:
     """A demo starter as a RecipeDoc ('starter:<key>'), its lines labelled demo house
     amounts. KeyError for an unknown key."""

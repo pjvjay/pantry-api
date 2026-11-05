@@ -8,6 +8,7 @@ prices are read from the database directly, never from the code under test.
 from __future__ import annotations
 
 import json
+import math
 
 import pytest
 from sqlalchemy import text
@@ -456,3 +457,74 @@ def test_each_trips_recommended_option_is_the_trip_optimizers(example):
     best = next(o for o in options if o.recommended)
     assert t["recommended"]["stores"] == best.stores
     assert t["recommended"]["basket_cost"] == best.basket_cost
+
+
+# ─── The budget ──────────────────────────────────────────────
+
+def _over_budget(sched: dict) -> dict[str, dict]:
+    return {w["strategy"]: w for w in sched["warnings"] if w["code"] == "over_budget"}
+
+
+def test_a_draft_saved_before_the_budget_loads_with_no_budget_diet_or_avoid(example):
+    from pantry_planner.mealplan.models import MealPlanDraft
+
+    prefs = MealPlanDraft.model_validate(example).prefs
+    assert (prefs.budget, prefs.diet, prefs.avoid) == (None, "any", [])
+    sched = schedule(example)
+    assert not _over_budget(sched)
+    for s in sched["strategies"]:
+        assert s["warning_counts"]["should_fix"] == 0
+
+
+@pytest.mark.parametrize("prefs", [{"budget": 0}, {"budget": -5}, {"budget": 10_000.01},
+                                   {"diet": "keto"}, {"avoid": ["meat"]},
+                                   {"avoid": ["dairy"] * 6}])
+def test_budget_diet_and_avoid_are_bounded(example, prefs):
+    r = client().post("/mealplan/schedule", json={**example, "prefs": prefs})
+    assert r.status_code == 422, prefs
+
+
+def test_a_strategy_over_the_budget_is_a_should_fix_warning_naming_its_total(example):
+    plain = schedule(example)
+    totals = {s["name"]: s["total_cost"] for s in plain["strategies"]}
+    budget = min(totals.values()) - 10
+    sched = schedule({**example, "prefs": {"budget": budget}})
+    over = _over_budget(sched)
+    assert set(over) == set(totals)
+    for name, w in over.items():
+        assert w["level"] == "should_fix"
+        assert f"${totals[name]:.2f}" in w["message"] and f"${budget:.2f}" in w["message"]
+        # The only remedy is a budget that covers the total: the other strategy is over too.
+        assert w["remedies"] == [{"op": "set_pref", "field": "budget",
+                                  "value": math.ceil(totals[name])}]
+        assert strategy(sched, name)["warning_counts"]["should_fix"] == 1
+    # The budget changes no trip: the strategies are the same apart from the counts.
+    for a, b in zip(plain["strategies"], sched["strategies"], strict=True):
+        assert {**a, "warning_counts": None} == {**b, "warning_counts": None}
+
+
+def test_a_budget_between_the_strategies_offers_the_one_within_it(example):
+    totals = {s["name"]: s["total_cost"] for s in schedule(example)["strategies"]}
+    dear, cheap = sorted(totals, key=totals.get, reverse=True)
+    assert totals[dear] > totals[cheap]
+    budget = (totals[dear] + totals[cheap]) / 2
+    over = _over_budget(schedule({**example, "prefs": {"budget": budget}}))
+    assert set(over) == {dear}
+    assert over[dear]["remedies"] == [
+        {"op": "set_strategy", "strategy": cheap},
+        {"op": "set_pref", "field": "budget", "value": math.ceil(totals[dear])}]
+    # A budget the total meets exactly is not exceeded.
+    assert not _over_budget(schedule({**example, "prefs": {"budget": totals[dear]}}))
+
+
+def test_a_total_that_is_a_floor_says_at_least():
+    known = doc_recipe("my:k", "Rice Bowl", 2, [("Basmati Rice", 200, "g", 8)])
+    unknown = doc_recipe("my:u", "Salmon", None, [("Atlantic Salmon", 400, "g", 47)])
+    meals = [{"id": "a", "recipe_key": "my:k", "date": day(2).isoformat()},
+             {"id": "b", "recipe_key": "my:u", "date": day(2).isoformat(), "slot": "lunch"}]
+    draft = doc_draft({"my:k": known, "my:u": unknown}, meals=meals,
+                      prefs={"budget": 1})
+    sched = schedule(draft)
+    total = strategy(sched, "fresh")["total_cost"]
+    w = _over_budget(sched)["fresh"]
+    assert f"come to at least ${total:.2f}, over your budget of $1.00" in w["message"]

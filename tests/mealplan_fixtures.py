@@ -31,13 +31,14 @@ def use_db(tmp_path_factory, name: str) -> None:
     os.environ["DEMO_MODE"] = "1"
     os.environ.pop("ANTHROPIC_API_KEY", None)
     from pantry_planner import config, db
-    from pantry_planner.mealplan import resolve
+    from pantry_planner.mealplan import catalog, resolve
     from pantry_planner.nlsearch import vocab
 
     config.settings.cache_clear()
     db.seed_from_json()
     vocab.clear_cache()
     resolve.clear_cache()
+    catalog.clear_cache()
 
 
 def done_db() -> None:

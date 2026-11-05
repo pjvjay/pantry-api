@@ -214,11 +214,11 @@ class MealPlanResult(BaseModel):
 def _candidates(docs: list[RecipeDoc]):
     from .. import db
     from . import selection
-    from .resolve import starters_file
+    from .resolve import library_slots, starters_file
 
     return selection.candidates(
         [(r.slug, r.name) for r in db.load_all_recipes()], starters_file()["starters"],
-        [{"key": d.key, "title": d.title} for d in docs])
+        [{"key": d.key, "title": d.title} for d in docs], library_slots=library_slots())
 
 
 def _ref_for(key: str, docs: dict[str, RecipeDoc]) -> RecipeRef | None:
@@ -499,7 +499,7 @@ def _result(draft: MealPlanDraft, sched: MealSchedule, current: MealPlanContext 
                        total_cost=t.total_cost, total_is_floor=t.total_is_floor,
                        reason=t.reason) for t in rec.trips]
     plan_warnings = [w.message for w in sched.warnings
-                     if w.level in ("must_fix", "decide")
+                     if w.level in ("must_fix", "should_fix", "decide")
                      and w.strategy in (None, rec.name)]
     if current is not None and current.approved_trips:
         n = len(current.approved_trips)

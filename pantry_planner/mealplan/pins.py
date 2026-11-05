@@ -8,6 +8,10 @@ chat cart's swap goes through: the line is one the plan bought a product for, th
 one of its candidates, the plan's origin exclusion does not hold it back, and a store in
 range sells it.
 
+A pin may also fill a line the resolve bought nothing for, chosen from that line's Options
+(mealplan/options.py): validate_pins' open_lines checks it the same way, and the line then
+buys it everywhere (basket, schedule, catalog).
+
 validate_pins reads a PlanBasis: what the recipe was planned from. meal_basis rebuilds it on
 the server from the recipe itself (resolve.recipe_doc) exactly as resolve planned it (a
 library recipe by its ingredient names, as flow.run plans it; every RecipeDoc by its reviewed
@@ -77,8 +81,9 @@ def meal_basis(draft: MealPlanDraft, key: str, doc: RecipeDoc,
 def check_pins(draft: MealPlanDraft, docs: dict[str, RecipeDoc],
                products: dict[int, Product]) -> None:
     """Every pin of every resolved recipe through alternatives.validate_pins; the first that
-    fails is 422 pin_invalid, naming the recipe, the line and the reason. A recipe not
-    resolved yet (or whose resolve failed) buys nothing, so its pins wait until it is."""
+    fails is 422 pin_invalid, naming the recipe, the line and the reason. A pin may fill a
+    line the resolve bought nothing for, checked the same way. A recipe not resolved yet (or
+    whose resolve failed) buys nothing, so its pins wait until it is."""
     from .. import alternatives
 
     for key, lines in sorted(draft.pins.items()):
@@ -88,7 +93,7 @@ def check_pins(draft: MealPlanDraft, docs: dict[str, RecipeDoc],
         basis = meal_basis(draft, key, docs[key])
         pins = [Pin(line_no=int(raw), product_id=pid) for raw, pid in sorted(lines.items())]
         try:
-            alternatives.validate_pins(basis, pins, catalog=products)
+            alternatives.validate_pins(basis, pins, catalog=products, open_lines=True)
         except alternatives.PinError as e:
             raise MealPlanError("pin_invalid", f"{docs[key].title}: {e}", recipe_key=key,
                                 line_no=e.line_no) from e

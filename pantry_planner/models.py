@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import datetime as dt
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
 
 from pydantic import AfterValidator, BaseModel, Field, model_validator
 
@@ -554,8 +555,10 @@ class AltRating(BaseModel):
 class RankedAlternative(BaseModel):
     """One candidate product for the line. `current` marks the cart's own
     pick. `tier`: same (the ingredient, at the exact, form or generic level),
-    other (shares the head noun, or a same-aisle substitute) or outside (the
-    cart's pick when it matches none of the line's words). `packs` is what
+    other (shares the head noun, a same-aisle substitute, or matches the
+    words but is another food from another aisle, as peanut butter is for
+    butter) or outside (the cart's pick when it matches none of the line's
+    words). `packs` is what
     the cart would buy; `pack_fit` whether that covers the recipe's need;
     `cost_for_need` the price of enough packs for the need (None when the
     need or the pack size is unknown or in another unit), at the price a
@@ -599,6 +602,19 @@ class HeldBack(BaseModel):
     demo: bool = False
 
 
+class OutOfReach(BaseModel):
+    """A product that would fill the line but cannot be bought under the plan's rules, so it
+    is never choosable: `why` is stores_off (sold within the plan's distance only at stores
+    the shopper turned off: `stores`, nearest first), out_of_range (sold only beyond the
+    plan's distance: `nearest`, the nearest offer at a store that is on when one sells it) or
+    not_stocked (no store sells it)."""
+    product_id: int
+    product: str
+    why: Literal["stores_off", "out_of_range", "not_stocked"]
+    stores: list[str] = Field(default_factory=list)
+    nearest: AltBuy | None = None
+
+
 class AltCounts(BaseModel):
     """How many ranked rows have each property, for filter chips."""
     exact: int = 0
@@ -620,7 +636,11 @@ class AlternativeRanking(BaseModel):
     `unavailable` the products matching the line's words (any level, or its
     head word) with no offer in range (or under the price cap); same-aisle
     substitutes are looked up in range only, as the planner's are, so none
-    is counted there. `data_note` labels synthetic offers and reviews."""
+    is counted there. `out_of_reach` says why for the first `limit` of them,
+    best match first, in the meal plan's Options only (TripEffect); a chat
+    cart's is empty. `data_note` labels synthetic offers and reviews. A
+    line the plan bought nothing for (the meal plan's Options for such a
+    line) has no row flagged `current`."""
     line_no: int
     lines: list[int]
     ingredient: str
@@ -632,6 +652,7 @@ class AlternativeRanking(BaseModel):
     ranking_text: str
     items: list[RankedAlternative]
     held_back: list[HeldBack] = Field(default_factory=list)
+    out_of_reach: list[OutOfReach] = Field(default_factory=list)
     total: int
     unavailable: int = 0
     counts: AltCounts = Field(default_factory=AltCounts)
@@ -642,9 +663,9 @@ class AlternativeRanking(BaseModel):
 # A library recipe, a demo starter, a pasted or imported ingredient list and
 # a dish the assistant wrote all reach the planner as a RecipeDoc. Its lines
 # are what the shopper saw and confirmed; recipe_doc.to_spec plans them as
-# given, with no parse. Only ingredient lines and a link back are kept: a
-# recipe's method text is never stored or shown. Mirrored in the frontend's
-# types.ts.
+# given, with no parse. Only ingredient lines and links back (to the page,
+# and to its own preview image) are kept: a recipe's method text is never
+# stored or shown. Mirrored in the frontend's types.ts.
 
 MAX_DOC_LINES = 60
 # The bounds a RecipeDoc is validated against. POST /recipes/parse-lines keeps
@@ -689,8 +710,20 @@ class RecipeLine(BaseModel):
     amount_basis: AmountBasis
 
 
+def _http_url(url: str) -> str:
+    """An absolute http(s) URL: a host, and no space or control character."""
+    parts = urlsplit(url)
+    if (parts.scheme.lower() not in ("http", "https") or not parts.hostname
+            or any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in url)):
+        raise ValueError("must be an absolute http(s) URL")
+    return url
+
+
 class RecipeSource(BaseModel):
-    """Where the recipe came from, for the link back and the labels."""
+    """Where the recipe came from, for the link back and the labels. image_url links to the
+    page's own preview image (its schema.org Recipe image or og:image, a video's thumbnail),
+    which the console shows credited to the site and linked back, as a link preview does:
+    a link, never the image itself."""
     kind: Literal["library", "starter", "pasted", "web", "youtube", "assistant"]
     method: Literal["db", "seed", "paste", "jsonld", "microdata", "youtube_description",
                     "youtube_linked_page", "gemini_video", "agent_written"]
@@ -703,6 +736,7 @@ class RecipeSource(BaseModel):
     extractor: str | None = Field(default=None, max_length=100)
     model: str | None = Field(default=None, max_length=100)
     label: str | None = Field(default=None, max_length=100)
+    image_url: Annotated[str, Field(max_length=2000), AfterValidator(_http_url)] | None = None
 
 
 class RecipeDoc(BaseModel):

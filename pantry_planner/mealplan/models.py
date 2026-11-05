@@ -31,6 +31,9 @@ Slot = Literal["breakfast", "lunch", "dinner", "snack"]
 SLOTS: tuple[str, ...] = ("breakfast", "lunch", "dinner", "snack")
 Strategy = Literal["fresh", "fewest_trips"]
 STRATEGIES: tuple[str, ...] = ("fresh", "fewest_trips")
+# The shopper's diet, and the products' contains-tags they can choose to avoid.
+Diet = Literal["any", "pescatarian", "vegetarian", "vegan"]
+Avoid = Literal["dairy", "gluten", "nuts", "soy", "egg"]
 # Where a purchase is kept: from the product's storage class in shelf_life.json (the file's
 # own label), or the freezer when the plan freezes it on arrival.
 Storage = Literal["fridge", "freezer", "pantry"]
@@ -54,6 +57,10 @@ MAX_PINS_PER_RECIPE = 40
 MAX_PRODUCT_ID = 2**31 - 1
 # Origin rules for the plan: as many countries as /plan/spec and /mealplan/resolve take.
 MAX_COUNTRIES = 50
+# Stores the shopper may turn off in one plan.
+MAX_STORES_OFF = 50
+# The grocery budget for the whole plan, in dollars.
+MAX_BUDGET = 10_000
 
 
 class MealPlanError(ValueError):
@@ -160,7 +167,9 @@ class Meal(BaseModel):
 class Prefs(BaseModel):
     """Household settings. shop_weekdays are ISO weekdays minus one (Monday 0 .. Sunday 6).
     buy_ahead_days is the shopper's own limit for a perishable with no cited storage time.
-    thaw_reminder is used only where no cited thaw time applies."""
+    thaw_reminder is used only where no cited thaw time applies. budget is the groceries for
+    the whole plan (None: no budget); diet and avoid choose the recipes the catalog offers.
+    All three have defaults, so a draft saved before them still loads."""
     household_servings: int = Field(default=2, ge=1, le=MAX_SERVINGS)
     slots_on: list[Slot] = Field(default_factory=lambda: list(SLOTS), min_length=1)
     shop_weekdays: list[int] = Field(default_factory=lambda: list(range(7)), min_length=1,
@@ -170,6 +179,9 @@ class Prefs(BaseModel):
     thaw_reminder: Literal["evening_before", "morning_of"] = "evening_before"
     allow_freezer: bool = True
     strategy: Strategy = "fresh"
+    budget: float | None = Field(default=None, gt=0, le=MAX_BUDGET, allow_inf_nan=False)
+    diet: Diet = "any"
+    avoid: list[Avoid] = Field(default_factory=list, max_length=5)
 
     @model_validator(mode="after")
     def _weekdays(self) -> Prefs:
@@ -198,6 +210,19 @@ class ApprovedTrip(BaseModel):
 Country = Annotated[str, Field(min_length=1, max_length=100)]
 LineNo = Annotated[str, Field(min_length=1, max_length=4)]
 ProductId = Annotated[int, Field(ge=1, le=MAX_PRODUCT_ID)]
+StoreId = Annotated[int, Field(ge=1, le=MAX_PRODUCT_ID)]
+# The shopper's own product for a recipe line: recipe_key -> {line_no: product_id}.
+PinMap = dict[Annotated[str, Field(min_length=1, max_length=100)],
+              Annotated[dict[LineNo, ProductId], Field(max_length=MAX_PINS_PER_RECIPE)]]
+
+# The meal plan wizard's default origin rules, which the shopper edits in its first stage:
+# products evidenced as from the United States are excluded, and the preference is Canada,
+# then these allies. A preference only orders; it never leaves a product out, since most
+# products have no origin evidence at all.
+DEFAULT_EXCLUDE_ORIGIN = ("United States",)
+DEFAULT_ALLIES = ("United Kingdom", "France", "Germany", "Italy", "Spain", "Netherlands",
+                  "Ireland", "Denmark", "Norway", "Sweden", "Australia", "New Zealand", "Japan",
+                  "South Korea", "Mexico")
 
 
 class PlanSettings(BaseModel):
@@ -205,12 +230,19 @@ class PlanSettings(BaseModel):
     server's reference point and every store. exclude_origin and preference are the plan's
     origin rules, as /mealplan/resolve takes them: the console resolves with them, and every
     pin and every Options list is checked against them (a product evidenced as from an
-    excluded country is held back)."""
+    excluded country is held back). address is the shopper's own words for lat/lon (an
+    address they searched, or "your current location"): kept with the plan for the console to
+    show, and never read here, so changing it alone changes nothing. stores_off are the store
+    ids the shopper turned off: no offer of theirs is priced or put on a trip (the catalog,
+    the basket, the schedule's trips and the Options lists skip them), while resolve ignores
+    them, so turning a store off or on never resolves a recipe again."""
     lat: float | None = Field(default=None, ge=-90, le=90)
     lon: float | None = Field(default=None, ge=-180, le=180)
     max_km: float | None = Field(default=None, ge=0.5, le=100)
+    address: str | None = Field(default=None, max_length=200)
     exclude_origin: list[Country] = Field(default_factory=list, max_length=MAX_COUNTRIES)
     preference: list[Country] = Field(default_factory=list, max_length=MAX_COUNTRIES)
+    stores_off: list[StoreId] = Field(default_factory=list, max_length=MAX_STORES_OFF)
 
     @model_validator(mode="after")
     def _known_countries(self) -> PlanSettings:
@@ -242,9 +274,7 @@ class MealPlanDraft(BaseModel):
     recipes: dict[str, DraftRecipe] = Field(default_factory=dict, max_length=MAX_RECIPES)
     resolved: dict[str, ResolvedRecipe] = Field(default_factory=dict, max_length=MAX_RECIPES)
     meals: list[Meal] = Field(default_factory=list, max_length=MAX_MEALS)
-    pins: dict[Annotated[str, Field(min_length=1, max_length=100)],
-               Annotated[dict[LineNo, ProductId], Field(max_length=MAX_PINS_PER_RECIPE)]] = \
-        Field(default_factory=dict, max_length=MAX_RECIPES)
+    pins: PinMap = Field(default_factory=dict, max_length=MAX_RECIPES)
     trips: list[ApprovedTrip] = Field(default_factory=list, max_length=MAX_DAYS)
     dismissed_dates: list[dt.date] = Field(default_factory=list, max_length=MAX_DAYS)
     fixed_dates: list[dt.date] = Field(default_factory=list, max_length=MAX_DAYS)
@@ -384,9 +414,10 @@ class Action(BaseModel):
 
 
 class PlanWarning(BaseModel):
-    """level: must_fix, decide or note. strategy None: about the plan whatever the strategy.
-    remedies are edits the console can apply (at most 3); the engine never applies them."""
-    level: Literal["must_fix", "decide", "note"]
+    """level: must_fix, should_fix, decide or note. strategy None: about the plan whatever the
+    strategy. remedies are edits the console can apply (at most 3); the engine never applies
+    them."""
+    level: Literal["must_fix", "should_fix", "decide", "note"]
     code: str
     message: str
     strategy: Strategy | None = None
@@ -472,15 +503,213 @@ class TripLineOptions(BaseModel):
     trips (as the Shop band sums them) and its change, trip.stores the stops of the trip
     that buys it for these meals, trip.buys_at the store and pack price there; packs and
     cost_for_need are what that trip line then buys and charges. stocked is False when no
-    store in range sells the line's product any more (it is then not among the rows)."""
+    store in range sells the line's product any more (it is then not among the rows).
+
+    trip_date None: no trip is planned yet (the wizard's Ingredients stage). The ranking is
+    for every line of the plan that buys the product, each row's trip is None, its packs are
+    what those meals need and cost_for_need those packs at its cheapest offer in range;
+    plan_total is None. `lines` still names every covered line, so choosing pins them all.
+
+    Asked for by a line that buys nothing (product_id None, product "", stocked False): the
+    ranking is for that line and every other line of the plan with the same ingredient that
+    buys nothing, with no row current; ranking.held_back lists what the origin exclusion holds
+    back, with its evidence, and ranking.out_of_reach what is sold only at stores turned off
+    or beyond the plan's distance. Neither is choosable; choosing a row pins every line."""
     v: Literal[1] = 1
     rev: int
     strategy: Strategy
-    trip_date: dt.date
-    product_id: int
+    trip_date: dt.date | None
+    product_id: int | None
     product: str
     stocked: bool
     pinned: bool
     lines: list[CoveredLine]
     plan_total: float | None
     ranking: AlternativeRanking
+
+
+# ─── The wizard's catalog and basket ─────────────────────────
+
+class WikiImage(BaseModel):
+    """A demo starter's or library recipe's picture: the lead image of this English Wikipedia
+    article (the starters file's image_wiki), which the console shows through the demo hub
+    (GET /hub/images/wiki?title=), credited to Wikipedia."""
+    kind: Literal["wiki"] = "wiki"
+    title: str
+
+
+class UrlImage(BaseModel):
+    """A shopper's own recipe's picture: the link to the preview image of the page it was
+    imported from (its doc's source.image_url), which the console shows through the hub's
+    guarded image proxy, credited to the site."""
+    kind: Literal["url"] = "url"
+    url: str
+
+
+RecipeImage = Annotated[WikiImage | UrlImage, Field(discriminator="kind")]
+
+
+class CatalogLine(BaseModel):
+    """One line a recipe buys, for costing a selection by whole packs: the product the
+    resolve picks in demo mode, one pack's price at its cheapest store in range (None when no
+    store in range sells it, or no product was found), the pack's size and unit, and the
+    line's need for one meal for the household in that unit (None when unknown or in another
+    unit). held_back: the origin rule left the line without a product."""
+    ingredient: str
+    product_id: int | None
+    pack_price: float | None
+    pack_qty: float | None
+    pack_uom: str | None
+    need_per_meal: float | None
+    held_back: bool
+
+
+class CatalogRecipe(BaseModel):
+    """One recipe the Meals stage offers. diets and contains are empty when they are not
+    known (a shopper's recipe whose lines do not all have a product): a known recipe that
+    satisfies no diet always contains something. est_cost_per_meal is one meal for the
+    household, each priced line's share of its pack price; None when no line is priced.
+    unavailable names the ingredients with no offer in range; held_back those of them the
+    plan's origin exclusion left out (every candidate in range is evidenced as from an excluded
+    country). image is its picture (catalog.image), None when it has none."""
+    key: str
+    ref: RecipeRef
+    title: str
+    image: RecipeImage | None
+    slot: Slot
+    diets: list[str]
+    contains: list[str]
+    servings: int | None
+    fits: bool
+    why_not: str | None
+    est_cost_per_meal: float | None
+    lines_total: int
+    lines_priced: int
+    unavailable: list[str]
+    held_back: list[str]
+    lines: list[CatalogLine]
+
+
+class Catalog(BaseModel):
+    """POST /mealplan/catalog. est_basis says in one sentence how the estimates are made, and
+    how a selection is costed from the recipes' lines: per product, the total need (meals x
+    need_per_meal) over pack_qty rounded up, plus one pack for each line whose need or pack
+    size is unknown, at pack_price; a line with no pack_price is not bought. /mealplan/basket's
+    est_total counts the same way."""
+    v: Literal[1] = 1
+    recipes: list[CatalogRecipe]
+    est_basis: str
+    latency_ms: int
+
+
+class BasketProduct(BaseModel):
+    """labels are the product's contains-tags (diets.product_contains)."""
+    id: int
+    name: str
+    size: str
+    labels: list[str]
+    says_organic: bool
+    demo_product: bool
+
+
+class BasketStore(BaseModel):
+    name: str
+    distance_km: float | None
+
+
+class BasketOrigin(BaseModel):
+    """status: evidenced (the evidence resolves to a country), conflicting or unknown. claim is
+    the evidence in plain words: "From Thailand", "Made in Canada, ingredients may be
+    imported", "Origin unclear: sources disagree", "Origin unknown".
+    preferred_rank is the place (1 first) of the plan's preference entry it matches."""
+    country: str | None
+    claim: str
+    status: Literal["evidenced", "unknown", "conflicting"]
+    preferred_rank: int | None
+
+
+class BasketLine(BaseModel):
+    """One ingredient of one recipe and the product the plan buys for it. need is the
+    recipe's amount for all its meals; price is one pack at the store; cost_for_need is this
+    recipe's share of what the whole packs of that product cost: by need for the lines whose
+    need is known, one pack for a line whose need is not (None when unavailable). shared_with
+    names the other recipes buying the same product. unavailable_kind says why an unavailable
+    line is: origin_excluded, stores_off (sold in range only at stores the shopper turned
+    off), out_of_range or not_stocked (None when it is available, or no product was chosen
+    for another reason)."""
+    line_no: int
+    ingredient: str
+    need: str
+    product: BasketProduct | None
+    store: BasketStore | None
+    price: float | None
+    cost_for_need: float | None
+    origin: BasketOrigin
+    pinned: bool
+    shared_with: list[str]
+    available: bool
+    unavailable_kind: Literal["origin_excluded", "stores_off", "not_stocked",
+                              "out_of_range"] | None
+    why_unavailable: str | None
+
+
+class BasketRecipe(BaseModel):
+    """status is the resolve's (ok, needs_servings, ...) or unresolved; a recipe that buys
+    nothing yet lists no lines. image is its picture, as the catalog gives it."""
+    key: str
+    title: str
+    image: RecipeImage | None
+    status: str
+    meals: int
+    lines: list[BasketLine]
+
+
+class PlanStore(BaseModel):
+    """One store for the Ingredients stage's store list and map. address, lat and lon are the
+    stores table's (address None when it has none), whether or not the stores are synthetic:
+    PlanStores.synthetic says so, for the console to label them. distance_km from the plan's
+    shopping point; in_range within its max_km; off when the shopper turned it off; sells how
+    many of the basket's products it stocks (None while the plan buys nothing)."""
+    id: int
+    name: str
+    address: str | None
+    lat: float
+    lon: float
+    distance_km: float
+    in_range: bool
+    off: bool
+    sells: int | None
+
+
+class GeoPoint(BaseModel):
+    lat: float
+    lon: float
+
+
+class PlanStores(BaseModel):
+    """POST /mealplan/stores: every store, nearest first, and how many products the basket
+    buys (products_total: the draft's chosen products, pins included, less any the origin
+    exclusion holds back). synthetic is STORES_SYNTHETIC: the stores are the demo's fictional
+    ones and their addresses made up. origin is the plan's shopping point (its own, or the
+    server's) and max_km its distance limit (None: no limit), for the map's centre and range."""
+    v: Literal[1] = 1
+    stores: list[PlanStore]
+    products_total: int
+    synthetic: bool
+    origin: GeoPoint
+    max_km: float | None
+
+
+class Basket(BaseModel):
+    """POST /mealplan/basket: every chosen recipe's ingredients, each with its product, store,
+    price and origin. est_total is what the whole packs cost, each product bought once for
+    every meal at its cheapest store in range, by the catalog's rule (catalog.whole_packs):
+    the summed need over the pack size rounded up, and at least one pack (one in all) when a
+    line's need or the pack size is unknown. Trips that buy a product on two dates can cost more."""
+    v: Literal[1] = 1
+    rev: int
+    recipes: list[BasketRecipe]
+    unavailable_count: int
+    est_total: float | None
+    budget: float | None
+    latency_ms: int

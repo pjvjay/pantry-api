@@ -328,6 +328,44 @@ def test_freeze_and_thaw_reminders_cite_their_rows(frozen):
         assert "Source: " in e["description"] and "https://" in e["description"]
 
 
+def test_timing_times_the_trips_and_cooks_and_sets_each_kinds_reminders(frozen):
+    _draft, sched = frozen
+    a = sched["approved_schedule"]
+    timing = {"timezone": "America/Vancouver", "trips": {"start": "10:00", "minutes": 90},
+              "cooks": {"start": "18:00", "minutes": 45, "by_slot": {"snack": "15:30"}},
+              "reminders": {"trips": [60], "cooks": [30, 15], "reminders": [720]}}
+    prev = post("/calendar/preview", a, timing=timing).json()
+    plain = post("/calendar/preview", a).json()
+    assert prev["all_day"] is False and plain["all_day"] is True
+    assert [e["uid"] for e in prev["events"]] == [e["uid"] for e in plain["events"]]
+    kinds = {e["kind"] for e in prev["events"]}
+    assert {"trip", "cook", "freeze", "thaw"} <= kinds
+    slot = {c["item_id"]: c["slot"] for c in a["cooks"]}
+    assert "snack" in slot.values() and "dinner" in slot.values()
+    for e in prev["events"]:
+        if e["kind"] in ("trip", "cook"):
+            start, end = (("10:00", "11:30") if e["kind"] == "trip"
+                          else ("15:30", "16:15") if slot[e["item_id"]] == "snack"
+                          else ("18:00", "18:45"))
+            assert (e["all_day"], e["start_time"], e["end_time"], e["timezone"], e["end"]) == (
+                False, start, end, "America/Vancouver", e["date"])
+        else:
+            assert (e["all_day"], e["start_time"], e["timezone"]) == (True, None, None)
+        assert e["reminders_min"] == {"trip": [60], "cook": [15, 30]}.get(e["kind"], [720])
+    for e in plain["events"]:
+        assert (e["all_day"], e["start_time"], e["end_time"], e["timezone"],
+                e["reminders_min"]) == (True, None, None, None, [])
+    text = ics(a, timing=timing)
+    lines = unfold(text)
+    assert lines.count("BEGIN:VALARM") == sum(len(e["reminders_min"]) for e in prev["events"])
+    trip = next(t for t in a["trips"])
+    assert f"DTSTART;TZID=America/Vancouver:{trip['date'].replace('-', '')}T100000" in lines
+    assert "BEGIN:VTIMEZONE" not in text
+    assert ics(a, timing=None) == ics(a)
+    r = post("/calendar/preview", a, timing={**timing, "timezone": "Mars/Olympus_Mons"})
+    assert r.status_code == 422
+
+
 def test_include_and_nothing_to_export(approved):
     _draft, sched = approved
     a = sched["approved_schedule"]

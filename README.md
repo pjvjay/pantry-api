@@ -90,7 +90,7 @@ Everything's env-var driven. Defaults in `pantry_planner/config.py`.
 | `TRUSTED_PROXY_HOPS`         | `0`                              | Proxies in front of the API that append to `X-Forwarded-For`; 0 = the header is ignored and the rate limit keys on the TCP peer |
 | `LLM_DAILY_COST_CAP_USD`     | *(unset: no ceiling)*            | Estimated LLM spend per replica per UTC day above which LLM-calling endpoints answer 503 |
 | `OFFERS_SYNTHETIC`           | `true`                           | Store prices, stock and reviews are the seeded demo data; the alternatives ranking labels them so (`data_note`, "(demo)" ratings). Set false only for real offers |
-| `STORES_SYNTHETIC`           | `true`                           | The stores are fictional: a calendar export names each as "<store> (demo store)" and never gives its seeded address |
+| `STORES_SYNTHETIC`           | `true`                           | The stores are fictional: a calendar export names each as "<store> (demo store)" and never gives its seeded address, and `/mealplan/stores` says `synthetic: true` so the console labels them demo stores |
 
 The four model settings are **specs**: `gemini:<model>` (e.g.
 `gemini:gemini-flash-latest`) routes that call to Google Gemini through its
@@ -120,9 +120,10 @@ Every public endpoint is bounded (`pantry_planner/limits.py`), per replica and i
 
 - **A token bucket per client IP and endpoint**: `/plan/nl` and `/plan/spec` 10 a minute,
   `/recipes/parse-lines`, `/plan/alternatives` and `/plan/reprice` 60 a minute,
-  `/mealplan/resolve` and `/mealplan/plan` 6 a minute (burst 3), `/mealplan/schedule` 120 a
-  minute, `/mealplan/selection/parse`, `/mealplan/suggest-cook-days` and
-  `/mealplan/alternatives` 60 a minute (more endpoints join as they land). Over the limit is a
+  `/mealplan/resolve` and `/mealplan/plan` 6 a minute (burst 3), `/mealplan/schedule`,
+  `/mealplan/basket` and `/mealplan/stores` 120 a minute, `/mealplan/selection/parse`, `/mealplan/suggest-cook-days`,
+  `/mealplan/alternatives` and `/mealplan/catalog` 60 a minute (more endpoints join as they
+  land). Over the limit is a
   429 `{"error": "rate_limited", "detail": "Too many requests to ...; retry in N s."}` with
   `Retry-After`. The client is the TCP peer unless `TRUSTED_PROXY_HOPS` says how many
   proxies append to `X-Forwarded-For`; a client-written header is never trusted.
@@ -198,7 +199,8 @@ pantry-planner/
 │   ├── recipe_doc.py      # RecipeDoc -> RecipeSpec (no parse) / display text
 │   ├── alternatives.py    # rank a plan line's alternatives; pin checks for reprice
 │   ├── nutrition.py       # 8 nutrients per portion from recipe amounts + CNF reference foods
-│   ├── calendar_export.py # ApprovedSchedule -> all-day events, RFC 5545 .ics, Google links
+│   ├── calendar_export.py # ApprovedSchedule -> events (all-day, or timed with reminders),
+│   │                      # RFC 5545 .ics, Google links
 │   ├── calendar_api.py    # POST /calendar/preview and /calendar/ics
 │   ├── mealplan/          # meal plans: counts, cited storage times, trips (docs/meal-planning.md)
 │   │   ├── selection.py   # Quick add: counted dishes matched exact/plural/alias/fuzzy
@@ -210,6 +212,10 @@ pantry-planner/
 │   │   ├── approved.py    # fingerprints, needs_review diffs, price deltas
 │   │   ├── pins.py        # the shopper's pins, checked like a cart swap (meal_basis)
 │   │   ├── options.py     # POST /mealplan/alternatives: Options for a trip line
+│   │   ├── catalog.py     # POST /mealplan/catalog: the wizard's recipes, diets, estimates
+│   │   ├── basket.py      # POST /mealplan/basket: each recipe's products, stores, origins
+│   │   ├── stores.py      # POST /mealplan/stores: the stores to turn off, and what each sells
+│   │   ├── diets.py       # diets and contains-tags from the products a recipe buys
 │   │   ├── warnings.py    # ranked warnings and their remedies
 │   │   ├── lists.py       # the per-trip shopping list text
 │   │   └── schedule.py    # POST /mealplan/schedule: pure, byte-identical
@@ -416,8 +422,11 @@ cart and keeps them away from its model.
   `AlternativeRanking` (`alternatives.py`). Candidates are the line at the exact, equivalent
   form, form and generic levels plus its head word (one options query), and same-aisle
   substitutes from stores in range when the pool is thin (the planner's t4 lookup; price ties
-  go to the lower id). Order (`ORDER`): same ingredient first, then
-  `alternatives.closeness` (the demo selector's `units.semantic_key`, with its head test read
+  go to the lower id). A product that matches the words but is another food (not mainly the
+  line's ingredient word, and from another aisle than the pick's) is not the same ingredient:
+  for "butter", Canadian Peanut Butter Cream is "Mentions butter, but it is peanut butter",
+  while Extra Virgin Olive Oil stays the same ingredient for "olive oil". Order (`ORDER`): same
+  ingredient first, then `alternatives.closeness` (the demo selector's `units.semantic_key`, with its head test read
   from the line's ingredient word, so "cumin powder" is about cumin, not powder; for a line
   that ends in its ingredient word it only breaks semantic_key's ties), pack fit for the
   recipe's amount, origin preference only when the plan had one, the trip total after the
@@ -456,11 +465,24 @@ time, for a "fresh" and a "fewest trips" (freeze on arrival) strategy, with a sh
 per trip grouped by store and aisle. `POST /mealplan/suggest-cook-days` proposes a
 freshness-aware layout with a cited reason per move. `POST /mealplan/alternatives` gives every
 trip line the chat cart's Options: the same ranking, each row's figures from the plan
-re-scheduled with that product pinned. Storage and thaw times come only from
-`seeds/shelf_life.json` (FoodSafety.gov's Cold Food Storage Chart and USDA FSIS's "The Big
-Thaw", quoted verbatim); a product with no cited row is planned with the shopper's own
-buy-ahead setting and labelled so. The 4 demo starters (`GET /mealplan/starters`) are
-labelled "demo recipe". Details, sources and the JSON contracts: `docs/meal-planning.md`.
+re-scheduled with that product pinned (or, with no trip date yet, for every line buying the
+product, with no trip). Storage and thaw times come only from `seeds/shelf_life.json`
+(FoodSafety.gov's Cold Food Storage Chart and USDA FSIS's "The Big Thaw", quoted verbatim); a
+product with no cited row is planned with the shopper's own buy-ahead setting and labelled
+so. The 13 demo starters (`GET /mealplan/starters`) are labelled "demo recipe".
+
+The meal plan wizard's stages read two more pure endpoints. `POST /mealplan/catalog` lists
+every library recipe, demo starter and recipe of the shopper's with its slot, the diets it
+satisfies and its contains-tags, whether it fits the shopper's diet and what they avoid, and
+an estimate of one meal's cost (each line's share of its pack price, the product resolve
+picks in demo mode, no model call even live), and its lines, so the console costs any
+selection by whole packs as the basket does. `POST /mealplan/basket` lists each chosen
+recipe's ingredients with the draft's product, its store and distance, price, share of the
+whole packs, origin evidence and labels, and what is not available nearby and why (the
+origin rule, out of range, or not stocked). The
+draft's prefs carry a budget, and the schedule warns `over_budget` (should fix) when a
+strategy's total passes it. Details, sources and the JSON contracts:
+`docs/meal-planning.md`.
 
 ## Weekly menu optimizer (`POST /plan/week`)
 
@@ -513,13 +535,24 @@ nothing reaches a calendar except by the shopper's own click.
   shopper approved (each with its shopping list, status and a reason for its date), a cook
   event for every meal placed on the board, and the freeze and thaw reminders of the approved
   trips. `exportable` is false and `blocked` says why while a trip needs review. The console
-  posts it back unchanged as `{schedule, include?: ["trips", "cooks", "reminders"]}`;
-  `/calendar/preview` answers with the events (each with its Google link) and `/calendar/ics`
-  with `text/calendar` as an attachment.
+  posts it back unchanged as `{schedule, include?: ["trips", "cooks", "reminders"],
+  timing?}`; `/calendar/preview` answers with the events (each with its Google link) and
+  `/calendar/ics` with `text/calendar` as an attachment.
 - **All-day events.** `DTSTART;VALUE=DATE` with no time and no zone, so an event lands on its
-  plan date in every time zone, on both sides of BC's 2026-11-01 change. Timed events are
-  decision D9. The file is RFC 5545: CRLF line endings, lines folded at 75 octets without
-  splitting a UTF-8 character, `TRANSP:TRANSPARENT`, no `VTIMEZONE`.
+  plan date in every time zone, on both sides of BC's 2026-11-01 change. The file is RFC
+  5545: CRLF line endings, lines folded at 75 octets without splitting a UTF-8 character,
+  `TRANSP:TRANSPARENT`, no `VTIMEZONE`. Without `timing` this is the whole export, byte for
+  byte as before it existed.
+- **Times and reminders.** `timing: {timezone, trips?: {start: "HH:MM", minutes}, cooks?:
+  {start, minutes, by_slot?: {breakfast?, lunch?, dinner?, snack?: "HH:MM"}}, reminders:
+  {trips: [], cooks: [], reminders: []}}` (an IANA zone; minutes before the start, 0 to
+  40,320, at most three per kind). A cook day starts at its meal's `by_slot` time, else at
+  `start`. Trips and cook days get
+  `DTSTART;TZID=<zone>` and `DTEND;TZID=<zone>` (the zone is named, never converted, so no
+  `VTIMEZONE` is written; `TRANSP:OPAQUE`); freeze and thaw reminders stay all-day. Each
+  reminder is one `VALARM` (`ACTION:DISPLAY`, `TRIGGER:-PT{n}M`); an all-day event's count
+  from its midnight, as Google's do. Each event says `all_day`, `start_time`, `end_time`,
+  `timezone` and `reminders_min`.
 - **Stable identity.** A UID is a hash of the plan id and the item (a trip's strategy and
   date, a meal's id, a reminder's kind, meal or trip and product), so exporting again gives
   the same UIDs, and a moved meal keeps its UID on its new date. `SEQUENCE` is the plan's

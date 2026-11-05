@@ -1,8 +1,9 @@
 """Ranked warnings and the edits that fix them.
 
-Three levels: must_fix (the plan as it stands would buy something too early, before a trip,
-or not at all), decide (a choice for the shopper: a trip to re-approve, a product out of
-range, a trip cap) and note (unknowns, rolled up). Each warning carries at most three
+Four levels: must_fix (the plan as it stands would buy something too early, before a trip,
+or not at all), should_fix (the plan works but breaks a limit the shopper set: its trips
+cost more than the budget), decide (a choice for the shopper: a trip to re-approve, a product
+out of range, a trip cap) and note (unknowns, rolled up). Each warning carries at most three
 remedies, edits the console can apply to the draft. The engine computes them and never
 applies them.
 
@@ -17,7 +18,7 @@ import datetime as dt
 
 from .models import PlanWarning
 
-LEVELS = ("must_fix", "decide", "note")
+LEVELS = ("must_fix", "should_fix", "decide", "note")
 
 
 def make(level: str, code: str, message: str, *, strategy: str | None = None,

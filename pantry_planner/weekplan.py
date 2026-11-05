@@ -207,6 +207,7 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
         # verdict — and origin_coverage below is what stops that leniency
         # from reading as a clean basket.
         from . import origins as origins_mod
+        from .flow import candidates_are
         all_ids = {p.id for pool in pools.values() for p in pool}
         origins_map = origins_mod.resolve_all(list(all_ids))
         origin_requested = bool(exclude_origin or preference)
@@ -276,8 +277,8 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
                              f"listed per ingredient."),
                     details=[{
                         "name": name,
-                        "reason": (f"all {len(by_name[name])} candidate(s) are evidenced "
-                                   f"as coming from an excluded country"),
+                        "reason": (f"{candidates_are(len(by_name[name]))} evidenced as "
+                                   "coming from an excluded country"),
                         "suggestions": [
                             f"{p.name} (${_charged(p):.2f}) — {country} via {field}"
                             for p, country, field in by_name[name][:5]],

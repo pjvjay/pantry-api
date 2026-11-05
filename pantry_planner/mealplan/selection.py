@@ -221,14 +221,19 @@ def aliases_file() -> dict:
 
 
 def candidates(library: list[tuple[str, str]], starters: list[dict],
-               mine: list[dict]) -> list[Candidate]:
+               mine: list[dict], *, library_slots: dict[str, str] | None = None
+               ) -> list[Candidate]:
     """library: (slug, name); starters: mealplan_starters.json entries; mine: the shopper's
-    own [{key, title, aliases?}]. Library first, then starters, then the shopper's."""
+    own [{key, title, aliases?}]. Library first, then starters, then the shopper's.
+    library_slots: slug -> slot (the starters file's library_meta); a library recipe it does
+    not name is a dinner."""
     common = aliases_file()["token_aliases"]
     by_slug = aliases_file()["recipes"]
-    out = [Candidate(key=f"lib:{slug}", title=name, kind="library", slot="dinner",
-                     label="library", aliases=tuple(by_slug.get(slug, [])),
-                     token_aliases=common) for slug, name in library]
+    slots = library_slots or {}
+    out = [Candidate(key=f"lib:{slug}", title=name, kind="library",
+                     slot=slots.get(slug, "dinner"), label="library",
+                     aliases=tuple(by_slug.get(slug, [])), token_aliases=common)
+           for slug, name in library]
     for s in starters:
         out.append(Candidate(key=s["doc_key"], title=s["title"], kind="starter", slot=s["slot"],
                              label="demo starter", aliases=tuple(s.get("aliases", [])),

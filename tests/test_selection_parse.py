@@ -145,6 +145,23 @@ def test_aliases_from_the_library_file_and_the_starters():
     assert (sel["matched_as"]["how"], sel["matched_as"]["kind"]) == ("alias", "starter")
 
 
+def test_a_library_recipe_takes_its_slot_from_library_meta():
+    """The starters file's library_meta says where each library recipe is offered: the
+    grilled cheese and the PB&J are lunches, the bolognese a dinner."""
+    import json
+
+    from pantry_planner.db import SEEDS_DIR
+
+    meta = json.loads((SEEDS_DIR / "mealplan_starters.json").read_text())["library_meta"]
+    out = _parse("2 grilled cheese sandwiches + peanut butter and jelly sandwich + spag bol")
+    got = {s["matched_as"]["recipe_key"]: s for s in out["selections"]}
+    for key in ("lib:grilled_cheese", "lib:pbj_sandwich", "lib:spaghetti_bolognese"):
+        assert got[key]["matched_as"]["slot"] == meta[key[4:]]["slot"], key
+    assert meta["grilled_cheese"]["slot"] == "lunch"
+    assert got["lib:grilled_cheese"]["meaning"] == (
+        "2 × Grilled Cheese Sandwich = 2 lunches for 2 people")
+
+
 def test_a_household_of_one_is_one_person():
     sel = _one("3 pepperoni pizza", household_servings=1)
     assert sel["meaning"] == "3 × Pepperoni Pizza = 3 dinners for 1 person"

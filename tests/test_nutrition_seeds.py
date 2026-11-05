@@ -47,13 +47,16 @@ def _count(sql: str) -> int:
 # ─── The file ────────────────────────────────────────────────
 
 def test_every_recipe_line_key_has_a_map_row():
-    """A tokenizer change that re-keys an ingredient fails here, not silently in a plan."""
+    """A tokenizer change that re-keys an ingredient fails here, not silently in a plan. The
+    wizard's fish starters buy salmon and tuna, which this file (pantry-db's, byte for byte)
+    has no row for yet: their nutrition counts those lines as no_reference, and they are the
+    only lines without a row."""
     keys = {m["ingredient_key"] for m in DATA["map"]}
     names = [ing["name"] for r in RECIPES for ing in r["ingredients"]]
     names += [ln["name"] for s in STARTERS for ln in s["lines"]]
-    assert len(names) == 37 + 36
-    for name in names:
-        assert " ".join(tokens(name)) in keys, name
+    assert len(names) == 37 + 36 + 52
+    assert {name for name in names if " ".join(tokens(name)) not in keys} == {
+        "Salmon Fillet", "Canned Tuna"}
 
 
 def test_every_map_row_points_at_a_food_and_only_none_has_none():

@@ -16,7 +16,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from . import db, flow, limits
 from .calendar_api import router as calendar_router
@@ -28,11 +28,20 @@ from .config import (
 )
 from .llm import LLMError
 from .mealplan.assistant import DishIn, MealPlanContext, MealPlanResult, ProposedDish
+from .mealplan.catalog import MAX_OWN_RECIPES
 from .mealplan.models import (
+    Avoid,
+    Basket,
+    Catalog,
+    Diet,
     MealPlanDraft,
     MealSchedule,
+    PinMap,
+    PlanSettings,
+    PlanStores,
     RecipeRef,
     ResolvedRecipe,
+    Slot,
     TripLineOptions,
 )
 from .models import (
@@ -800,15 +809,31 @@ def mealplan_schedule(draft: MealPlanDraft) -> MealSchedule:
         raise _meal_plan_error(e) from e
 
 
+class OptionsLine(BaseModel):
+    """A recipe line that buys nothing, by its recipe's key and its line number."""
+
+    recipe_key: str = Field(min_length=1, max_length=100)
+    line_no: int = Field(ge=1, le=MAX_DOC_LINES)
+
+
 class TripLineOptionsRequest(BaseModel):
     """One trip line: the product bought on `trip_date` under `strategy` (the draft's own
-    when omitted), in the plan as `draft` holds it."""
+    when omitted), in the plan as `draft` holds it. With no trip_date: every line of the
+    plan that buys the product, before any trip is planned. `line` in place of `product_id`
+    (exactly one of the two): a line that buys nothing, and its options."""
 
     draft: MealPlanDraft
-    trip_date: dt.date
-    product_id: int = Field(ge=1, le=2**31 - 1)
+    trip_date: dt.date | None = None
+    product_id: int | None = Field(default=None, ge=1, le=2**31 - 1)
+    line: OptionsLine | None = None
     strategy: Literal["fresh", "fewest_trips"] | None = None
     limit: int = Field(default=12, ge=1, le=25)
+
+    @model_validator(mode="after")
+    def _product_or_line(self) -> TripLineOptionsRequest:
+        if (self.product_id is None) == (self.line is None):
+            raise ValueError("name exactly one of product_id or line")
+        return self
 
 
 async def _options_size(request: Request) -> None:
@@ -821,19 +846,99 @@ async def _options_size(request: Request) -> None:
 def mealplan_alternatives(req: TripLineOptionsRequest) -> TripLineOptions:
     """Options for one trip line: the chat cart's ranking (alternatives.rank_alternatives)
     for every recipe line the purchase covers, under the plan's shopping point and origin
-    rules, each row's trip the plan re-scheduled with that product pinned (no LLM). The
-    console pins the chosen product on `lines`. 422 as /mealplan/schedule; 409 no_trip_line
-    when that trip buys no such product any more."""
+    rules, each row's trip the plan re-scheduled with that product pinned (no LLM). With no
+    trip_date the purchase is every line of the plan buying the product and no row has a
+    trip (plan_total null). With `line` instead of `product_id`: the options for a line that
+    buys nothing and every other such line of the same ingredient (product_id null, no row
+    current; ranking.out_of_reach says what is sold only at stores turned off or beyond the
+    plan's distance). The console pins the chosen product on `lines`. 422 as
+    /mealplan/schedule, and for both or neither of product_id and line; 409 no_trip_line
+    when nothing buys such a product any more, or the line buys something."""
     from . import alternatives as alts
     from .mealplan.models import MealPlanError
     from .mealplan.options import NoTripLineError, options_error, trip_line_options
 
     try:
-        return trip_line_options(req.draft, req.trip_date, req.product_id, req.strategy,
-                                 req.limit)
+        return trip_line_options(
+            req.draft, req.trip_date, req.product_id, req.strategy, req.limit,
+            line=(req.line.recipe_key, req.line.line_no) if req.line else None)
     except (MealPlanError, NoTripLineError, alts.BasisError, alts.PinError) as e:
         status, detail = options_error(e)
         raise HTTPException(status_code=status, detail=detail) from e
+
+
+class MealPlanCatalogRequest(BaseModel):
+    """The wizard's Meals stage: the recipes to offer this household, under its diet, what it
+    avoids and where it shops. recipes are the shopper's own, classified and priced like the
+    library's and the starters'; slots keeps only those sections (all of them by default)."""
+
+    household_servings: int = Field(default=2, ge=1, le=20)
+    diet: Diet = "any"
+    avoid: list[Avoid] = Field(default_factory=list, max_length=5)
+    settings: PlanSettings = Field(default_factory=PlanSettings)
+    slots: list[Slot] | None = Field(default=None, min_length=1, max_length=4)
+    recipes: list[RecipeRef] = Field(default_factory=list, max_length=MAX_OWN_RECIPES)
+    # the plan's pins, as MealPlanDraft.pins: a pinned line is costed at the shopper's product
+    pins: PinMap = Field(default_factory=dict, max_length=MAX_OWN_RECIPES)
+
+
+@app.post("/mealplan/catalog", response_model=Catalog,
+          dependencies=[Depends(_draft_size),
+                        Depends(limits.rate_limit("/mealplan/catalog"))])
+def mealplan_catalog(req: MealPlanCatalogRequest) -> Catalog:
+    """Every library recipe, demo starter and recipe of the shopper's, with its slot, diets,
+    contains, whether it fits (and why not) and an estimate of one meal's cost: each line's
+    share of its pack price at the cheapest store in range, the product the resolve picks in
+    demo mode. No LLM call in demo mode or live; an excluded product is never priced. 422 for
+    a library slug or starter that does not exist."""
+    from .mealplan.catalog import catalog
+    from .mealplan.models import MealPlanError
+
+    try:
+        return catalog(household_servings=req.household_servings, diet=req.diet,
+                       avoid=req.avoid, settings=req.settings, slots=req.slots,
+                       own=req.recipes, pins=req.pins)
+    except MealPlanError as e:
+        raise _meal_plan_error(e) from e
+
+
+class BasketRequest(BaseModel):
+    draft: MealPlanDraft
+
+
+@app.post("/mealplan/basket", response_model=Basket,
+          dependencies=[Depends(_options_size),
+                        Depends(limits.rate_limit("/mealplan/basket"))])
+def mealplan_basket(req: BasketRequest) -> Basket:
+    """The wizard's Ingredients stage: every chosen recipe's ingredients with the product the
+    draft buys (resolved, then pinned), its store and distance, one pack's price, the
+    recipe's share of the whole packs, the origin evidence and the product's labels; and what
+    is not available nearby, with why. Pure: no LLM, no write. 422 as /mealplan/schedule."""
+    from .mealplan.basket import basket
+    from .mealplan.models import MealPlanError
+
+    try:
+        return basket(req.draft)
+    except MealPlanError as e:
+        raise _meal_plan_error(e) from e
+
+
+@app.post("/mealplan/stores", response_model=PlanStores,
+          dependencies=[Depends(_options_size),
+                        Depends(limits.rate_limit("/mealplan/stores"))])
+def mealplan_stores(req: BasketRequest) -> PlanStores:
+    """The Ingredients stage's stores: every store nearest first from the plan's shopping
+    point, with its address and place, whether it is in range and turned off, and how many of
+    the basket's products it stocks (sells null while the plan buys nothing); whether the
+    stores are synthetic, and the plan's shopping point and max_km. Pure: no LLM, no write.
+    422 as /mealplan/schedule."""
+    from .mealplan.models import MealPlanError
+    from .mealplan.stores import stores
+
+    try:
+        return stores(req.draft)
+    except MealPlanError as e:
+        raise _meal_plan_error(e) from e
 
 
 class MyRecipeName(BaseModel):
@@ -860,11 +965,11 @@ def mealplan_selection_parse(req: SelectionParseRequest) -> dict:
     (exact, plural, alias, fuzzy), with no LLM. Only exact and plural matches may be
     accepted without asking: alias and fuzzy come back with needs_confirmation true."""
     from .mealplan import selection
-    from .mealplan.resolve import starters_file
+    from .mealplan.resolve import library_slots, starters_file
 
     cands = selection.candidates(
         [(r.slug, r.name) for r in db.load_all_recipes()], starters_file()["starters"],
-        [r.model_dump() for r in req.recipes])
+        [r.model_dump() for r in req.recipes], library_slots=library_slots())
     return selection.parse(req.text, cands, req.household_servings)
 
 
