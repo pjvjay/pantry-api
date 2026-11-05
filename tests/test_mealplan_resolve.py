@@ -219,6 +219,61 @@ def test_get_starters_lists_the_labelled_demo_recipes():
         assert s["text"] == to_recipe_text(doc) == seed["text"]
 
 
+@pytest.fixture
+def live_without_keys(monkeypatch):
+    """Not DEMO_MODE, and neither model key: the configuration that used to 500."""
+    from pantry_planner import config, llm
+
+    def no_client(*_a, **_k):
+        raise AssertionError("an Anthropic client was built with no key")
+
+    for var in ("DEMO_MODE", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "SELECTOR_MODEL_DEFAULT",
+                "SELECTOR_MODEL_ESCALATION", "CLASSIFIER_MODEL", "NL2SQL_MODEL"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(llm, "Anthropic", no_client)
+    config.settings.cache_clear()
+    yield
+    config.settings.cache_clear()
+
+
+@pytest.mark.parametrize("ref", [
+    _starter("mango_milkshake"),                                  # run_spec
+    {"key": "lib:chicken_curry", "slug": "chicken_curry"},       # flow.run
+])
+def test_resolve_without_a_model_key_is_a_503_naming_the_fix(live_without_keys, ref):
+    """Every recipe used to come back as an opaque 500 (an empty key sent as an auth
+    header). A missing key fails the whole request once, saying what to set."""
+    from pantry_planner.llm import NO_KEY_HINT
+
+    r = client().post("/mealplan/resolve", json={"recipes": [ref, _starter("pepperoni_pizza")]})
+    assert r.status_code == 503, r.text
+    body = r.json()
+    assert body["error"] == "llm_call_failed" and body["provider"] == "anthropic"
+    assert NO_KEY_HINT in body["detail"]
+    assert ("No model key is configured: set ANTHROPIC_API_KEY or GEMINI_API_KEY, "
+            "or run with DEMO_MODE=1") in body["detail"]
+
+
+def test_a_missing_key_is_not_cached_as_a_result(live_without_keys, monkeypatch):
+    """Once a key is set, the same recipe resolves: the 503 left nothing in the cache."""
+    from pantry_planner import config
+
+    ref = _starter("mango_milkshake")
+    assert client().post("/mealplan/resolve", json={"recipes": [ref]}).status_code == 503
+    monkeypatch.setenv("DEMO_MODE", "1")
+    config.settings.cache_clear()
+    (got,) = _resolve(ref)
+    assert got["status"] == "ok" and got["cached"] is False
+
+
+def test_mealplan_plan_without_a_model_key_is_a_503(live_without_keys):
+    """POST /mealplan/plan resolves the dishes it drafts through the same path."""
+    r = client().post("/mealplan/plan", json={"dishes": [{"recipe": "mango_milkshake",
+                                                          "count": 1}]})
+    assert r.status_code == 503, r.text
+    assert "ANTHROPIC_API_KEY" in r.json()["detail"]
+
+
 def test_resolve_is_rate_limited_per_client():
     body = {"recipes": [_starter("mango_milkshake")]}
     codes = [client().post("/mealplan/resolve", json=body).status_code for _ in range(4)]

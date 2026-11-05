@@ -7,14 +7,16 @@ The model never writes SQL — it parameterizes a fixed pattern menu, and
 validate_parsed() clamps every value against the live DB vocabulary.
 
 Failure mode: any error returns an empty parse with `error` set — the
-caller decides how to degrade. Never raises.
+caller decides how to degrade. The one exception is LLMConfigError (no key,
+no model name): that is the deployment's fault, not this input's, so it is
+raised for the API to answer as a 503.
 """
 from __future__ import annotations
 
 import time
 
 from ..config import estimate_cost_usd, settings
-from ..llm import forced_tool_call
+from ..llm import LLMConfigError, forced_tool_call
 from .schemas import ParsedInput
 
 ALLOWED_TAGS = {"dairy", "gluten", "meat", "nuts", "egg", "soy"}
@@ -165,7 +167,7 @@ PARSER_TOOL = {
 
 
 def parse_input(text_input: str, *, model: str | None = None) -> ParsedInput:
-    """One extractor call. Never raises — see module docstring."""
+    """One extractor call. Raises only LLMConfigError — see module docstring."""
     from .vocab import db_vocab, prompt_block
 
     cfg = settings()
@@ -186,6 +188,8 @@ def parse_input(text_input: str, *, model: str | None = None) -> ParsedInput:
         parsed.latency_ms = latency_ms
         parsed.http = reply.http
         return parsed
+    except LLMConfigError:
+        raise
     except Exception as e:  # noqa: BLE001 — housing failure mode: degrade, don't raise
         return ParsedInput(error=str(e)[:200])
 

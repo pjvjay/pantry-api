@@ -758,7 +758,8 @@ def mealplan_resolve(req: MealPlanResolveRequest) -> MealPlanResolveResponse:
     """Which products each recipe buys: library recipes through the classic pipeline, every
     RecipeDoc through /plan/spec's path (reviewed lines planned as given). A recipe that
     fails comes back with a status of its own (needs_servings, unconfirmed_lines, not_found,
-    unparseable, aborted, llm_error); the request does not fail. Slow when live, instant in
+    unparseable, aborted, llm_error); the request does not fail, except with no model key
+    configured (503 llm_call_failed, naming the keys to set). Slow when live, instant in
     demo mode; results are cached per recipe and knobs."""
     import time
 

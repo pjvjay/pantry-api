@@ -104,8 +104,12 @@ class FakeProviders:
         return _Client
 
     def install(self, monkeypatch) -> FakeProviders:
-        from pantry_planner import llm
+        """Also sets a placeholder ANTHROPIC_API_KEY: llm refuses a call with no key
+        before reaching the (fake) client, as it must in production."""
+        from pantry_planner import config, llm
 
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-placeholder")
+        config.settings.cache_clear()
         monkeypatch.setattr(llm, "_transport", httpx.MockTransport(self.gemini_handler))
         monkeypatch.setattr(llm, "Anthropic", self.anthropic_class())
         monkeypatch.setattr(llm, "_sleep", lambda _s: None)

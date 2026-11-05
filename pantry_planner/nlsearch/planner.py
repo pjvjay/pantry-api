@@ -599,7 +599,13 @@ def run_query_plan(text_input: str, *, parsed: ParsedInput | None = None,
             from .. import demomode
             parsed = demomode.parse_recipe(text_input)
         else:
-            parsed = parse_input(text_input)
+            from ..llm import LLMConfigError
+
+            try:
+                parsed = parse_input(text_input)
+            except LLMConfigError as e:
+                raise LLMConfigError(f"Recipe parse failed ({cfg.nl2sql_model}): {e}",
+                                     provider=e.provider) from e
             if parsed.error:
                 # The parse CALL failed (bad key, quota, provider down, a
                 # reply that didn't validate) — not a recipe without

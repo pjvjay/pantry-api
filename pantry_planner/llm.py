@@ -16,6 +16,8 @@ the SDK's own exceptions propagate untouched.
 
 Gemini errors are raised as LLMError subclasses whose message leads with
 what to fix (GEMINI_API_KEY, the model spec, the quota) — never the key.
+A call to either provider with no key configured raises LLMConfigError
+before any HTTP request is made (the API answers it with a 503).
 """
 from __future__ import annotations
 
@@ -68,6 +70,10 @@ class LLMConfigError(LLMError):
     """The call can't be made as configured (no key, empty model name)."""
 
     http_status = 503
+
+
+NO_KEY_HINT = ("No model key is configured: set ANTHROPIC_API_KEY or GEMINI_API_KEY, "
+               "or run with DEMO_MODE=1.")
 
 
 class LLMAuthError(LLMError):
@@ -136,7 +142,14 @@ def forced_tool_call(*, model: str, system: str, messages: list[dict],
 def _anthropic_call(name: str, *, system: str, messages: list[dict], tool: dict,
                     max_tokens: int, temperature: float | None,
                     thinking_budget: int | None) -> ToolCallResult:
-    client = Anthropic(api_key=settings().anthropic_api_key)
+    key = settings().anthropic_api_key
+    if not key:
+        # Without this the SDK sends an empty auth header and httpx rejects it
+        # locally (LocalProtocolError) — an opaque 500 instead of a fixable 503.
+        raise LLMConfigError(
+            f"ANTHROPIC_API_KEY is not set, and the model {name!r} needs it. "
+            + NO_KEY_HINT, provider=ANTHROPIC)
+    client = Anthropic(api_key=key)
     kwargs: dict = {
         "model": name,
         "max_tokens": max_tokens,
@@ -209,7 +222,8 @@ def _gemini_call(name: str, *, system: str, messages: list[dict], tool: dict,
     if not key:
         raise LLMConfigError(
             f"GEMINI_API_KEY is not set, and the model 'gemini:{name}' needs it. "
-            "Set GEMINI_API_KEY, or point this model setting at an Anthropic model.",
+            "Set GEMINI_API_KEY, or point this model setting at an Anthropic model. "
+            + NO_KEY_HINT,
             provider=GEMINI)
     url = (cfg.gemini_base_url or DEFAULT_GEMINI_BASE_URL).rstrip("/") + "/chat/completions"
     body = gemini_request_body(name, system=system, messages=messages, tool=tool,

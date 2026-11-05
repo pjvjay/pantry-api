@@ -8,7 +8,8 @@ product choice is the selector's. Results are cached in process (64 entries) by 
 that can change them.
 
 A recipe that fails keeps a status of its own (needs_servings, unconfirmed_lines, not_found,
-unparseable, aborted, llm_error) and never fails the others.
+unparseable, aborted, llm_error) and never fails the others. The exception is a missing model
+key (llm.LLMConfigError): it would fail every recipe alike, so it fails the request (503).
 
 This module also says what a recipe ref is (recipe_doc): the schedule reads the amounts from
 here, by ref, rather than trusting amounts the browser sends back.
@@ -152,8 +153,9 @@ def resolve_one(ref: RecipeRef, *, lat: float | None = None, lon: float | None =
                 max_km: float | None = None, exclude: list[str] | None = None,
                 preference: list[str] | None = None) -> ResolvedRecipe:
     """Resolve one recipe, from the cache when it can. Never raises for a recipe that
-    fails: the failure is its status."""
-    from ..llm import LLMError
+    fails: the failure is its status. A missing model key is not one recipe's failure:
+    LLMConfigError propagates."""
+    from ..llm import LLMConfigError, LLMError
     from ..nlsearch import PlanAborted, UnparseableRecipe
 
     knobs = {"lat": lat, "lon": lon, "max_km": max_km, "exclude": list(exclude or []),
@@ -193,6 +195,10 @@ def resolve_one(ref: RecipeRef, *, lat: float | None = None, lon: float | None =
         return ResolvedRecipe(**base, status="aborted",
                               message=alert.message if alert else "planning stopped",
                               lines=_lines(doc, None))
+    except LLMConfigError:
+        # No key (or no model name) fails every recipe alike: the whole request is a 503
+        # naming the fix (api._llm_error), not one "llm_error" per recipe.
+        raise
     except LLMError as e:
         return ResolvedRecipe(**base, status="llm_error", message=str(e),
                               lines=_lines(doc, None))

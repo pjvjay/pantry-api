@@ -335,6 +335,44 @@ def test_missing_key_is_an_error_only_when_gemini_is_called(monkeypatch):
     assert seen == []
 
 
+def test_missing_anthropic_key_is_a_config_error_before_any_request(monkeypatch):
+    """With no ANTHROPIC_API_KEY the SDK used to send an empty auth header,
+    which httpx rejects locally (LocalProtocolError) — an unexplained 500."""
+    from pantry_planner import llm
+    from pantry_planner.llm import NO_KEY_HINT, LLMConfigError
+
+    def no_client(*_a, **_k):
+        raise AssertionError("an Anthropic client was built with no key")
+
+    monkeypatch.setattr(llm, "Anthropic", no_client)
+    for spec in ("claude-haiku-4-5-20251001", "anthropic:claude-haiku-4-5-20251001"):
+        with pytest.raises(LLMConfigError) as e:
+            _call(model=spec)
+        assert e.value.http_status == 503 and e.value.provider == "anthropic"
+        assert "ANTHROPIC_API_KEY is not set" in str(e.value)
+        assert "'claude-haiku-4-5-20251001'" in str(e.value)
+        assert NO_KEY_HINT in str(e.value)
+
+
+def test_missing_gemini_key_message_names_every_way_out(monkeypatch):
+    from pantry_planner.llm import NO_KEY_HINT, LLMConfigError
+
+    _set(monkeypatch, GEMINI_API_KEY="")
+    with pytest.raises(LLMConfigError, match="DEMO_MODE=1") as e:
+        _call()
+    assert NO_KEY_HINT in str(e.value)
+
+
+def test_parser_raises_a_missing_key_instead_of_degrading(monkeypatch):
+    """A missing key is the deployment's fault, not the recipe's: no empty parse."""
+    from pantry_planner.llm import LLMConfigError
+    from pantry_planner.nlsearch.query_parser import parse_input
+
+    _set(monkeypatch, NL2SQL_MODEL="claude-haiku-4-5-20251001")
+    with pytest.raises(LLMConfigError, match="ANTHROPIC_API_KEY is not set"):
+        parse_input("- 200g spaghetti")
+
+
 def test_spec_without_a_model_name_is_rejected():
     from pantry_planner.llm import LLMConfigError
 
@@ -625,6 +663,28 @@ def test_missing_gemini_key_is_a_503_from_the_api(monkeypatch):
     resp = TestClient(app).post("/plan/tomato_penne")
     assert resp.status_code == 503, resp.text
     assert "GEMINI_API_KEY is not set" in resp.json()["detail"]
+
+
+@pytest.mark.parametrize("path,body", [
+    ("/plan/tomato_penne", None),
+    ("/plan/nl", {"recipe_text": "- 200g spaghetti"}),
+    ("/plan/week", {"days": 1}),
+])
+def test_missing_anthropic_key_is_a_503_from_every_llm_endpoint(monkeypatch, path, body):
+    """The default specs are Anthropic models: with no key at all (and no
+    DEMO_MODE) each LLM endpoint names the keys to set instead of a 500."""
+    from fastapi.testclient import TestClient
+
+    from pantry_planner.api import app
+    from pantry_planner.llm import NO_KEY_HINT
+
+    _set(monkeypatch, GEMINI_API_KEY="")
+    resp = TestClient(app, raise_server_exceptions=False).post(path, json=body)
+    assert resp.status_code == 503, resp.text
+    got = resp.json()
+    assert got["error"] == "llm_call_failed" and got["provider"] == "anthropic"
+    assert "ANTHROPIC_API_KEY is not set" in got["detail"]
+    assert NO_KEY_HINT in got["detail"]
 
 
 @pytest.mark.asyncio
