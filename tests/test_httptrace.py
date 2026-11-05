@@ -168,14 +168,17 @@ def test_a_plan_carries_its_llm_calls_into_the_trace_and_the_mcp_summary(monkeyp
     from pantry_planner import flow
     from pantry_planner.mcp_server import _summarize_plan
 
-    FakeProviders().install(monkeypatch)
+    # A fixed server wait: the fake answers in well under a millisecond, and phases that
+    # round to 0 ms are (rightly) left out of the timeline.
+    FakeProviders(gemini_wait_ms=250).install(monkeypatch)
     plan = flow.run("tomato_penne")
 
     [call] = plan.llm_calls
     assert (call.step, call.model, call.attempts, call.status) == \
         ("select_products", "gemini:gemini-3.1-flash-lite", 1, 200)
     assert plan.plan_trace[0].step_id == "llm_select_products"
-    assert plan.plan_trace[0].phases
+    phases = plan.plan_trace[0].phases
+    assert [(p.name, p.ms, p.attempt) for p in phases][:1] == [("waiting for Google", 250, 1)]
     assert _summarize_plan(plan).llm_calls == plan.llm_calls
 
 

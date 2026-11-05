@@ -54,7 +54,11 @@ def _plan_reply(user_content: str, low_conf_lines: set[int]) -> dict:
 
 
 class FakeProviders:
-    def __init__(self) -> None:
+    def __init__(self, *, gemini_wait_ms: float | None = None) -> None:
+        # When set, every Gemini reply reports this fixed "waiting for Google" phase on the
+        # request's PhaseClock (MockTransport fires no connection events of its own), so a
+        # test of the trace timeline does not depend on how fast the fake answers.
+        self.gemini_wait_ms = gemini_wait_ms
         self.gemini: list[dict] = []          # request bodies
         self.gemini_headers: list[dict] = []
         self.anthropic: list[dict] = []       # messages.create kwargs
@@ -76,6 +80,10 @@ class FakeProviders:
         body = json.loads(request.content)
         self.gemini.append(body)
         self.gemini_headers.append(dict(request.headers))
+        clock = request.extensions.get("trace")
+        if self.gemini_wait_ms is not None and hasattr(clock, "marks"):
+            clock.marks["receive_response_headers.started"] = 0.0
+            clock.marks["receive_response_headers.complete"] = self.gemini_wait_ms / 1000
         tool_name = body["tool_choice"]["function"]["name"]
         args = self.reply_for("gemini", tool_name, body["messages"][-1]["content"])
         return httpx.Response(200, json=gemini_reply(tool_name, args, model=body["model"]))
