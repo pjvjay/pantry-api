@@ -33,7 +33,9 @@ Strategy = Literal["fresh", "fewest_trips"]
 STRATEGIES: tuple[str, ...] = ("fresh", "fewest_trips")
 # The shopper's diet, and the products' contains-tags they can choose to avoid.
 Diet = Literal["any", "pescatarian", "vegetarian", "vegan"]
-Avoid = Literal["dairy", "gluten", "nuts", "soy", "egg"]
+# "nuts" is peanuts and tree nuts together, as the console offered it before they were split.
+Avoid = Literal["dairy", "gluten", "nuts", "soy", "egg", "peanuts", "tree_nuts", "sesame", "fish",
+                "shellfish", "mustard", "sulphites"]
 # Where a purchase is kept: from the product's storage class in shelf_life.json (the file's
 # own label), or the freezer when the plan freezes it on arrival.
 Storage = Literal["fridge", "freezer", "pantry"]
@@ -181,7 +183,7 @@ class Prefs(BaseModel):
     strategy: Strategy = "fresh"
     budget: float | None = Field(default=None, gt=0, le=MAX_BUDGET, allow_inf_nan=False)
     diet: Diet = "any"
-    avoid: list[Avoid] = Field(default_factory=list, max_length=5)
+    avoid: list[Avoid] = Field(default_factory=list, max_length=12)
 
     @model_validator(mode="after")
     def _weekdays(self) -> Prefs:

@@ -366,8 +366,8 @@ def test_a_product_that_matches_the_words_but_is_another_food_is_not_the_same_in
         assert butter.current and (butter.match, butter.tier) == ("exact", "same")
         held = {f.product: f for f in ranking.filtered}
         peanut = held["Canadian Peanut Butter Cream"]
-        assert (peanut.why, peanut.tags) == ("adds_tags", ["nuts"])
-        assert peanut.text == ("Canadian Peanut Butter Cream contains nuts, which Butter "
+        assert (peanut.why, peanut.tags) == ("adds_tags", ["nuts", "peanuts"])
+        assert peanut.text == ("Canadian Peanut Butter Cream contains peanuts, which Butter "
                                "Salted 454g does not")
         assert "Canadian Peanut Butter Cream" not in _by_name(ranking)
     plan = flow.run_nl(SAME_OR_NOT)
