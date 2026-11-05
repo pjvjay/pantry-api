@@ -10,6 +10,79 @@ C 0.01, I 0). No amount, location or origin preference: only matching and price.
 | Words (today's fallback) | 0.924 | 96% |
 | Meaning (EmbeddingGemma + Gemini seeds) | 0.966 | 98% |
 
+## How sure these numbers are
+
+95% intervals from a paired bootstrap over the 47 names (10,000 draws,
+seed fixed). The difference is meaning minus words on the same names.
+
+| Metric | Words | Meaning | Difference | Draws where meaning is not better |
+|---|---|---|---|---|
+| nDCG@3 | 0.858–0.975 | 0.915–0.996 | +0.041 (0.011–0.091) | 0.0% |
+| Hit@1 | 89%–100% | 94%–100% | +2.1% (0%–6%) | 36.3% |
+
+Caveats: the same Gemini family wrote the product profiles and judged the labels, and
+the matcher's weights were tuned on this set, so these are optimistic for new names.
+
+## When the exact item is missing
+
+46 names with an exact product: every product labelled E removed, Options' hard
+rule applied (nothing that adds an allergen or diet tag the exact item lacks), and the
+first product left scored. Unlabelled products count as not a substitute.
+
+| Method | Sub@1 (first offer works instead) | Something offered | First offer would add an allergen without the rule |
+|---|---|---|---|
+| Words | 52% | 87% | 13% |
+| Meaning | 74% | 85% | 13% |
+
+| Ingredient | Words: first offer | Meaning: first offer |
+|---|---|---|
+| All-Purpose Flour | Flour Tortillas 10-Pack (I) | nothing |
+| Basmati Rice | Long Grain White Rice 1kg (S) | Long Grain White Rice 1kg (S) |
+| Broccoli | Fresh Garlic (I) | Bok Choy (S) |
+| Butter | nothing | Ghee 400g (S) |
+| Canned Tomatoes | Roma Tomato (S) | Roma Tomato (S) |
+| Canned Tuna | Canned Corn Kernels 341ml (I) | Frozen White Fish 400g (S) |
+| Canola Oil | Toasted Sesame Oil 250ml (I) | Extra Virgin Olive Oil 500ml (S) |
+| Carrots | Fresh Garlic (I) | nothing |
+| Cheddar Cheese | Paneer 350g (S) | Mozzarella Shredded 200g (S) |
+| Chicken Breast | Chicken Thighs Bone-In (S) | Chicken Thighs Bone-In (S) |
+| Chicken Thighs | Chicken Drumsticks 1kg (S) | Chicken Drumsticks 1kg (S) |
+| Chili Powder | Sichuan Chili Flakes 100g (S) | Paprika Ground 100g (S) |
+| Cilantro | Flat-Leaf Parsley (S) | Flat-Leaf Parsley (S) |
+| Diced Tomatoes | Crushed Tomatoes Canned 796ml (S) | Crushed Tomatoes Canned 796ml (S) |
+| Dried Oregano | Bay Leaves 10g (I) | Dried Thyme 10g (S) |
+| Eggs | nothing | nothing |
+| Fresh Mint | Cilantro (I) | Cilantro (I) |
+| Frozen Mango | Limes 4-Pack (I) | nothing |
+| Garam Masala | Cumin Ground 100g (I) | Curry Powder 100g (S) |
+| Garlic | Yellow Onion (I) | Shallots 227g (S) |
+| Ghee | Butter Salted 454g (S) | Butter Salted 454g (S) |
+| Ginger | Fresh Garlic (I) | nothing |
+| Granulated Sugar | Icing Sugar 1kg (S) | Brown Sugar 1kg (S) |
+| Green Cardamom Pods | Star Anise Whole 30g (I) | Green Chilies 100g (I) |
+| Green Chilies | Dried Red Chilies 100g (S) | Green Bell Pepper (S) |
+| Green Onions | Yellow Onion (S) | Yellow Onions 10lb Bag (S) |
+| Ground Beef | Beef Sirloin Steak 450g (S) | Ground Pork 450g (S) |
+| Instant Yeast | Baking Soda 500g (I) | nothing |
+| Jasmine Rice | Long Grain White Rice 1kg (S) | Long Grain White Rice 1kg (S) |
+| Mozzarella | Cheddar Cheese Block 300g (S) | Cheddar Cheese Block 300g (S) |
+| Olive Oil | Canola Oil 1L (S) | Canola Oil 1L (S) |
+| Passata | Tomato Sauce Jar 650ml (S) | Canned Diced Tomatoes (S) |
+| Peanut Butter and Jelly Jam | nothing | Canadian Peanut Butter Cream (S) |
+| Penne | Spaghetti Pasta 500g (S) | Fusilli Family Pack 900g (S) |
+| Pepperoni | nothing | Crushed Red Pepper Flakes 60g (I) |
+| Plain Yogurt | Coconut Yogurt 500g (S) | Coconut Yogurt 500g (S) |
+| Salmon Fillet | Frozen White Fish 400g (S) | Frozen White Fish 400g (S) |
+| Salt | nothing | nothing |
+| Sesame Oil | Canola Oil 1L (I) | Canola Oil 1L (I) |
+| Sliced Bread | nothing | Sourdough Loaf (S) |
+| Soy Sauce | Tomato Sauce Jar 650ml (I) | Vegetable Oil 1.42L (I) |
+| Spaghetti | Penne Rigate 500g (S) | Fusilli Family Pack 900g (S) |
+| Turmeric | Cumin Ground 100g (I) | Curry Powder 100g (S) |
+| Wheat Bread | Sourdough Loaf (S) | Sourdough Loaf (S) |
+| Whole Milk | Coconut Milk Canned 400ml (S) | Oat Milk 1L (S) |
+| Yellow Onion | Green Onions (S) | Red Onion (S) |
+
 ## Per ingredient
 
 | Ingredient | Words nDCG@3 | Words top 3 | Meaning nDCG@3 | Meaning top 3 |
