@@ -16,14 +16,17 @@ from mcp.server.mcpserver.exceptions import ToolError
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from tests.seed_catalog import ids_mentioning
+
 _TMP_DB = None
 
 # Seed facts the assertions name (seeds/products.json).
-BASMATI, LONG_GRAIN = 8, 9
+BASMATI, LONG_GRAIN, JASMINE = 8, 9, 84
 GF_PENNE, PENNE_RIGATE = 49, 51
-# Gluten-Free Penne 340g is rice-flour pasta, so its description carries
-# the term "rice": the head-noun pool for "rice" is three products, not two.
-RICE_POOL = {BASMATI, LONG_GRAIN, GF_PENNE}
+# The head-noun pool for "rice" is every product whose name or description
+# says "rice" — not only the rice bags: Gluten-Free Penne is rice-flour
+# pasta, and Shaoxing wine, rice vinegar and rice noodles say "rice" too.
+RICE_POOL = ids_mentioning("rice")
 
 RECIPE = ("Garlic Pasta (serves 2)\n- 500g penne\n- 2 cloves garlic\n"
           "- 1 can crushed tomatoes\nNotes: ")
@@ -133,6 +136,7 @@ async def test_relaxed_match_offers_head_noun_alternatives(server):
     out = await _find(server, query="coconut rice")
     assert out["tokens"] == ["coconut", "rice"]
     assert out["match"] == "relaxed"
+    assert {BASMATI, LONG_GRAIN, JASMINE, GF_PENNE} <= RICE_POOL
     assert {i["id"] for i in out["items"]} == RICE_POOL
     assert out["total"] == len(RICE_POOL)
     assert "alternatives" in out["note"]
@@ -351,7 +355,9 @@ READ_TOOLS = {
     "get_product_origins", "rank_products_by_origin", "origin_triage", "pipeline_status",
     "list_origin_submissions",
 }
-PLAN_TOOLS = {"plan_recipe", "plan_from_text", "plan_week"}
+PLAN_TOOLS = {"plan_recipe", "plan_from_text", "plan_from_lines", "plan_week", "plan_meals"}
+# No LLM behind them: the same basis against the same catalog gives the same answer.
+FOLLOW_UP_TOOLS = {"rank_alternatives", "reprice_plan"}
 # Write tools add to a queue or copy into evidence; nothing is destroyed.
 WRITE_TOOLS = {"submit_origin_evidence", "review_origin_submission"}
 
@@ -359,7 +365,7 @@ WRITE_TOOLS = {"submit_origin_evidence", "review_origin_submission"}
 @pytest.mark.asyncio
 async def test_every_tool_is_annotated_and_titled(server):
     tools = {t.name: t for t in await server.list_tools()}
-    assert set(tools) == READ_TOOLS | PLAN_TOOLS | WRITE_TOOLS
+    assert set(tools) == READ_TOOLS | PLAN_TOOLS | WRITE_TOOLS | FOLLOW_UP_TOOLS
     for name, t in tools.items():
         assert t.annotations is not None, name
         assert t.title, name
@@ -369,6 +375,9 @@ async def test_every_tool_is_annotated_and_titled(server):
     for name in PLAN_TOOLS:
         assert tools[name].annotations.read_only_hint is True, name
         assert tools[name].annotations.idempotent_hint is False, name
+    for name in FOLLOW_UP_TOOLS:
+        assert tools[name].annotations.read_only_hint is True, name
+        assert tools[name].annotations.idempotent_hint is True, name
     for name in WRITE_TOOLS:
         assert tools[name].annotations.read_only_hint is False, name
         assert tools[name].annotations.destructive_hint is False, name

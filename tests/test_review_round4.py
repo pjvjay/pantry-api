@@ -9,6 +9,8 @@ import os
 import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 
+from tests.seed_catalog import CATALOG
+
 _TMP_DB = None
 TEXT = "Garlic Pasta (serves 2)\n- 500g penne\n- 2 cloves garlic\n- 1 can crushed tomatoes\n"
 
@@ -54,7 +56,7 @@ async def test_lookup_and_coverage_answer_without_the_review_queue_table():
         assert d["name"] == "Basmati Rice 2kg"
         assert d["pending_submissions"] is None          # unknown, not zero
         cov = await _read_json(server, "pantry://origins/coverage")
-        assert cov["products"] == 62
+        assert cov["products"] == CATALOG
         assert cov["submissions"] is None
         assert "0006" in cov["submissions_note"]
         with pytest.raises(ToolError, match="0006"):

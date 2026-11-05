@@ -47,7 +47,9 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:15-alpine   # production's major; a parity gate must match it
+        # Production's major (CNPG ghcr.io/cloudnative-pg/postgresql:17.5, pantry-gitops
+        # infra/postgres-cluster.yaml); a parity gate must match it.
+        image: postgres:17-alpine
         env:
           POSTGRES_USER: pantry
           POSTGRES_PASSWORD: pantry
@@ -78,7 +80,7 @@ jobs:
         # A hollow run leaves these tables absent or empty. Fail loudly
         # rather than let a green check stand for a backend never touched.
         # Floors, not just "> 0": a single seeding module would satisfy > 0
-        # while every other module silently ran on SQLite. The seed is 62
+        # while every other module silently ran on SQLite. The seed is 161
         # products / 7 recipes, and store_products only exists once the
         # synthetic store seed ran — so these three together mean the whole
         # seed path executed against Postgres.
@@ -87,7 +89,8 @@ jobs:
           p=$(q "select count(*) from products"); r=$(q "select count(*) from recipes")
           s=$(q "select count(*) from store_products")
           echo "rows in Postgres after the suite: products=$p recipes=$r store_products=$s"
-          test "$p" -ge 62 && test "$r" -ge 7 && test "$s" -gt 0 \
+          test "$p" -ge 161 && test "$r" -ge 7 && test "$s" -gt 0 \
             || { echo "::error::suite did not fully exercise Postgres"; exit 1; }
           q "select to_regclass('product_origin_evidence') is not null" | grep -q t
           q "select to_regclass('origin_submissions') is not null" | grep -q t
+          q "select to_regclass('recipe_line_amounts') is not null" | grep -q t

@@ -17,6 +17,8 @@ from mcp.server.mcpserver.exceptions import ResourceError
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from tests.seed_catalog import CATALOG, categories, count
+
 _TMP_DB = None
 
 RESOURCE_URIS = {
@@ -134,9 +136,11 @@ async def test_categories_resource_matches_a_direct_group_by(server):
             "GROUP BY category, subcategory"):
         expected.setdefault(cat or "", {})[sub or ""] = n
     assert data == expected
-    assert data["pantry"]["pasta"] == 4
-    assert data["produce"]["vegetables"] == 9
-    assert sum(n for subs in data.values() for n in subs.values()) == 62
+    # ...and the database holds what the seed file says, aisle by aisle
+    assert data == categories()
+    assert data["pantry"]["pasta"] == count("pantry", "pasta") > 0
+    assert data["produce"]["vegetables"] == count("produce", "vegetables") > 0
+    assert sum(n for subs in data.values() for n in subs.values()) == CATALOG
 
 
 # ─── Countries ───────────────────────────────────────────────
@@ -181,7 +185,7 @@ async def test_origin_coverage_reflects_evidence_and_the_review_queue(
 
     data = await _read_json(server, "pantry://origins/coverage")
     assert data == {
-        "products": 62, "by_status": {"unknown": 62}, "evidence_rows": 0,
+        "products": CATALOG, "by_status": {"unknown": CATALOG}, "evidence_rows": 0,
         "submissions": {"pending": 0, "approved": 0, "rejected": 0},
         "submissions_note": "",
         "floor": config.settings().origin_min_coverage,
@@ -200,8 +204,8 @@ async def test_origin_coverage_reflects_evidence_and_the_review_queue(
     assert sub["status"] == "pending" and sub["duplicate"] is False
 
     data = await _read_json(server, "pantry://origins/coverage")
-    assert data["products"] == 62
-    assert data["by_status"] == {"resolved": 1, "unknown": 61}
+    assert data["products"] == CATALOG
+    assert data["by_status"] == {"resolved": 1, "unknown": CATALOG - 1}
     assert data["evidence_rows"] == 1
     assert data["submissions"] == {"pending": 1, "approved": 0, "rejected": 0}
     (pending,) = _sql("SELECT COUNT(*) FROM origin_submissions WHERE status = 'pending'")[0]
@@ -265,7 +269,7 @@ async def test_review_submissions_prompt_names_the_three_tools(server):
 @pytest.mark.asyncio
 async def test_every_tool_has_a_title_and_annotations(server):
     tools = await server.list_tools()
-    assert len(tools) == 15
+    assert len(tools) == 19
     for t in tools:
         assert t.title, t.name
         assert t.annotations is not None, t.name
@@ -279,5 +283,7 @@ async def test_every_tool_has_a_title_and_annotations(server):
             assert a.read_only_hint is True, name
     assert by_name["submit_origin_evidence"].idempotent_hint is True
     assert by_name["review_origin_submission"].idempotent_hint is False
-    for name in ("plan_recipe", "plan_from_text", "plan_week"):
+    for name in ("plan_recipe", "plan_from_text", "plan_from_lines", "plan_week", "plan_meals"):
         assert by_name[name].idempotent_hint is False, name
+    for name in ("rank_alternatives", "reprice_plan"):
+        assert by_name[name].idempotent_hint is True, name

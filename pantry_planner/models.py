@@ -4,9 +4,14 @@ API boundary; plain dataclasses inside would also work.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+import datetime as dt
+from typing import Annotated, Literal
+from urllib.parse import urlsplit
 
-from .nlsearch.plan import StepResult  # import-safe: plan.py is pydantic-only
+from pydantic import AfterValidator, BaseModel, Field, model_validator
+
+from .nlsearch.plan import StepPhase, StepResult  # import-safe: plan.py is pydantic-only
+from .nlsearch.schemas import Constraints  # import-safe: schemas.py is pydantic-only
 
 # ─── Domain models ────────────────────────────────────────────
 
@@ -209,6 +214,21 @@ class SelectorResult(BaseModel):
     output_tokens: int = 0
     latency_ms: int = 0
     cost_usd: float = 0.0
+    # One httptrace record per LLM call behind this result (Gemini only): where the time went.
+    http: list[dict] = Field(default_factory=list)
+
+
+class LlmCallTrace(BaseModel):
+    """One LLM call's time, phase by phase (httptrace.py). `server_ms` is the provider's own
+    processing time as its front end reports it (Google's server-timing header), when it
+    does: `waiting for Google` far above it was spent before the request reached Google."""
+    step: str
+    model: str
+    total_ms: int
+    attempts: int = 1
+    status: int | None = None
+    server_ms: int | None = None
+    phases: list[StepPhase] = Field(default_factory=list)
 
 
 # ─── Router I/O ───────────────────────────────────────────────
@@ -280,13 +300,42 @@ class TripOption(BaseModel):
 
 # ─── Final plan ───────────────────────────────────────────────
 
+# How retrieval matched a line's ingredient to the catalog:
+#   exact   — every word of the ingredient as written (the purchase form
+#             included); always the case on the classic seeded-recipe path,
+#             whose ingredient names are used verbatim
+#   form    — only after dropping the purchase form ("powdered tomato" ->
+#             tomato products)
+#   generic — only after dropping descriptor words (units.DESCRIPTORS:
+#             light/dark/toasted/ground/...): "light brown sugar" -> Brown Sugar.
+#             On the week path, a line rescued by the head-noun fallback.
+MatchLevel = Literal["exact", "form", "generic"]
+# Product matching (matching/matcher.py): by meaning, or by words when a name no seed knows
+# cannot be embedded; and the group a product is in for an ingredient (ESCI-style).
+MatchingMode = Literal["meaning", "words"]
+MatchGroup = Literal["same_item", "works_instead", "looser_match"]
+
+
+class DroppedIngredient(BaseModel):
+    """An ingredient a partial plan (allow_partial) left out instead of
+    aborting: what it was, why, and what to try instead."""
+    ingredient: str
+    reason: str
+    suggestions: list[str] = Field(default_factory=list)
+
+
 class PlanLineItem(BaseModel):
+    """One PURCHASE. Recipe lines that resolve to the same product are one
+    purchase: `line_no` is the first of them, `also_lines` the rest,
+    `ingredient_name` names every one ("ground Sichuan peppercorn + Sichuan
+    peppercorn"), and `packs` is how many packs their summed need takes
+    (1 unless the need is known in the pack's unit and one pack is short)."""
     line_no: int
     ingredient_name: str
     product_id: int
     product_name: str
     product_description: str
-    price: float                       # the charged price (store offer when known)
+    price: float                       # the charged price: store offer x packs
     confidence: float
     reasoning: str
     model_used: str
@@ -295,6 +344,81 @@ class PlanLineItem(BaseModel):
     store_price: float | None = None
     # Provenance of this line, when origin evidence exists for it
     origin: OriginReceipt | None = None
+    match: MatchLevel = "exact"        # the loosest level among the lines it covers
+    also_lines: list[int] = Field(default_factory=list)
+    packs: int = 1
+    # The summed need of every line this purchase covers, in canonical units,
+    # when every one of them is known in the same unit; None otherwise (an
+    # unstated amount, or a teaspoon and a gram on one purchase).
+    need_qty: float | None = None
+    need_uom: Literal["g", "ml", "each"] | None = None
+    # How the lines were matched to products (matching/matcher.py): "meaning", or "words"
+    # when a name no seed knows could not be embedded; and the product's group for the first
+    # line (same_item | works_instead). None when not known (a re-priced plan).
+    matching: MatchingMode | None = None
+    group: MatchGroup | None = None
+
+
+# ─── Plan basis: what a plan was made from ───────────────────
+# Everything needed to re-price or rank a finished plan without re-running the
+# parse or the selector: its lines as planned, the products chosen, and the
+# constraints and location it was planned under. Read-only and recomputed
+# from the plan; whoever holds it (the hub, the browser's meal-plan draft)
+# sends it back, and pins are validated against it on the server.
+
+class BasisLine(BaseModel):
+    """One planned recipe line: the ingredient as planned (name, form, prep,
+    quantity and unit exactly as the parse or the reviewed recipe gave them),
+    how it matched the catalog, and the product chosen (None when the
+    selector chose nothing valid, or the product had no offer in range)."""
+    line_no: int
+    name: str
+    form: str | None = None
+    prep: str | None = None
+    quantity: float | None = None
+    unit: str | None = None
+    level: MatchLevel = "exact"
+    product_id: int | None = None
+    confidence: float | None = None
+    # The selector called its pick a substitution. A re-price has no
+    # selector reasoning to read, and the summary's substitution note must
+    # not vanish when the shopper changes another line.
+    substitution: bool = False
+
+
+class Pin(BaseModel):
+    """The shopper's own choice of product for one line."""
+    line_no: int
+    product_id: int
+
+
+class PlanBasis(BaseModel):
+    """`path`: library (a seeded recipe), nl (pasted text through the
+    parser) or spec (reviewed lines, planned with no parse). The left-out
+    lists and the interpretation are the plan's own. `origin_dropped` counts
+    the products the origin exclusion removed."""
+    v: Literal[1] = 1
+    path: Literal["library", "nl", "spec"]
+    recipe_slug: str
+    recipe_name: str
+    lines: list[BasisLine]
+    constraints: Constraints = Field(default_factory=Constraints)
+    lat: float | None = None
+    lon: float | None = None
+    max_km: float | None = None
+    exclude_origin: list[str] = Field(default_factory=list)
+    preference: list[str] = Field(default_factory=list)
+    origin_requested: bool = False
+    origin_dropped: int = 0
+    interpretation: list[str] = Field(default_factory=list)
+    not_stocked: list[DroppedIngredient] = Field(default_factory=list)
+    out_of_range: list[DroppedIngredient] = Field(default_factory=list)
+    skipped: list[DroppedIngredient] = Field(default_factory=list)
+    ingredient_count: int = 0
+    pins: list[Pin] = Field(default_factory=list)
+    # How many the recipe serves when it says (the plan's own servings), so a
+    # re-priced plan reports what the plan did.
+    servings: int | None = None
 
 
 class ShoppingPlan(BaseModel):
@@ -311,6 +435,12 @@ class ShoppingPlan(BaseModel):
     interpretation: list[str] = Field(default_factory=list)
     plan_trace: list[StepResult] = Field(default_factory=list)
     candidate_count: int = 0
+    # Every LLM call the plan made, phase by phase (both paths; empty in demo mode).
+    llm_calls: list[LlmCallTrace] = Field(default_factory=list)
+    # The Burr run that traced this plan, step by step (its app id in the Burr UI), and how long
+    # each of its steps took: [{step, ms, error}], in order.
+    burr_run: str = ""
+    pipeline: list[dict] = Field(default_factory=list)
     # Split-trip optimizer: stops-vs-cost frontier for the chosen basket
     trip_options: list[TripOption] = Field(default_factory=list)
     # Provenance of the basket as a whole. Only computed when the caller
@@ -321,6 +451,576 @@ class ShoppingPlan(BaseModel):
     # describing a basket as clean. "unverified" means coverage is below the
     # floor, not that anything excluded shipped.
     origin_status: str = "not_requested"
+    # Partial plans (allow_partial=True): ingredients left out instead of
+    # aborting. not_stocked = the catalog has no match at all (t1, NL path);
+    # out_of_range = stocked, but no offer within the distance/price/diet
+    # constraints (t2), or every candidate is evidenced as coming from an
+    # excluded country (either path; its suggestions name the removed
+    # products and the alternatives left). skipped = never planned, whatever allow_partial says:
+    # water and ice (never bought), lines past the 40-ingredient cap, and
+    # lines the selector returned no valid product for. total_cost,
+    # origin_coverage and trip_options cover the planned line_items only.
+    # ingredient_count is how many ingredients the recipe asked for, before
+    # anything was dropped: the lines covered by line_items (line_no plus
+    # also_lines) + not_stocked + out_of_range + skipped == ingredient_count.
+    not_stocked: list[DroppedIngredient] = Field(default_factory=list)
+    out_of_range: list[DroppedIngredient] = Field(default_factory=list)
+    skipped: list[DroppedIngredient] = Field(default_factory=list)
+    ingredient_count: int = 0
+    # How many the recipe serves, when it says; None when it does not (the
+    # planner still plans one batch, but never claims it serves 1).
+    servings: int | None = None
+    # What the plan was made from (see PlanBasis); set on every plan.
+    basis: PlanBasis | None = None
+
+
+# ─── Alternatives: the other products that could fill one planned line ──
+# alternatives.rank_alternatives builds these from a PlanBasis with no LLM call.
+# Every fact on a row comes from a database row or is stated as unknown: an
+# unchecked origin is "Origin not checked", never a country; no reviews is
+# rating None, never 0 stars; a pack in ml against a recipe in g is pack_fit
+# "unknown" with cost_for_need None, never a guessed conversion.
+
+AltTier = Literal["same", "other", "outside"]
+AltMatch = Literal["exact", "form", "generic", "related", "substitute", "outside"]
+AltGroup = Literal["same_item", "works_instead", "looser_match", "outside"]
+
+
+class Reason(BaseModel):
+    """One short reason on a row, built only from the row's facts. `code` is
+    match | pack | origin | trip | rating; `tone` says how to show it."""
+    code: str
+    text: str
+    tone: Literal["plus", "minus", "info", "unknown"]
+
+
+class AltOffer(BaseModel):
+    """The product's cheapest offer in range, priced per pack. `store` is ""
+    and `distance_km` None when the plan has no shopping location (the
+    catalog price, as such a plan charges). `on_trip`: the store is one the
+    cart's current trip already visits."""
+    store: str
+    price: float
+    distance_km: float | None = None
+    on_trip: bool = False
+
+
+class AltMove(BaseModel):
+    """Another purchase whose store the trip changes after the swap."""
+    product_id: int
+    product: str
+    from_store: str
+    to_store: str
+
+
+class AltBuy(BaseModel):
+    """Where a trip buys a product, and its price a pack there."""
+    store: str
+    price: float
+    distance_km: float | None = None
+
+
+class AltTrip(BaseModel):
+    """The cart's recommended trip re-optimised with this product on the line,
+    exactly as reprice_plan would: `total` is that trip's total (basket plus
+    travel), `delta` its difference from the cart's trip now (0.00 for the
+    cart's own pick). `buys_at` is the store that trip buys this product at
+    and its price a pack there, which is what the cart charges after the
+    swap; it can differ from the row's `offer`, the lowest price in range,
+    when stopping there costs more than it saves. `merges_with_line` names
+    another line this product already fills (the two become one purchase);
+    `moved_items` are the other purchases the new trip buys at a different
+    store."""
+    total: float
+    delta: float
+    stores: list[str]
+    stops_delta: int
+    buys_at: AltBuy | None = None
+    merges_with_line: int | None = None
+    moved_items: list[AltMove] = Field(default_factory=list)
+
+
+class AltOrigin(BaseModel):
+    """Where the product comes from, as the evidence says. `country` is set
+    only when the evidence resolved; `claim` is full (product of, grown in)
+    or processing (made, prepared or packaged in); `verbatim` quotes the
+    source; `demo` marks evidence from a demo label photo."""
+    status: str
+    country: str = ""
+    claim: Literal["full", "processing", ""] = ""
+    label: str
+    verbatim: str = ""
+    source: str = ""
+    demo: bool = False
+
+
+class AltRating(BaseModel):
+    """Average review rating and how many reviews; `synthetic` when reviews
+    are the seeded demo data (OFFERS_SYNTHETIC)."""
+    avg: float
+    count: int
+    synthetic: bool
+
+
+class RankedAlternative(BaseModel):
+    """One candidate product for the line. `current` marks the cart's own
+    pick. `group` is how the matcher sees it (Same item, Works instead, Looser
+    match); `tier` and `match` say the same in the words-era terms the console
+    already reads: matched by meaning, a Same item is tier same, match exact;
+    Works instead is other, substitute; a Looser match other, related.
+    Matched by words, `tier` is same (the ingredient, at the exact, form or
+    generic level), other (shares the head noun, a same-aisle substitute, or
+    matches the words but is another food from another aisle, as peanut butter
+    is for butter) or outside (the cart's pick when it matches none of the
+    line's words). `packs` is what
+    the cart would buy; `pack_fit` whether that covers the recipe's need;
+    `cost_for_need` the price of enough packs for the need (None when the
+    need or the pack size is unknown or in another unit), at the price a
+    pack where the row's trip buys it (`trip.buys_at`), or at `offer` when
+    there is no trip; `unit_price` likewise. `trip` is None when the plan
+    has no location or the trip effect was not worked out.
+    `rank_reason` says, in plain words, why the row sits below the one
+    above it."""
+    rank: int
+    current: bool = False
+    product_id: int
+    product: str
+    brand: str = ""
+    size: str = ""
+    tier: AltTier
+    match: AltMatch
+    offer: AltOffer
+    packs: int = 1
+    pack_fit: Literal["covers", "short", "unknown"]
+    cost_for_need: float | None = None
+    unit_price: float | None = None
+    unit_basis: str = ""                 # "100 g" | "100 ml" | "each" | ""
+    trip: AltTrip | None = None
+    origin: AltOrigin
+    rating: AltRating | None = None
+    says_organic: bool = False
+    reasons: list[Reason] = Field(default_factory=list)
+    rank_reason: str = ""
+    # Matching by meaning (matching/matcher.py): the row's group, ESCI-style, and its plain
+    # name ("Same item", "Works instead", "Looser match"; "Not a candidate" for the cart's pick
+    # when it is none); `score` the matcher's weighted sum (None when matched by words);
+    # `summary` the row's short reasons on one line ("butter · 454 g covers 80 g · no new
+    # allergens").
+    group: AltGroup = "same_item"
+    group_label: str = ""
+    score: float | None = None
+    summary: str = ""
+
+
+class HeldBack(BaseModel):
+    """A product that would fill the line but is evidenced as coming from a
+    country the plan excludes: shown with its evidence, never choosable."""
+    product_id: int
+    product: str
+    country: str
+    # ingredient_origin | manufactured_in | conflicting_evidence
+    field: str
+    verbatim: str = ""
+    source: str = ""
+    demo: bool = False
+
+
+class OutOfReach(BaseModel):
+    """A product that would fill the line but cannot be bought under the plan's rules, so it
+    is never choosable: `why` is stores_off (sold within the plan's distance only at stores
+    the shopper turned off: `stores`, nearest first), out_of_range (sold only beyond the
+    plan's distance: `nearest`, the nearest offer at a store that is on when one sells it) or
+    not_stocked (no store sells it)."""
+    product_id: int
+    product: str
+    why: Literal["stores_off", "out_of_range", "not_stocked"]
+    stores: list[str] = Field(default_factory=list)
+    nearest: AltBuy | None = None
+
+
+class Filtered(BaseModel):
+    """A product that would fill the line but fails a hard rule, so it is never choosable:
+    `why` is adds_tags (it contains something the plan's own product does not: `tags`),
+    diet (it contains something the plan's diet or avoid list leaves out, or its constraints
+    exclude: `tags`) or constraints (outside the plan's required tags or aisles). `text`
+    says it in plain words."""
+    product_id: int
+    product: str
+    group: MatchGroup
+    why: Literal["adds_tags", "diet", "constraints"]
+    tags: list[str] = Field(default_factory=list)
+    text: str
+
+
+class AltCounts(BaseModel):
+    """How many ranked rows have each property, for filter chips; and how many are in each
+    group."""
+    exact: int = 0
+    no_new_stop: int = 0
+    preferred_origin: int = 0
+    says_organic: int = 0
+    rated: int = 0
+    same_item: int = 0
+    works_instead: int = 0
+    looser_match: int = 0
+
+
+class AlternativeRanking(BaseModel):
+    """The ranked options for one planned line. `lines` are every recipe line
+    the cart's purchase covers (a swap applies to all of them; pin each).
+    `need` is the recipe's amount for those lines ("500 g"), "" when not
+    given, and then `need_note` says why ("Recipe gives no amount",
+    "Planned without amounts (a library recipe)"). `order` names the
+    ranking keys in order and `ranking_text` says them in plain words.
+    `items` holds the first `limit` rows plus the cart's pick wherever it
+    ranks; `total` counts every ranked row;
+    `unavailable` the products matching the line's words (any level, or its
+    head word) with no offer in range (or under the price cap); same-aisle
+    substitutes are looked up in range only, as the planner's are, so none
+    is counted there. `out_of_reach` says why for the first `limit` of them,
+    best match first, in the meal plan's Options only (TripEffect); a chat
+    cart's is empty. `data_note` labels synthetic offers and reviews. A
+    line the plan bought nothing for (the meal plan's Options for such a
+    line) has no row flagged `current`."""
+    line_no: int
+    lines: list[int]
+    ingredient: str
+    need: str = ""
+    need_note: str = ""
+    need_qty: float | None = None
+    need_uom: str | None = None
+    order: list[str]
+    ranking_text: str
+    items: list[RankedAlternative]
+    held_back: list[HeldBack] = Field(default_factory=list)
+    out_of_reach: list[OutOfReach] = Field(default_factory=list)
+    total: int
+    unavailable: int = 0
+    counts: AltCounts = Field(default_factory=AltCounts)
+    data_note: str = ""
+    # How the line was matched: "meaning" (matching/matcher.py), or "words" when its name is
+    # one no seed knows and the embedding model could not be reached; `matching_note` says it
+    # in plain words for the console. `filtered`: candidates a hard rule keeps out (Filtered).
+    matching: MatchingMode = "meaning"
+    matching_note: str = ""
+    filtered: list[Filtered] = Field(default_factory=list)
+
+
+# ─── Recipe documents: one schema for every recipe the shopper reviews ──
+# A library recipe, a demo starter, a pasted or imported ingredient list and
+# a dish the assistant wrote all reach the planner as a RecipeDoc. Its lines
+# are what the shopper saw and confirmed; recipe_doc.to_spec plans them as
+# given, with no parse. Only ingredient lines and links back (to the page,
+# and to its own preview image) are kept: a recipe's method text is never
+# stored or shown. Mirrored in the frontend's types.ts.
+
+MAX_DOC_LINES = 60
+# The bounds a RecipeDoc is validated against. POST /recipes/parse-lines keeps
+# its output inside them, so what it returns can be planned as it stands.
+MAX_LINE_NAME = 200
+MAX_SERVINGS = 100
+MAX_DOC_WARNINGS = 20
+# A line's quantity, in whatever unit it names. A million grams is a tonne, past any
+# recipe; the bound keeps every sum the planner makes of a doc's lines a finite number.
+MAX_LINE_QUANTITY = 1_000_000
+
+AmountBasis = Literal["stated_by_source", "demo_house_amounts", "parsed_from_your_paste",
+                      "transcribed_confirmed_by_you", "written_by_assistant"]
+
+
+class LineEvidence(BaseModel):
+    """Where a line's amount came from: a verbatim quote, a video timestamp."""
+    quote: str | None = Field(default=None, max_length=300)
+    at: str | None = Field(default=None, pattern=r"^\d{1,3}:\d{2}$")   # mm:ss
+
+
+class RecipeLine(BaseModel):
+    """One ingredient line. `text` is the line as the source wrote it; `name`,
+    `quantity` and `unit` are what gets planned. quantity None means the
+    source did not say; otherwise it is a finite number from 0 to
+    MAX_LINE_QUANTITY (JSON's 1e309 reads as infinity in Python and is
+    refused, not planned). A count is unit "each" ("2 eggs"), as parse-lines
+    writes it; unit "" means no unit, and the planner cannot measure a
+    quantity without one, so that line's need and pack count are unknown
+    rather than guessed. `unit` is planned as written, never rewritten.
+    `confirmed` is False only for a line transcribed from a video until the
+    shopper ticks it."""
+    line_no: int = Field(ge=1)
+    text: str = Field(max_length=300)
+    name: str = Field(min_length=1, max_length=MAX_LINE_NAME)
+    quantity: float | None = Field(default=None, ge=0, le=MAX_LINE_QUANTITY,
+                                   allow_inf_nan=False)
+    unit: str = Field(default="", max_length=40)
+    note: str = Field(default="", max_length=300)
+    evidence: LineEvidence | None = None
+    confirmed: bool = True
+    amount_basis: AmountBasis
+
+
+def _http_url(url: str) -> str:
+    """An absolute http(s) URL: a host, and no space or control character."""
+    parts = urlsplit(url)
+    if (parts.scheme.lower() not in ("http", "https") or not parts.hostname
+            or any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in url)):
+        raise ValueError("must be an absolute http(s) URL")
+    return url
+
+
+class RecipeSource(BaseModel):
+    """Where the recipe came from, for the link back and the labels. image_url links to the
+    page's own preview image (its schema.org Recipe image or og:image, a video's thumbnail),
+    which the console shows credited to the site and linked back, as a link preview does:
+    a link, never the image itself."""
+    kind: Literal["library", "starter", "pasted", "web", "youtube", "assistant"]
+    method: Literal["db", "seed", "paste", "jsonld", "microdata", "youtube_description",
+                    "youtube_linked_page", "gemini_video", "agent_written"]
+    url: str | None = Field(default=None, max_length=2000)
+    site: str | None = Field(default=None, max_length=200)
+    page_title: str | None = Field(default=None, max_length=300)
+    author: str | None = Field(default=None, max_length=200)
+    channel: str | None = Field(default=None, max_length=200)
+    retrieved_at: str | None = Field(default=None, max_length=40)
+    extractor: str | None = Field(default=None, max_length=100)
+    model: str | None = Field(default=None, max_length=100)
+    label: str | None = Field(default=None, max_length=100)
+    image_url: Annotated[str, Field(max_length=2000), AfterValidator(_http_url)] | None = None
+
+
+class RecipeDoc(BaseModel):
+    """A recipe as the shopper reviews it. `key` names it: 'lib:<slug>',
+    'starter:<key>', 'my:<uuid>', 'imp:<n>' (chat import) or 'asst:<n>'.
+    servings None means not stated, never silently 1; servings_basis says
+    whose number it is ('source', or 'your_setting' once the shopper
+    answered). Lines are numbered 1..n in order (a client that removes a
+    line renumbers the rest), so a plan's line_no is the doc's line_no."""
+    v: Literal[1] = 1
+    key: str = Field(min_length=1, max_length=100)
+    title: str = Field(min_length=1, max_length=200)
+    servings: int | None = Field(default=None, ge=1, le=MAX_SERVINGS)
+    servings_stated: bool = False
+    servings_basis: Literal["source", "your_setting"] | None = None
+    yield_text: str = Field(default="", max_length=200)
+    lines: list[RecipeLine] = Field(default_factory=list, max_length=MAX_DOC_LINES)
+    source: RecipeSource
+    warnings: list[str] = Field(default_factory=list, max_length=MAX_DOC_WARNINGS)
+
+    @model_validator(mode="after")
+    def _numbered_in_order(self) -> RecipeDoc:
+        got = [ln.line_no for ln in self.lines]
+        if got != list(range(1, len(got) + 1)):
+            raise ValueError(f"lines must be numbered 1..{len(got)} in order, got {got}")
+        return self
+
+
+# ─── Nutrition (P6) ───────────────────────────────────────────
+# Computed by code (nutrition.py) from a recipe's amounts and one reference food per
+# ingredient: published values for a generic food, never a product's label. A None amount
+# is unknown, never 0, and a total that misses a line is a lower bound ("at_least").
+
+NutrientKey = Literal["energy_kcal", "protein_g", "fat_g", "satfat_g", "carbohydrate_g",
+                      "fibre_g", "sugars_g", "sodium_mg"]
+LineStatus = Literal["counted", "no_quantity", "no_conversion", "no_reference", "excluded"]
+
+
+class NutrientTotal(BaseModel):
+    """One nutrient's total. amount None: nothing counted for it (unknown). complete: every
+    line in scope was counted and its reference food published this nutrient; otherwise
+    amount is a lower bound (status "at_least") and `gaps` names the lines it misses."""
+    amount: float | None
+    unit: str
+    status: Literal["complete", "at_least", "unknown"]
+    complete: bool
+    lines_counted: int
+    lines_total: int
+    gaps: list[str] = Field(default_factory=list)
+
+
+class NutritionLine(BaseModel):
+    """One recipe line's receipt. grams is the line's weight in the whole recipe (None when
+    it has none); values are for the meal's basis (per serving x portions, or the whole
+    recipe), only for the nutrients the reference food published (`absent` lists the rest).
+    conversion quotes how grams were reached; reason says why a line was not counted."""
+    line_no: int
+    ingredient: str
+    quantity: float | None
+    unit: str
+    grams: float | None
+    status: LineStatus
+    reason: str = ""
+    key: str
+    match_kind: Literal["generic", "close", "none"] | None = None
+    match_note: str = ""
+    ref_id: str | None = None
+    ref_description: str | None = None
+    state_note: str | None = None
+    source: str | None = None
+    conversion: str | None = None
+    values: dict[str, float] = Field(default_factory=dict)
+    absent: list[str] = Field(default_factory=list)
+    amount_basis: str | None = None
+
+
+class NutritionCoverage(BaseModel):
+    """How much of the meal is counted, by line count and by mass. mass_fraction is over the
+    lines whose weight is known (None when no line has one). meets_floor needs both at or
+    above `floor` (NUTRITION_MIN_COVERAGE)."""
+    lines_total: int
+    lines_counted: int
+    count_fraction: float | None
+    grams_weighed: float
+    grams_known: float
+    mass_fraction: float | None
+    lines_mass_unknown: int
+    floor: float
+    meets_floor: bool
+    note: str
+
+
+class MissingLine(BaseModel):
+    line_no: int
+    ingredient: str
+    reason: Literal["no_quantity", "no_conversion", "no_reference"]
+    detail: str
+
+
+class MealNutrition(BaseModel):
+    """Nutrition of one recipe, per serving (basis per_serving, x portions) or for the whole
+    recipe when it does not say how many it serves (per_recipe). amounts_basis lists where the
+    counted lines' amounts came from; demo_amounts is True when any is demo house amounts, and
+    every surface showing a number then shows the "demo amounts" badge."""
+    basis: Literal["per_serving", "per_recipe"]
+    servings: int | None
+    portions: float
+    totals: dict[str, NutrientTotal]
+    status: Literal["complete", "incomplete", "below_floor"]
+    coverage: NutritionCoverage
+    missing: list[MissingLine]
+    lines: list[NutritionLine]
+    source_ids: list[str]
+    amounts_basis: list[str]
+    demo_amounts: bool
+    note: str
+
+
+class NutritionSource(BaseModel):
+    source: str
+    name: str
+    publisher: str = ""
+    edition: str = ""
+    licence: str = ""
+    licence_url: str = ""
+    attribution: str = ""
+    url: str = ""
+    retrieved_at: str = ""
+
+
+class RecipeNutrition(BaseModel):
+    """GET /recipes/{slug}/nutrition and each item of GET /nutrition/recipes. nutrition None:
+    the reference tables are not deployed, and `note` says so. sources is filled on the
+    single-recipe endpoint; the list carries them once at the top."""
+    slug: str
+    name: str
+    servings: int | None
+    nutrition: MealNutrition | None
+    note: str = ""
+    sources: list[NutritionSource] = Field(default_factory=list)
+
+
+class NutritionRecipes(BaseModel):
+    """GET /nutrition/recipes: every library recipe per serving, and the sources once."""
+    sources: list[NutritionSource]
+    recipes: list[RecipeNutrition]
+    note: str
+
+
+Verdict = Literal["over", "within", "met", "short", "unknown"]
+
+
+class NutritionTarget(BaseModel):
+    """A daily target the shopper typed (source "you"), held in their browser and sent with
+    each request. A "health_canada_dv" label is accepted only for nutrients that have a
+    Health Canada Daily Value: never energy or protein, which have none."""
+    min: float | None = Field(default=None, ge=0)
+    max: float | None = Field(default=None, ge=0)
+    source: Literal["you", "health_canada_dv"] = "you"
+
+    @model_validator(mode="after")
+    def _a_bound(self) -> NutritionTarget:
+        if self.min is None and self.max is None:
+            raise ValueError("a target needs a min, a max or both")
+        if self.min is not None and self.max is not None and self.min > self.max:
+            raise ValueError("a target's min is above its max")
+        return self
+
+
+def _no_dv_for_energy_or_protein(targets: dict[str, NutritionTarget]
+                                 ) -> dict[str, NutritionTarget]:
+    for key, t in targets.items():
+        if t.source == "health_canada_dv" and key in ("energy_kcal", "protein_g"):
+            raise ValueError(f"{key}: Health Canada sets no Daily Value for it, so only a "
+                             "target you set yourself is accepted")
+    return targets
+
+
+NutritionTargets = Annotated[dict[NutrientKey, NutritionTarget],
+                             AfterValidator(_no_dv_for_energy_or_protein)]
+
+
+class TargetCheck(BaseModel):
+    """A verdict per bound, given only where the data proves it: 'over' and 'met' hold for a
+    lower bound; 'within' and 'short' need a complete total. Otherwise 'unknown'."""
+    amount: float | None
+    complete: bool
+    min: Verdict | None = None
+    max: Verdict | None = None
+
+
+class DayMeal(BaseModel):
+    """One meal of a day, per person (one portion)."""
+    meal_id: str
+    recipe_key: str
+    title: str
+    slot: str
+    basis: Literal["per_serving", "per_recipe"]
+    status: Literal["complete", "incomplete", "below_floor"]
+    totals: dict[str, NutrientTotal]
+    amounts_basis: list[str]
+    demo_amounts: bool
+
+
+class DayNutrition(BaseModel):
+    """What one person eats in a day: the sum of each planned meal's per-serving values.
+    complete only when every slot counted (meals_counted) has a meal and every meal is
+    complete; a meal whose servings are unknown adds nothing and keeps the day incomplete."""
+    date: dt.date | None = None
+    meals: list[DayMeal]
+    meals_counted: list[str]
+    all_meals_planned: bool
+    totals: dict[str, NutrientTotal]
+    complete: bool
+    amounts_basis: list[str]
+    demo_amounts: bool
+    note: str
+    targets: dict[str, TargetCheck] | None = None
+
+
+class PeriodTotal(BaseModel):
+    amount: float | None
+    complete: bool
+
+
+class PeriodNutrition(BaseModel):
+    """The plan's days together. The per-day average is over complete days only (None when
+    no day is complete); lower_bound_total sums every day's known amounts."""
+    days_total: int
+    days_complete: int
+    incomplete_days: list[dt.date]
+    per_day_average_over_complete_days: dict[str, float | None] | None
+    lower_bound_total: dict[str, PeriodTotal]
+    slots_counted: list[str]
+    amounts_basis: list[str]
+    demo_amounts: bool
+    note: str
 
 
 # ─── Weekly menu optimizer (5A) ───────────────────────────────
@@ -341,6 +1041,10 @@ class DayPlan(BaseModel):
     recipe_name: str
     line_items: list[PlanLineItem]
     day_cost: float                    # this dinner priced standalone
+    # Per serving of this dinner, from the recipe's amounts (never the packs bought); None
+    # when the nutrition tables are not deployed. day_totals counts dinner only.
+    nutrition: MealNutrition | None = None
+    day_totals: DayNutrition | None = None
 
 
 class WeekPlan(BaseModel):
@@ -356,3 +1060,4 @@ class WeekPlan(BaseModel):
     origin_coverage: OriginCoverage | None = None
     origin_status: str = "not_requested"
     total_llm_cost_usd: float = 0.0
+    nutrition_sources: list[NutritionSource] = Field(default_factory=list)

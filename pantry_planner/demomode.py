@@ -14,33 +14,35 @@ code that runs identically in both modes. Responses are labeled
 model_used="demo-deterministic" and the /health endpoint reports
 demo_mode so the UI can say so honestly.
 
-The stand-ins are deliberately simple (regex recipe parse; token-overlap
-+ price product ranking): good enough to drive the demo, visibly not
-the point of the project.
+The stand-ins are deliberately simple (regex recipe parse; the product
+choice takes the matcher's first candidate, or, for a line matched by words,
+the token-overlap + price ranking): good enough to drive the demo, visibly
+not the point of the project.
 """
 from __future__ import annotations
 
 import re
 
 from .models import Product, RecipeIngredient, Selection, SelectorResult
+from .nlsearch import lineparse
 from .nlsearch.schemas import Constraints, IngredientSpec, ParsedInput, RecipeSpec
-from .nlsearch.units import tokens
+from .nlsearch.units import semantic_key
 
-_QTY = re.compile(
-    r"^(\d+(?:\.\d+)?)\s*(g|kg|ml|l|lb|oz|cups?|cans?|cloves?|dozen)?\s+",
-    re.IGNORECASE)
-_FORMS = {"canned", "frozen", "dried", "ground", "smoked", "pickled", "powdered"}
 _TAGS = ("dairy", "gluten", "meat", "nuts", "egg", "soy")
 
 
 def parse_recipe(text_input: str, *, model: str | None = None) -> ParsedInput:
     """Regex recipe parse: title, servings, '- qty unit name' ingredient
     lines, and budget / distance / dietary constraints from a Notes line.
-    Same failure contract as the real parser: empty parse, never raises."""
+    Same failure contract as the real parser: empty parse, never raises.
+
+    Each line is read by nlsearch.lineparse.parse_line, which is consistent
+    with the live parser on what to buy (see there); this function decides
+    which lines are ingredient lines and reads the rest of the recipe."""
     lines = [ln.strip() for ln in text_input.splitlines() if ln.strip()]
     title = lines[0].split("(")[0].strip() if lines else "Pasted recipe"
-    m = re.search(r"serves\s+(\d+)", text_input, re.IGNORECASE)
-    servings = int(m.group(1)) if m else 1
+    stated = lineparse.parse_servings(text_input)
+    servings = stated if stated is not None else 1
 
     ingredients: list[IngredientSpec] = []
     notes = ""
@@ -50,21 +52,9 @@ def parse_recipe(text_input: str, *, model: str | None = None) -> ParsedInput:
             continue
         if not ln.startswith(("-", "*", "•")):
             continue
-        item = ln.lstrip("-*• ").strip()
-        qty = unit = None
-        if qm := _QTY.match(item):
-            qty = float(qm.group(1))
-            unit = (qm.group(2) or "each").lower()
-            item = item[qm.end():]
-        words = [w for w in item.lower().split() if w not in {"of", "fresh"}]
-        form = None
-        if words and words[0] in _FORMS:
-            form = words.pop(0)
-        if unit and unit.startswith("can"):
-            form, unit = "canned", "can"
-        name = " ".join(words).strip() or item
-        ingredients.append(IngredientSpec(name=name, form=form,
-                                          quantity=qty, unit=unit))
+        p = lineparse.parse_line(ln)
+        ingredients.append(IngredientSpec(name=p.name, form=p.form, quantity=p.quantity,
+                                          unit=p.unit, prep=p.prep))
 
     cons = Constraints()
     scope = notes or text_input
@@ -76,6 +66,7 @@ def parse_recipe(text_input: str, *, model: str | None = None) -> ParsedInput:
         if re.search(rf"no {tag}|{tag}[- ]free", scope, re.IGNORECASE):
             cons.exclude_tags.append(tag)
     return ParsedInput(recipe=RecipeSpec(title=title, servings=servings,
+                                         servings_stated=stated is not None,
                                          ingredients=ingredients),
                        constraints=cons, cost_usd=0.0, latency_ms=0)
 
@@ -90,31 +81,72 @@ def select_products(ingredients: list[RecipeIngredient],
                     enable_thinking: bool = False,
                     constraints: dict | None = None,
                     origins_by_id: dict | None = None,
-                    preference: list[str] | None = None) -> SelectorResult:
-    """Token-overlap, then origin preference, then offer price; direct
-    matches before t4 substitutes. Confidence is fixed at 0.9 — above the
-    cascade threshold, so demo mode never triggers a (would-be) escalation.
+                    preference: list[str] | None = None,
+                    substitutes: dict[int, list[int]] | None = None,
+                    order: dict[int, list[tuple[int, str]]] | None = None) -> SelectorResult:
+    """A line matched by meaning (`order`: line_no -> (product id, group) in the
+    matcher's order, matching/matcher.rank_pool) takes the first product of its
+    order that it is offered: the same item before what works instead, then
+    the matcher's score (relevance, form and variant, pack fit, value, origin
+    preference). A pick that only works instead says "substitution".
 
-    Preference applies strictly AFTER semantic match (token overlap), the
+    Any other line (matched by words): token-overlap, then "fresh" when the
+    ingredient says it, then head noun, then origin preference, then offer
+    price; direct matches before t4 substitutes.
+
+    Confidence is fixed at 0.9
+    — above the cascade threshold, so demo mode never triggers a (would-be)
+    escalation.
+
+    A t4 substitute is a substitute for the line whose thin pool fetched it,
+    not for every line: `substitutes` (line_no -> product ids, the NL and
+    spec paths) keeps each line's own substitutes out of that line's choice
+    only, so Fresh Ginger, fetched as a same-aisle substitute for garlic, is
+    still the pick for ginger. Without it (the library path, where nothing
+    is a substitute) the products' own flags are read.
+
+    The head-noun key breaks overlap ties the way a shopper would: for
+    "flour", All-Purpose Flour (about flour) beats Flour Tortillas (about
+    tortillas, though cheaper); for "mustard", Dijon Mustard beats Black
+    Mustard Seeds. Preference applies strictly AFTER semantic match, the
     same priority the live selector prompt gives it: it only breaks ties
     between equally-good matches, never trades correctness for origin."""
     origins_by_id = origins_by_id or {}
     preference = [c for c in (preference or []) if c.strip()]
     selections: list[Selection] = []
+    offered = {p.id for p in products}
     for ing in ingredients:
-        toks = set(tokens(ing.name))
-        pool = [p for p in products if not p.substitute] or products
+        ranked = (order or {}).get(ing.line_no)
+        if ranked is not None:
+            pick_group = next(((pid, g) for pid, g in ranked if pid in offered), None)
+            if pick_group is None:
+                continue
+            pid, group = pick_group
+            why = ("demo mode: matched by meaning, the same item the matcher ranks first"
+                   if group == "same_item" else
+                   "demo mode: matched by meaning; no same item is offered, so a "
+                   "substitution: the product that works instead the matcher ranks first")
+            selections.append(Selection(line_no=ing.line_no, product_id=pid, confidence=0.9,
+                                        reasoning=why))
+            continue
+        if substitutes is None:
+            pool = [p for p in products if not p.substitute] or products
+        else:
+            subs = set(substitutes.get(ing.line_no, ()))
+            pool = [p for p in products if p.id not in subs] or products
         if not pool:
             continue
+        # semantic_key is the ranking the alternatives share: overlap, then
+        # "fresh", then head noun.
         pick = min(pool, key=lambda p: (
-            -len(toks & set(tokens(f"{p.name} {p.description}"))),
+            *semantic_key(ing.name, p),
             _preference_rank(origins_by_id.get(p.id), preference),
             p.store_price if p.store_price is not None else p.price,
             p.id))
-        why = "demo mode: highest token overlap, then cheapest offer"
+        why = "demo mode: highest token overlap, then head noun, then cheapest offer"
         if preference:
-            why = ("demo mode: highest token overlap, then origin preference "
-                   f"({', '.join(preference)}), then cheapest offer")
+            why = ("demo mode: highest token overlap, then head noun, then origin "
+                   f"preference ({', '.join(preference)}), then cheapest offer")
         selections.append(Selection(
             line_no=ing.line_no, product_id=pick.id, confidence=0.9,
             reasoning=why))

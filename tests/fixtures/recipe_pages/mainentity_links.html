@@ -1,0 +1,32 @@
+<!doctype html>
+<!-- SYNTHETIC test page, written for pantry-api's extractor tests. It imitates
+     a page whose JSON-LD WebPage carries the recipe as its mainEntity, with an
+     unrelated VideoObject block first, a sponsored link inside one ingredient line,
+     empty lines, a numeric yield and an encoded apostrophe in the name. No text is
+     copied from any site. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fried rice for two - Example Weeknight</title>
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "VideoObject", "name": "How to fry rice",
+ "contentUrl": "https://example.net/video/fried-rice.mp4", "uploadDate": "2026-03-01"}
+</script>
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "WebPage", "url": "https://example.net/fried-rice",
+ "mainEntity": {"@type": ["Recipe"], "name": "Mia&#039;s Gochujang Fried Rice",
+   "recipeYield": 2,
+   "recipeIngredient": ["2 cups cooked rice, preferably day-old",
+     "1 tablespoon <a href=\"https://example.net/shop/gochujang\" rel=\"sponsored\">gochujang</a>",
+     "", "   ",
+     "2 eggs",
+     "1 green onion, sliced"]}}
+</script>
+</head>
+<body>
+<main>
+<h1>Fried rice for two</h1>
+<p>Leftover rice fries best.</p>
+</main>
+</body>
+</html>

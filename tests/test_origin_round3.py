@@ -61,11 +61,11 @@ def _ids_named(fragment):
 
 
 def _pools(recipe):
+    """The candidates the library plan reads: by meaning, the same item (direct) and what
+    works instead (relaxed)."""
     from pantry_planner import flow
-    from pantry_planner.config import settings
 
-    cfg = settings()
-    return flow._ingredient_pools(recipe, cfg.default_lat, cfg.default_lon)
+    return flow.ingredient_pools(recipe)[0]
 
 
 # ─── B: relaxed matches are alternatives, never candidates ────────────

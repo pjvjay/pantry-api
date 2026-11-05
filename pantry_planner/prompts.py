@@ -15,7 +15,12 @@ the rule above it. NEVER let a lower rule override a higher one:
 
 1. SEMANTIC MATCH DOMINATES. Pick the product that best represents what
    the recipe is asking for. Read descriptions carefully — the name
-   alone can be misleading.
+   alone can be misleading. The ingredient name keeps the words the
+   recipe wrote that decide which product to buy (boneless, skinless,
+   ground, whole, unsalted, smoked, ...): a product that has them is the
+   match, and one that contradicts them (bone-in for "boneless", whole
+   for "ground") is a substitution — choose it only when nothing else
+   fits, and say so in the reasoning.
 
 2. TIE-BREAK BY COST — but ONLY between products that are already
    equally-good semantic matches (rule 1). Do NOT prefer a cheaper but

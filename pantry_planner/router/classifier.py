@@ -16,9 +16,8 @@ import json
 import time
 from collections import Counter
 
-from anthropic import Anthropic
-
 from ..config import estimate_cost_usd, settings
+from ..llm import forced_tool_call
 from ..models import PhaseBMetrics, Product, Recipe
 from ..prompts import CLASSIFIER_SYSTEM, CLASSIFIER_TOOL
 
@@ -46,13 +45,12 @@ def _catalog_summary(products: list[Product]) -> dict:
 
 
 def call_classifier(recipe: Recipe, products: list[Product]) -> PhaseBMetrics:
-    """One Haiku call. Meta-cognitive prompt. Structured output via tool use."""
+    """One CLASSIFIER_MODEL call (Haiku by default; a "gemini:<model>" spec
+    routes to Gemini). Meta-cognitive prompt. Structured output via tool use."""
     cfg = settings()
     if cfg.demo_mode:                       # public demo: fixed triage, no call
         from .. import demomode
         return PhaseBMetrics(**demomode.triage())
-    client = Anthropic(api_key=cfg.anthropic_api_key)
-
     user_msg = json.dumps({
         "recipe": {
             "name": recipe.name,
@@ -65,21 +63,16 @@ def call_classifier(recipe: Recipe, products: list[Product]) -> PhaseBMetrics:
     }, indent=2)
 
     t0 = time.perf_counter()
-    resp = client.messages.create(
+    reply = forced_tool_call(
         model=cfg.classifier_model,
         max_tokens=1024,
         system=CLASSIFIER_SYSTEM,
-        tools=[CLASSIFIER_TOOL],
-        tool_choice={"type": "tool", "name": "submit_triage"},
+        tool=CLASSIFIER_TOOL,
         messages=[{"role": "user", "content": user_msg}],
     )
     latency_ms = int((time.perf_counter() - t0) * 1000)
 
-    tool_block = next((b for b in resp.content if b.type == "tool_use"), None)
-    if tool_block is None:
-        raise ValueError(f"Classifier didn't call the tool. Response: {resp.content!r}")
-
-    args = tool_block.input
+    args = reply.input
     return PhaseBMetrics(
         match_confidence_1_to_10=args["match_confidence_1_to_10"],
         cost_complexity_1_to_10=args["cost_complexity_1_to_10"],
@@ -87,7 +80,7 @@ def call_classifier(recipe: Recipe, products: list[Product]) -> PhaseBMetrics:
         confidence_in_own_estimate_1_to_10=args["confidence_in_own_estimate_1_to_10"],
         reasoning=args["reasoning"],
         cost_usd=estimate_cost_usd(
-            cfg.classifier_model, resp.usage.input_tokens, resp.usage.output_tokens
+            cfg.classifier_model, reply.input_tokens, reply.output_tokens
         ),
         latency_ms=latency_ms,
     )

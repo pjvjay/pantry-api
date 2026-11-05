@@ -1,0 +1,3672 @@
+{
+  "v": 1,
+  "about": "Nutrients per 100 g of one reference food per recipe ingredient, from Health Canada's Canadian Nutrient File. These are reference values for a generic food, not any product's label. A nutrient missing from per_100g (listed in `absent`) was not published for that food and is unknown, never 0.",
+  "sources": [
+    {
+      "source": "cnf-api",
+      "name": "Canadian Nutrient File (API)",
+      "publisher": "Health Canada",
+      "edition": "Not stated by the API documentation. Health Canada's CNF online search says it serves the 2015 CNF; that the API serves the same edition is assumed, not verified. These are not the CNF 2026 files.",
+      "licence": "Open Government Licence - Canada is stated on the CNF 2026 dataset record (open.canada.ca); the API documentation states no licence, so its coverage of the API data is not verified.",
+      "licence_url": "https://open.canada.ca/en/open-government-licence-canada",
+      "attribution": "Contains information licensed under the Open Government Licence – Canada.",
+      "url": "https://produits-sante.canada.ca/api/documentation/cnf-documentation-en.html",
+      "api_base": "https://food-nutrition.canada.ca/api/canadian-nutrient-file",
+      "retrieved_at": "2026-10-08"
+    }
+  ],
+  "nutrients": {
+    "energy_kcal": {
+      "cnf_nutrient_name_id": 208
+    },
+    "protein_g": {
+      "cnf_nutrient_name_id": 203
+    },
+    "fat_g": {
+      "cnf_nutrient_name_id": 204
+    },
+    "satfat_g": {
+      "cnf_nutrient_name_id": 606
+    },
+    "carbohydrate_g": {
+      "cnf_nutrient_name_id": 205
+    },
+    "fibre_g": {
+      "cnf_nutrient_name_id": 291
+    },
+    "sugars_g": {
+      "cnf_nutrient_name_id": 269
+    },
+    "sodium_mg": {
+      "cnf_nutrient_name_id": 307
+    }
+  },
+  "foods": [
+    {
+      "ref_id": "cnf-api:17",
+      "source": "cnf-api",
+      "food_code": 17,
+      "description": "Butter oil, anhydrous",
+      "state_note": "anhydrous butter oil; reference for ghee",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=17&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 876.0,
+        "protein_g": 0.28,
+        "fat_g": 99.48,
+        "satfat_g": 61.924,
+        "carbohydrate_g": 0.0,
+        "fibre_g": 0.0,
+        "sugars_g": 0.0,
+        "sodium_mg": 2.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 12,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:110",
+      "source": "cnf-api",
+      "food_code": 110,
+      "description": "Cheese, mozzarella, (52% water, 22.5% M.F.)",
+      "state_note": "mozzarella, 52% water, 22.5% M.F.",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=110&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 300.0,
+        "protein_g": 22.17,
+        "fat_g": 22.35,
+        "satfat_g": 13.152,
+        "carbohydrate_g": 2.19,
+        "fibre_g": 0.0,
+        "sugars_g": 1.03,
+        "sodium_mg": 627.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 6
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 6
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 6
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:113",
+      "source": "cnf-api",
+      "food_code": 113,
+      "description": "Milk, fluid, whole, pasteurized, homogenized, 3.25% M.F.",
+      "state_note": "whole milk, 3.25% M.F.",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=113&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 61.0,
+        "protein_g": 3.15,
+        "fat_g": 3.25,
+        "satfat_g": 1.865,
+        "carbohydrate_g": 4.8,
+        "fibre_g": 0.0,
+        "sugars_g": 5.05,
+        "sodium_mg": 43.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 27
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 42
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:118",
+      "source": "cnf-api",
+      "food_code": 118,
+      "description": "Butter, regular",
+      "state_note": "butter; CNF does not say salted or unsalted",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=118&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 717.0,
+        "protein_g": 0.85,
+        "fat_g": 81.11,
+        "satfat_g": 51.368,
+        "carbohydrate_g": 0.06,
+        "fibre_g": 0.0,
+        "sugars_g": 0.06,
+        "sodium_mg": 643.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 16
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 580
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:119",
+      "source": "cnf-api",
+      "food_code": 119,
+      "description": "Cheese, cheddar",
+      "state_note": "cheddar",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=119&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 406.0,
+        "protein_g": 24.04,
+        "fat_g": 33.82,
+        "satfat_g": 19.368,
+        "carbohydrate_g": 1.33,
+        "fibre_g": 0.0,
+        "sugars_g": 0.28,
+        "sodium_mg": 644.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 24
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 18
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 4
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 18
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:125",
+      "source": "cnf-api",
+      "food_code": 125,
+      "description": "Egg, chicken, whole, fresh or frozen, raw",
+      "state_note": "whole egg, raw",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=125&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 145.0,
+        "protein_g": 11.7995,
+        "fat_g": 10.012,
+        "satfat_g": 3.0429,
+        "carbohydrate_g": 0.9812,
+        "fibre_g": 0.0,
+        "sugars_g": 0.77,
+        "sodium_mg": 125.4555
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 2,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 7,
+          "number_observation": 15
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 7,
+          "number_observation": 15
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 7,
+          "number_observation": 15
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 2,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 12,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 5,
+          "number_observation": 2
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 7,
+          "number_observation": 15
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:174",
+      "source": "cnf-api",
+      "food_code": 174,
+      "description": "Spices, cardamom, ground",
+      "state_note": "ground spice",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=174&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 312.0,
+        "protein_g": 10.76,
+        "fat_g": 6.7,
+        "satfat_g": 0.68,
+        "carbohydrate_g": 68.47,
+        "fibre_g": 28.0,
+        "sodium_mg": 18.0
+      },
+      "absent": [
+        "sugars_g"
+      ],
+      "atwater_note": "Published energy 312 kcal is outside the Atwater check against 4 x protein + 9 x fat + 4 x carbohydrate = 377.2 kcal. This food has 28 g fibre per 100 g; counting that fibre at 2 kcal/g instead of 4 gives 321.2 kcal, within the check. The published value is kept as it is.",
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 28
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 40
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 3
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:177",
+      "source": "cnf-api",
+      "food_code": 177,
+      "description": "Spices, chili powder",
+      "state_note": "ground chili powder; contents not stated by CNF",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=177&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 282.0,
+        "protein_g": 13.46,
+        "fat_g": 14.28,
+        "satfat_g": 2.462,
+        "carbohydrate_g": 49.7,
+        "fibre_g": 34.8,
+        "sugars_g": 7.19,
+        "sodium_mg": 2867.0
+      },
+      "absent": [],
+      "atwater_note": "Published energy 282 kcal is outside the Atwater check against 4 x protein + 9 x fat + 4 x carbohydrate = 381.2 kcal. This food has 34.8 g fibre per 100 g; counting that fibre at 2 kcal/g instead of 4 gives 311.6 kcal, within the check. The published value is kept as it is.",
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:195",
+      "source": "cnf-api",
+      "food_code": 195,
+      "description": "Spices, oregano, ground",
+      "state_note": "ground dried herb",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=195&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 265.0,
+        "protein_g": 9.0,
+        "fat_g": 4.28,
+        "satfat_g": 1.551,
+        "carbohydrate_g": 68.92,
+        "fibre_g": 42.5,
+        "sugars_g": 4.09,
+        "sodium_mg": 25.0
+      },
+      "absent": [],
+      "atwater_note": "Published energy 265 kcal is outside the Atwater check against 4 x protein + 9 x fat + 4 x carbohydrate = 350.2 kcal. This food has 42.5 g fibre per 100 g; counting that fibre at 2 kcal/g instead of 4 gives 265.2 kcal, within the check. The published value is kept as it is.",
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 3
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 3
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 3
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 3
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:211",
+      "source": "cnf-api",
+      "food_code": 211,
+      "description": "Spices, turmeric, ground",
+      "state_note": "ground spice",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=211&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 312.0,
+        "protein_g": 9.68,
+        "fat_g": 3.25,
+        "satfat_g": 1.838,
+        "carbohydrate_g": 67.14,
+        "fibre_g": 22.7,
+        "sugars_g": 3.21,
+        "sodium_mg": 27.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:214",
+      "source": "cnf-api",
+      "food_code": 214,
+      "description": "Salt, table",
+      "state_note": "table salt",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=214&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 0.0,
+        "protein_g": 0.0,
+        "fat_g": 0.0,
+        "satfat_g": 0.0,
+        "carbohydrate_g": 0.0,
+        "fibre_g": 0.0,
+        "sugars_g": 0.0,
+        "sodium_mg": 38758.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 12,
+          "number_observation": 1
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 12,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 12,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:422",
+      "source": "cnf-api",
+      "food_code": 422,
+      "description": "Vegetable oil, olive",
+      "state_note": "oil",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=422&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 885.0,
+        "protein_g": 0.0,
+        "fat_g": 100.0,
+        "satfat_g": 13.808,
+        "carbohydrate_g": 0.0,
+        "fibre_g": 0.0,
+        "sugars_g": 0.0,
+        "sodium_mg": 2.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 4
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 12,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 12,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 4
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:424",
+      "source": "cnf-api",
+      "food_code": 424,
+      "description": "Vegetable oil, sesame",
+      "state_note": "oil",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=424&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 885.0,
+        "protein_g": 0.0,
+        "fat_g": 100.0,
+        "satfat_g": 14.2,
+        "carbohydrate_g": 0.0,
+        "fibre_g": 0.0,
+        "sugars_g": 0.0,
+        "sodium_mg": 0.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 12,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 12,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:451",
+      "source": "cnf-api",
+      "food_code": 451,
+      "description": "Vegetable oil, canola",
+      "state_note": "oil",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=451&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 885.0,
+        "protein_g": 0.0,
+        "fat_g": 100.0,
+        "satfat_g": 7.365,
+        "carbohydrate_g": 0.0,
+        "fibre_g": 0.0,
+        "sugars_g": 0.0,
+        "sodium_mg": 0.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 4
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 8
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 12,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 12,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:841",
+      "source": "cnf-api",
+      "food_code": 841,
+      "description": "Chicken, broiler, breast, skinless, boneless, meat, raw",
+      "state_note": "raw, meat only (boneless, skinless)",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=841&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 120.0,
+        "protein_g": 22.5,
+        "fat_g": 2.62,
+        "satfat_g": 0.563,
+        "carbohydrate_g": 0.0,
+        "fibre_g": 0.0,
+        "sugars_g": 0.0,
+        "sodium_mg": 45.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 6
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 6
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 6
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:853",
+      "source": "cnf-api",
+      "food_code": 853,
+      "description": "Chicken, broiler, thigh, meat, raw",
+      "state_note": "raw, meat only (no bone, no skin)",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=853&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 121.0,
+        "protein_g": 19.66,
+        "fat_g": 4.12,
+        "satfat_g": 1.097,
+        "carbohydrate_g": 0.0,
+        "fibre_g": 0.0,
+        "sugars_g": 0.0,
+        "sodium_mg": 95.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 7
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 7
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 6
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:1603",
+      "source": "cnf-api",
+      "food_code": 1603,
+      "description": "Mango, raw",
+      "state_note": "raw fruit flesh",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=1603&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 60.0,
+        "protein_g": 0.82,
+        "fat_g": 0.38,
+        "satfat_g": 0.092,
+        "carbohydrate_g": 14.98,
+        "fibre_g": 1.6,
+        "sugars_g": 13.66,
+        "sodium_mg": 1.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 7
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 7
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 9
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 8
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:2067",
+      "source": "cnf-api",
+      "food_code": 2067,
+      "description": "Coriander (cilantro), raw",
+      "state_note": "raw leaves",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=2067&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 23.0,
+        "protein_g": 2.13,
+        "fat_g": 0.52,
+        "satfat_g": 0.014,
+        "carbohydrate_g": 3.67,
+        "fibre_g": 2.8,
+        "sugars_g": 0.87,
+        "sodium_mg": 46.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 3
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 3
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 2
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 3
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:2091",
+      "source": "cnf-api",
+      "food_code": 2091,
+      "description": "Ginger root, raw",
+      "state_note": "raw root",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=2091&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 80.0,
+        "protein_g": 1.82,
+        "fat_g": 0.75,
+        "satfat_g": 0.203,
+        "carbohydrate_g": 17.77,
+        "fibre_g": 2.0,
+        "sugars_g": 1.7,
+        "sodium_mg": 13.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 5
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 3
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 2
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:2144",
+      "source": "cnf-api",
+      "food_code": 2144,
+      "description": "Onion, spring (green) or scallion (includes tops and bulb), raw",
+      "state_note": "raw, tops and bulb",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=2144&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 32.0,
+        "protein_g": 1.83,
+        "fat_g": 0.19,
+        "satfat_g": 0.032,
+        "carbohydrate_g": 7.34,
+        "fibre_g": 2.6,
+        "sugars_g": 2.33,
+        "sodium_mg": 16.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 3
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 3
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 12
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:2259",
+      "source": "cnf-api",
+      "food_code": 2259,
+      "description": "Tomato products, canned, puree, no salt added",
+      "state_note": "canned purée, no salt added",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=2259&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 38.0,
+        "protein_g": 1.65,
+        "fat_g": 0.21,
+        "satfat_g": 0.029,
+        "carbohydrate_g": 8.98,
+        "fibre_g": 1.9,
+        "sugars_g": 4.83,
+        "sodium_mg": 28.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 36
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 36
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 33
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 32
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:2322",
+      "source": "cnf-api",
+      "food_code": 2322,
+      "description": "Pepper, hot chili, red or green, raw",
+      "state_note": "raw",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=2322&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 40.0,
+        "protein_g": 2.0,
+        "fat_g": 0.2,
+        "satfat_g": 0.021,
+        "carbohydrate_g": 9.46,
+        "fibre_g": 1.5,
+        "sugars_g": 5.1,
+        "sodium_mg": 7.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 2
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 2
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:2374",
+      "source": "cnf-api",
+      "food_code": 2374,
+      "description": "Broccoli, raw",
+      "state_note": "raw",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=2374&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 34.0,
+        "protein_g": 2.82,
+        "fat_g": 0.37,
+        "satfat_g": 0.039,
+        "carbohydrate_g": 6.64,
+        "fibre_g": 2.4,
+        "sugars_g": 1.7,
+        "sodium_mg": 33.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 23
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 29
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 3,
+          "number_observation": 20
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 42
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:2380",
+      "source": "cnf-api",
+      "food_code": 2380,
+      "description": "Carrot, raw",
+      "state_note": "raw",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=2380&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 41.0,
+        "protein_g": 0.93,
+        "fat_g": 0.24,
+        "satfat_g": 0.037,
+        "carbohydrate_g": 9.58,
+        "fibre_g": 2.44,
+        "sugars_g": 4.74,
+        "sodium_mg": 69.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 19
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 26
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 3,
+          "number_observation": 20
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 81
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:2394",
+      "source": "cnf-api",
+      "food_code": 2394,
+      "description": "Garlic, raw",
+      "state_note": "raw cloves",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=2394&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 149.0,
+        "protein_g": 6.36,
+        "fat_g": 0.5,
+        "satfat_g": 0.089,
+        "carbohydrate_g": 33.06,
+        "fibre_g": 2.1,
+        "sugars_g": 1.0,
+        "sodium_mg": 17.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 8
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 8
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:2401",
+      "source": "cnf-api",
+      "food_code": 2401,
+      "description": "Onion, raw",
+      "state_note": "raw",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=2401&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 40.0,
+        "protein_g": 1.1,
+        "fat_g": 0.1,
+        "satfat_g": 0.042,
+        "carbohydrate_g": 9.34,
+        "fibre_g": 1.7,
+        "sugars_g": 4.24,
+        "sodium_mg": 4.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 25
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 22
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 10
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 81
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:2462",
+      "source": "cnf-api",
+      "food_code": 2462,
+      "description": "Tomato, red, ripe, canned, whole",
+      "state_note": "canned whole tomatoes",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=2462&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 16.0,
+        "protein_g": 0.79,
+        "fat_g": 0.25,
+        "satfat_g": 0.034,
+        "carbohydrate_g": 3.47,
+        "fibre_g": 0.78,
+        "sugars_g": 2.55,
+        "sodium_mg": 115.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 18
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 18
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 3,
+          "number_observation": 8
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 9
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 18
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:2690",
+      "source": "cnf-api",
+      "food_code": 2690,
+      "description": "Beef, ground, medium, raw",
+      "state_note": "raw, medium ground beef",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=2690&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 226.0,
+        "protein_g": 18.9,
+        "fat_g": 16.1,
+        "satfat_g": 6.67,
+        "carbohydrate_g": 0.0,
+        "fibre_g": 0.0,
+        "sugars_g": 0.0,
+        "sodium_mg": 58.975
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 2,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 7,
+          "number_observation": 4
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 7,
+          "number_observation": 4
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 2,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 12,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 7,
+          "number_observation": 4
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:2933",
+      "source": "cnf-api",
+      "food_code": 2933,
+      "description": "Water, municipal",
+      "state_note": "municipal tap water",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=2933&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 0.0,
+        "protein_g": 0.0,
+        "fat_g": 0.0,
+        "satfat_g": 0.0,
+        "carbohydrate_g": 0.0,
+        "fibre_g": 0.0,
+        "sugars_g": 0.0,
+        "sodium_mg": 3.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 12,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 12,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 12,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 236
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:3403",
+      "source": "cnf-api",
+      "food_code": 3403,
+      "description": "Soy sauce (made with soy and wheat), shoyu, regular",
+      "state_note": "regular soy sauce",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=3403&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 53.0,
+        "protein_g": 8.14,
+        "fat_g": 0.57,
+        "satfat_g": 0.073,
+        "carbohydrate_g": 4.93,
+        "fibre_g": 0.56,
+        "sugars_g": 0.4,
+        "sodium_mg": 5493.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 6
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 6
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 3,
+          "number_observation": 8
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 6
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:4008",
+      "source": "cnf-api",
+      "food_code": 4008,
+      "description": "Leavening agent, yeast, baker's, active, dry",
+      "state_note": "active dry yeast",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=4008&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 325.0,
+        "protein_g": 40.44,
+        "fat_g": 7.61,
+        "satfat_g": 1.001,
+        "carbohydrate_g": 41.22,
+        "fibre_g": 26.9,
+        "sugars_g": 0.0,
+        "sodium_mg": 51.0
+      },
+      "absent": [],
+      "atwater_note": "Published energy 325 kcal is outside the Atwater check against 4 x protein + 9 x fat + 4 x carbohydrate = 395.1 kcal. This food has 26.9 g fibre per 100 g; counting that fibre at 2 kcal/g instead of 4 gives 341.3 kcal, within the check. The published value is kept as it is.",
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:4066",
+      "source": "cnf-api",
+      "food_code": 4066,
+      "description": "Bread, white, commercial",
+      "state_note": "commercial white bread",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=4066&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 261.0,
+        "protein_g": 9.14,
+        "fat_g": 2.66,
+        "satfat_g": 0.641,
+        "carbohydrate_g": 49.21,
+        "fibre_g": 3.32,
+        "sugars_g": 7.62,
+        "sodium_mg": 513.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 107,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 3,
+          "number_observation": 27
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 3,
+          "number_observation": 27
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 3,
+          "number_observation": 27
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 107,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 3,
+          "number_observation": 27
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 3,
+          "number_observation": 27
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 3,
+          "number_observation": 27
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:4067",
+      "source": "cnf-api",
+      "food_code": 4067,
+      "description": "Bread, whole wheat, commercial",
+      "state_note": "commercial whole wheat bread",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=4067&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 257.0,
+        "protein_g": 10.7,
+        "fat_g": 3.03,
+        "satfat_g": 0.785,
+        "carbohydrate_g": 45.64,
+        "fibre_g": 6.28,
+        "sugars_g": 3.24,
+        "sodium_mg": 593.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 107,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 3,
+          "number_observation": 22
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 3,
+          "number_observation": 22
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 3,
+          "number_observation": 22
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 107,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 3,
+          "number_observation": 22
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 3,
+          "number_observation": 22
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 3,
+          "number_observation": 22
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:4155",
+      "source": "cnf-api",
+      "food_code": 4155,
+      "description": "Sweets, confectioner's coating / chips, white chocolate",
+      "state_note": "white chocolate coating / chips",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=4155&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 539.0,
+        "protein_g": 5.87,
+        "fat_g": 32.09,
+        "satfat_g": 19.412,
+        "carbohydrate_g": 59.24,
+        "fibre_g": 0.2,
+        "sugars_g": 59.0,
+        "sodium_mg": 90.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 3
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 5
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 2
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 2
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 3
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:4318",
+      "source": "cnf-api",
+      "food_code": 4318,
+      "description": "Sweets, sugars, granulated",
+      "state_note": "white sugar",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=4318&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 387.0,
+        "protein_g": 0.0,
+        "fat_g": 0.0,
+        "satfat_g": 0.0,
+        "carbohydrate_g": 99.98,
+        "fibre_g": 0.0,
+        "sugars_g": 99.8,
+        "sodium_mg": 1.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 8
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 1
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 12,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 7
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 8
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:4471",
+      "source": "cnf-api",
+      "food_code": 4471,
+      "description": "Grains, rice, white, long-grain, regular, dry",
+      "state_note": "dry (uncooked) long-grain white rice",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=4471&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 365.0,
+        "protein_g": 7.13,
+        "fat_g": 0.66,
+        "satfat_g": 0.18,
+        "carbohydrate_g": 79.95,
+        "fibre_g": 0.97,
+        "sugars_g": 0.12,
+        "sodium_mg": 5.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 70
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 23
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 3,
+          "number_observation": 16
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 10
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:4484",
+      "source": "cnf-api",
+      "food_code": 4484,
+      "description": "Grains, wheat flour, white, all purpose, enriched, calcium fortified",
+      "state_note": "dry flour",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=4484&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 364.0,
+        "protein_g": 10.33,
+        "fat_g": 0.98,
+        "satfat_g": 0.155,
+        "carbohydrate_g": 76.31,
+        "fibre_g": 3.1,
+        "sodium_mg": 2.0
+      },
+      "absent": [
+        "sugars_g"
+      ],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 61
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 29
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 3,
+          "number_observation": 12
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 82
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:4515",
+      "source": "cnf-api",
+      "food_code": 4515,
+      "description": "Pasta, spaghetti, enriched, dry",
+      "state_note": "dry (uncooked) enriched pasta",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=4515&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 371.0,
+        "protein_g": 13.04,
+        "fat_g": 1.51,
+        "satfat_g": 0.277,
+        "carbohydrate_g": 74.67,
+        "fibre_g": 3.2,
+        "sugars_g": 2.67,
+        "sodium_mg": 6.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 6
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 8
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 6
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 6
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:4725",
+      "source": "cnf-api",
+      "food_code": 4725,
+      "description": "Spices, spearmint, fresh",
+      "state_note": "fresh leaves",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=4725&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 44.0,
+        "protein_g": 3.29,
+        "fat_g": 0.73,
+        "satfat_g": 0.191,
+        "carbohydrate_g": 8.41,
+        "fibre_g": 6.8,
+        "sodium_mg": 30.0
+      },
+      "absent": [
+        "sugars_g"
+      ],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 0,
+          "number_observation": 2
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 0,
+          "number_observation": 2
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 0,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 0,
+          "number_observation": 2
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 0,
+          "number_observation": 2
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:6961",
+      "source": "cnf-api",
+      "food_code": 6961,
+      "description": "Yogourt, plain (2-3.9% M.F.)",
+      "state_note": "plain yogurt, 2-3.9% M.F.",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=6961&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 50.0,
+        "protein_g": 4.6,
+        "fat_g": 1.98,
+        "satfat_g": 1.307,
+        "carbohydrate_g": 3.4,
+        "fibre_g": 0.0,
+        "sugars_g": 3.45,
+        "sodium_mg": 40.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 107,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 3,
+          "number_observation": 14
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 3,
+          "number_observation": 14
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 3,
+          "number_observation": 14
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 107,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 12,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 3,
+          "number_observation": 14
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 3,
+          "number_observation": 14
+        }
+      }
+    },
+    {
+      "ref_id": "cnf-api:7164",
+      "source": "cnf-api",
+      "food_code": 7164,
+      "description": "Deli-meat, pepperoni",
+      "state_note": "deli pepperoni",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/nutrientamount/?id=7164&lang=en&type=json",
+      "retrieved_at": "2026-10-08",
+      "per_100g": {
+        "energy_kcal": 269.0,
+        "protein_g": 15.9,
+        "fat_g": 19.86,
+        "satfat_g": 7.01,
+        "carbohydrate_g": 5.72,
+        "fibre_g": 0.0,
+        "sugars_g": 1.33,
+        "sodium_mg": 1252.0
+      },
+      "absent": [],
+      "source_codes": {
+        "energy_kcal": {
+          "nutrient_name_id": 208,
+          "nutrient_web_name": "Energy (kcal)",
+          "nutrient_source_id": 107,
+          "number_observation": 0
+        },
+        "protein_g": {
+          "nutrient_name_id": 203,
+          "nutrient_web_name": "Protein",
+          "nutrient_source_id": 3,
+          "number_observation": 3
+        },
+        "fat_g": {
+          "nutrient_name_id": 204,
+          "nutrient_web_name": "Total Fat",
+          "nutrient_source_id": 3,
+          "number_observation": 3
+        },
+        "satfat_g": {
+          "nutrient_name_id": 606,
+          "nutrient_web_name": "Fatty acids, saturated, total",
+          "nutrient_source_id": 3,
+          "number_observation": 3
+        },
+        "carbohydrate_g": {
+          "nutrient_name_id": 205,
+          "nutrient_web_name": "Carbohydrate",
+          "nutrient_source_id": 107,
+          "number_observation": 0
+        },
+        "fibre_g": {
+          "nutrient_name_id": 291,
+          "nutrient_web_name": "Fibre, total dietary",
+          "nutrient_source_id": 5,
+          "number_observation": 0
+        },
+        "sugars_g": {
+          "nutrient_name_id": 269,
+          "nutrient_web_name": "Sugars, total",
+          "nutrient_source_id": 107,
+          "number_observation": 0
+        },
+        "sodium_mg": {
+          "nutrient_name_id": 307,
+          "nutrient_web_name": "Sodium, Na",
+          "nutrient_source_id": 3,
+          "number_observation": 3
+        }
+      }
+    }
+  ],
+  "measures": [
+    {
+      "ref_id": "cnf-api:113",
+      "measure": "vol_100ml",
+      "grams": 103.128,
+      "volume_ml": 100.0,
+      "verbatim": "100ml",
+      "conversion_factor_value": 1.03128,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=113&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:113",
+      "measure": "vol_250ml",
+      "grams": 257.819,
+      "volume_ml": 250.0,
+      "verbatim": "250ml",
+      "conversion_factor_value": 2.57819,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=113&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:125",
+      "measure": "1_small_egg",
+      "grams": 41.58,
+      "volume_ml": null,
+      "verbatim": "1 small egg",
+      "conversion_factor_value": 0.4158,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=125&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:125",
+      "measure": "1_medium_egg",
+      "grams": 46.39,
+      "volume_ml": null,
+      "verbatim": "1 medium egg",
+      "conversion_factor_value": 0.4639,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=125&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:125",
+      "measure": "1_large_egg",
+      "grams": 52.68,
+      "volume_ml": null,
+      "verbatim": "1 large egg",
+      "conversion_factor_value": 0.5268,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=125&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:125",
+      "measure": "1_extra_large_egg",
+      "grams": 58.13,
+      "volume_ml": null,
+      "verbatim": "1 extra large egg",
+      "conversion_factor_value": 0.5813,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=125&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:125",
+      "measure": "1_jumbo_egg",
+      "grams": 64.82,
+      "volume_ml": null,
+      "verbatim": "1 jumbo egg",
+      "conversion_factor_value": 0.6482,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=125&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:125",
+      "measure": "vol_100ml",
+      "grams": 102.705,
+      "volume_ml": 100.0,
+      "verbatim": "100ml",
+      "conversion_factor_value": 1.02705,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=125&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:125",
+      "measure": "vol_125ml",
+      "grams": 128.381,
+      "volume_ml": 125.0,
+      "verbatim": "125ml",
+      "conversion_factor_value": 1.28381,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=125&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:125",
+      "measure": "vol_250ml",
+      "grams": 256.762,
+      "volume_ml": 250.0,
+      "verbatim": "250ml",
+      "conversion_factor_value": 2.56762,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=125&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:125",
+      "measure": "2_large_eggs",
+      "grams": 105.36,
+      "volume_ml": null,
+      "verbatim": "2 large eggs",
+      "conversion_factor_value": 1.0536,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=125&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:125",
+      "measure": "1_pee_wee_egg",
+      "grams": 33.49,
+      "volume_ml": null,
+      "verbatim": "1 pee wee egg",
+      "conversion_factor_value": 0.3349,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=125&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:422",
+      "measure": "vol_5ml",
+      "grams": 4.592,
+      "volume_ml": 5.0,
+      "verbatim": "5ml",
+      "conversion_factor_value": 0.04592,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=422&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:422",
+      "measure": "vol_15ml",
+      "grams": 13.682,
+      "volume_ml": 15.0,
+      "verbatim": "15ml",
+      "conversion_factor_value": 0.13682,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=422&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:422",
+      "measure": "vol_100ml",
+      "grams": 91.293,
+      "volume_ml": 100.0,
+      "verbatim": "100ml",
+      "conversion_factor_value": 0.91293,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=422&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:424",
+      "measure": "vol_5ml",
+      "grams": 4.592,
+      "volume_ml": 5.0,
+      "verbatim": "5ml",
+      "conversion_factor_value": 0.04592,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=424&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:424",
+      "measure": "vol_15ml",
+      "grams": 13.784,
+      "volume_ml": 15.0,
+      "verbatim": "15ml",
+      "conversion_factor_value": 0.13784,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=424&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:424",
+      "measure": "vol_100ml",
+      "grams": 92.139,
+      "volume_ml": 100.0,
+      "verbatim": "100ml",
+      "conversion_factor_value": 0.92139,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=424&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:451",
+      "measure": "vol_5ml",
+      "grams": 4.592,
+      "volume_ml": 5.0,
+      "verbatim": "5ml",
+      "conversion_factor_value": 0.04592,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=451&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:451",
+      "measure": "vol_15ml",
+      "grams": 14.189,
+      "volume_ml": 15.0,
+      "verbatim": "15ml",
+      "conversion_factor_value": 0.14189,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=451&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:451",
+      "measure": "vol_100ml",
+      "grams": 92.139,
+      "volume_ml": 100.0,
+      "verbatim": "100ml",
+      "conversion_factor_value": 0.92139,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=451&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:2259",
+      "measure": "vol_60ml",
+      "grams": 63.398,
+      "volume_ml": 60.0,
+      "verbatim": "60ml",
+      "conversion_factor_value": 0.63398,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=2259&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:2259",
+      "measure": "vol_100ml",
+      "grams": 105.67,
+      "volume_ml": 100.0,
+      "verbatim": "100ml",
+      "conversion_factor_value": 1.0567,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=2259&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:2259",
+      "measure": "vol_125ml",
+      "grams": 132.079,
+      "volume_ml": 125.0,
+      "verbatim": "125ml",
+      "conversion_factor_value": 1.32079,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=2259&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:2259",
+      "measure": "vol_250ml",
+      "grams": 264.159,
+      "volume_ml": 250.0,
+      "verbatim": "250ml",
+      "conversion_factor_value": 2.64159,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=2259&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:2462",
+      "measure": "vol_100ml",
+      "grams": 101.437,
+      "volume_ml": 100.0,
+      "verbatim": "100ml",
+      "conversion_factor_value": 1.01437,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=2462&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:2462",
+      "measure": "vol_125ml",
+      "grams": 126.796,
+      "volume_ml": 125.0,
+      "verbatim": "125ml",
+      "conversion_factor_value": 1.26796,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=2462&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:2462",
+      "measure": "vol_250ml",
+      "grams": 253.593,
+      "volume_ml": 250.0,
+      "verbatim": "250ml",
+      "conversion_factor_value": 2.53593,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=2462&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:2462",
+      "measure": "1_small",
+      "grams": 82.0,
+      "volume_ml": null,
+      "verbatim": "1 small",
+      "conversion_factor_value": 0.82,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=2462&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:2462",
+      "measure": "1_medium",
+      "grams": 111.0,
+      "volume_ml": null,
+      "verbatim": "1 medium",
+      "conversion_factor_value": 1.11,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=2462&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:2462",
+      "measure": "1_large",
+      "grams": 164.0,
+      "volume_ml": null,
+      "verbatim": "1 large",
+      "conversion_factor_value": 1.64,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=2462&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:2933",
+      "measure": "vol_100ml",
+      "grams": 100.169,
+      "volume_ml": 100.0,
+      "verbatim": "100ml",
+      "conversion_factor_value": 1.00169,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=2933&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:2933",
+      "measure": "vol_125ml",
+      "grams": 125.211,
+      "volume_ml": 125.0,
+      "verbatim": "125ml",
+      "conversion_factor_value": 1.25211,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=2933&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:2933",
+      "measure": "vol_250ml",
+      "grams": 250.423,
+      "volume_ml": 250.0,
+      "verbatim": "250ml",
+      "conversion_factor_value": 2.50423,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=2933&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:2933",
+      "measure": "vol_500ml",
+      "grams": 500.845,
+      "volume_ml": 500.0,
+      "verbatim": "500ml",
+      "conversion_factor_value": 5.00845,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=2933&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:2933",
+      "measure": "1_ice_cube",
+      "grams": 32.0,
+      "volume_ml": null,
+      "verbatim": "1 ice cube",
+      "conversion_factor_value": 0.32,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=2933&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:3403",
+      "measure": "vol_15ml",
+      "grams": 16.216,
+      "volume_ml": 15.0,
+      "verbatim": "15ml",
+      "conversion_factor_value": 0.16216,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=3403&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:3403",
+      "measure": "vol_100ml",
+      "grams": 107.777,
+      "volume_ml": 100.0,
+      "verbatim": "100ml",
+      "conversion_factor_value": 1.07777,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=3403&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:3403",
+      "measure": "vol_250ml",
+      "grams": 269.442,
+      "volume_ml": 250.0,
+      "verbatim": "250ml",
+      "conversion_factor_value": 2.69442,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=3403&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    },
+    {
+      "ref_id": "cnf-api:3403",
+      "measure": "1_packet_individual",
+      "grams": 8.9,
+      "volume_ml": null,
+      "verbatim": "1 packet (individual)",
+      "conversion_factor_value": 0.089,
+      "source_ref": "",
+      "url": "https://food-nutrition.canada.ca/api/canadian-nutrient-file/servingsize/?id=3403&lang=en&type=json",
+      "retrieved_at": "2026-10-08"
+    }
+  ],
+  "measures_note": "grams = CNF conversion_factor_value x 100 (the factor is per 100 g). Only measures CNF publishes are listed; source_ref is empty because the API does not return a MeasureID.",
+  "map": [
+    {
+      "ingredient_key": "all purpose flour",
+      "ref_id": "cnf-api:4484",
+      "match_kind": "generic",
+      "note": "The CNF entry is enriched, calcium-fortified all-purpose flour.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "basmati rice",
+      "ref_id": "cnf-api:4471",
+      "match_kind": "close",
+      "note": "Reference is dry long-grain white rice. The collector found no basmati entry in the CNF food list; not re-checked.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "broccoli",
+      "ref_id": "cnf-api:2374",
+      "match_kind": "generic",
+      "note": "",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "butter",
+      "ref_id": "cnf-api:118",
+      "match_kind": "close",
+      "note": "The catalog's butter is salted; CNF 'Butter, regular' does not say whether it is salted.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "canned tomato",
+      "ref_id": "cnf-api:2462",
+      "match_kind": "close",
+      "note": "CNF has whole canned tomatoes; the catalog's are diced or crushed.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "canola oil",
+      "ref_id": "cnf-api:451",
+      "match_kind": "generic",
+      "note": "",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "carrot",
+      "ref_id": "cnf-api:2380",
+      "match_kind": "generic",
+      "note": "",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "cheddar cheese",
+      "ref_id": "cnf-api:119",
+      "match_kind": "generic",
+      "note": "",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "chicken breast",
+      "ref_id": "cnf-api:841",
+      "match_kind": "generic",
+      "note": "",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "chicken thigh",
+      "ref_id": "cnf-api:853",
+      "match_kind": "close",
+      "note": "Meat only. A bone-in, skin-on pack weighs more than the meat eaten.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "chili powder",
+      "ref_id": "cnf-api:177",
+      "match_kind": "close",
+      "note": "The catalog's is Indian-style hot red chili powder (lal mirch). CNF's 'Spices, chili powder' does not say what it contains; its 2867 mg sodium per 100 g suggests a salted seasoning blend, so sodium may be overstated.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "cilantro",
+      "ref_id": "cnf-api:2067",
+      "match_kind": "generic",
+      "note": "",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "diced tomato",
+      "ref_id": "cnf-api:2462",
+      "match_kind": "close",
+      "note": "Reference is whole canned tomatoes. The collector found no diced canned tomato entry in the CNF food list; not re-checked.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "dried oregano",
+      "ref_id": "cnf-api:195",
+      "match_kind": "close",
+      "note": "CNF lists ground oregano; the catalog sells dried leaves.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "egg",
+      "ref_id": "cnf-api:125",
+      "match_kind": "generic",
+      "note": "",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "frozen mango",
+      "ref_id": "cnf-api:1603",
+      "match_kind": "close",
+      "note": "Reference is raw mango; frozen chunks are the same fruit. The collector found no frozen mango entry; not re-checked.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "garam masala",
+      "ref_id": null,
+      "match_kind": "none",
+      "note": "No reference food, so nutrients are unknown. The collector found no garam masala entry in the CNF food list (not re-checked). CNF does list other spice blends, such as curry powder (code 183), but they are different mixtures and are not used.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "garlic",
+      "ref_id": "cnf-api:2394",
+      "match_kind": "generic",
+      "note": "",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "ghee",
+      "ref_id": "cnf-api:17",
+      "match_kind": "close",
+      "note": "Ghee is clarified butter; the reference is CNF anhydrous butter oil.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "ginger",
+      "ref_id": "cnf-api:2091",
+      "match_kind": "generic",
+      "note": "",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "granulated sugar",
+      "ref_id": "cnf-api:4318",
+      "match_kind": "generic",
+      "note": "",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "green cardamom pod",
+      "ref_id": "cnf-api:174",
+      "match_kind": "close",
+      "note": "CNF lists ground cardamom; the recipe uses whole pods.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "green chilie",
+      "ref_id": "cnf-api:2322",
+      "match_kind": "generic",
+      "note": "Key is the planner's stem of 'Green Chilies'.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "green onion",
+      "ref_id": "cnf-api:2144",
+      "match_kind": "generic",
+      "note": "",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "ground beef",
+      "ref_id": "cnf-api:2690",
+      "match_kind": "generic",
+      "note": "The catalog sells lean, medium and extra lean; medium is the reference, not the product's label.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "instant yeast",
+      "ref_id": "cnf-api:4008",
+      "match_kind": "close",
+      "note": "Reference is active dry baker's yeast; the product is instant yeast. The collector found no instant yeast entry; not re-checked.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "jasmine rice",
+      "ref_id": "cnf-api:4471",
+      "match_kind": "close",
+      "note": "Reference is dry long-grain white rice. The collector found no jasmine entry in the CNF food list; not re-checked.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "mint",
+      "ref_id": "cnf-api:4725",
+      "match_kind": "close",
+      "note": "CNF lists spearmint and peppermint; spearmint is the reference. Key drops the stopword 'fresh'.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "mozzarella",
+      "ref_id": "cnf-api:110",
+      "match_kind": "generic",
+      "note": "The product's fat level is not known; CNF mozzarella (52% water, 22.5% M.F.) is the reference.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "olive oil",
+      "ref_id": "cnf-api:422",
+      "match_kind": "generic",
+      "note": "",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "passata",
+      "ref_id": "cnf-api:2259",
+      "match_kind": "close",
+      "note": "CNF tomato purée, no salt added; a salted passata has more sodium.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "peanut butter and jelly jam",
+      "ref_id": null,
+      "match_kind": "none",
+      "note": "Two foods in one line (peanut butter and jelly); no single reference food fits.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "penne",
+      "ref_id": "cnf-api:4515",
+      "match_kind": "close",
+      "note": "Reference is dry enriched spaghetti, the same dough in another shape. The collector found no penne entry in the CNF food list; not re-checked.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "pepperoni",
+      "ref_id": "cnf-api:7164",
+      "match_kind": "generic",
+      "note": "",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "plain yogurt",
+      "ref_id": "cnf-api:6961",
+      "match_kind": "close",
+      "note": "The catalog's plain yogurts are Greek and coconut; CNF plain yogurt 2-3.9% M.F. is the reference.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "salt",
+      "ref_id": "cnf-api:214",
+      "match_kind": "generic",
+      "note": "",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "sesame oil",
+      "ref_id": "cnf-api:424",
+      "match_kind": "close",
+      "note": "CNF does not say whether its sesame oil is toasted.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "sliced bread",
+      "ref_id": "cnf-api:4066",
+      "match_kind": "close",
+      "note": "The recipe does not say which bread; commercial white bread is the reference.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "soy sauce",
+      "ref_id": "cnf-api:3403",
+      "match_kind": "generic",
+      "note": "",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "spaghetti",
+      "ref_id": "cnf-api:4515",
+      "match_kind": "generic",
+      "note": "Dry weight. The recipe line does not say dry or cooked; the catalog sells dry spaghetti, so the amount is read as dry.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "turmeric",
+      "ref_id": "cnf-api:211",
+      "match_kind": "generic",
+      "note": "",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "water",
+      "ref_id": "cnf-api:2933",
+      "match_kind": "generic",
+      "note": "Not bought (the planner skips water), but counted for nutrition.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "wheat bread",
+      "ref_id": "cnf-api:4067",
+      "match_kind": "close",
+      "note": "The catalog has a whole-grain wheat loaf (Wheat Bread 1) and a basic wheat loaf (Wheat Bread 2); CNF commercial whole wheat bread is the reference for both.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "white chocolate",
+      "ref_id": "cnf-api:4155",
+      "match_kind": "close",
+      "note": "Reference is CNF's white chocolate confectioner's coating / chips. The collector found no other white chocolate entry; not re-checked.",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "whole milk",
+      "ref_id": "cnf-api:113",
+      "match_kind": "generic",
+      "note": "",
+      "reviewed_at": "2026-10-08"
+    },
+    {
+      "ingredient_key": "yellow onion",
+      "ref_id": "cnf-api:2401",
+      "match_kind": "generic",
+      "note": "",
+      "reviewed_at": "2026-10-08"
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "note": "Written by hand from each SYNTHETIC page in this directory, not from the extractor's output: the recipe each page holds, or null for a page with none. servings is extract_recipe.servings_from(yield).",
+  "pages": {
+    "wordpress_graph.html": {
+      "method": "jsonld",
+      "name": "Weeknight Garlic Butter Shrimp",
+      "yield": "4 servings",
+      "servings": 4,
+      "ingredients": [
+        "1 lb large shrimp, peeled & deveined",
+        "4 tablespoons unsalted butter, divided",
+        "6 cloves garlic, minced",
+        "½ teaspoon red pepper flakes",
+        "2 tablespoons fresh lemon juice",
+        "2 tablespoons chopped parsley",
+        "salt & pepper, to taste"
+      ]
+    },
+    "microdata_card.html": {
+      "method": "microdata",
+      "name": "Buttermilk Cornbread",
+      "yield": "Serves 9",
+      "servings": 9,
+      "ingredients": [
+        "1 cup yellow cornmeal",
+        "1 cup all-purpose flour",
+        "¼ cup sugar",
+        "1 tablespoon baking powder",
+        "½ teaspoon salt",
+        "1 cup buttermilk",
+        "1 large egg",
+        "⅓ cup butter, melted"
+      ]
+    },
+    "mainentity_links.html": {
+      "method": "jsonld",
+      "name": "Mia's Gochujang Fried Rice",
+      "yield": "2",
+      "servings": 2,
+      "ingredients": [
+        "2 cups cooked rice, preferably day-old",
+        "1 tablespoon gochujang",
+        "2 eggs",
+        "1 green onion, sliced"
+      ]
+    },
+    "windows1252_cdata.html": {
+      "method": "jsonld",
+      "name": "Smoky Black Bean Soup",
+      "yield": "6 bowls",
+      "servings": null,
+      "ingredients": [
+        "2 cans (15 oz) black beans, rinsed",
+        "1 jalapeño, seeded and minced",
+        "½ cup crème fraîche",
+        "1 tsp smoked paprika",
+        "4 cups vegetable stock",
+        "Chef’s tip: a squeeze of lime"
+      ]
+    },
+    "legacy_ingredients_text.html": {
+      "method": "jsonld",
+      "name": "No-Knead Bread",
+      "yield": "1 loaf",
+      "servings": null,
+      "ingredients": [
+        "3 cups bread flour",
+        "1 1/2 cups warm water",
+        "1 1/2 teaspoons salt",
+        "1/4 teaspoon instant yeast"
+      ]
+    },
+    "bot_challenge.html": null
+  }
+}

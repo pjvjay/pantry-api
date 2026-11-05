@@ -17,6 +17,7 @@ JSON-RPC stream lives there. The SDK logs to stderr.
 """
 from __future__ import annotations
 
+import datetime as dt
 import math
 import os
 from pathlib import Path
@@ -26,15 +27,31 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ResourceNotFoundError, ToolError
 from mcp.types import ToolAnnotations
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 
+from .llm import LLMError
+from .mealplan.assistant import DishIn as MealDish
+from .mealplan.assistant import MealPlanContext, MealPlanResult, ProposedDish
 from .models import (
+    MAX_DOC_LINES,
+    MAX_LINE_QUANTITY,
+    MAX_SERVINGS,
+    AlternativeRanking,
+    AmountBasis,
+    DroppedIngredient,
+    LlmCallTrace,
+    MatchLevel,
     OriginCoverage,
     OriginRanking,
+    Pin,
+    PlanBasis,
     PlanLineItem,
     Product,
     ProductOrigin,
     Recipe,
+    RecipeDoc,
+    RecipeLine,
+    RecipeSource,
     ShoppingPlan,
     TripOption,
     WeekPlan,
@@ -48,6 +65,11 @@ from .version import app_version
 _READ = ToolAnnotations(read_only_hint=True, open_world_hint=False)
 _PLAN = ToolAnnotations(read_only_hint=True, open_world_hint=False,
                         idempotent_hint=False)
+# Re-pricing and ranking a finished plan: read-only, and idempotent too, since
+# no LLM is involved and the same basis against the same catalog gives the same
+# answer.
+_READ_IDEM = ToolAnnotations(read_only_hint=True, idempotent_hint=True,
+                             open_world_hint=False)
 # Write tools: they add to a review queue or copy a reviewed claim into
 # evidence; nothing is ever deleted. Submitting is idempotent (the queue
 # dedupes the same reading), reviewing is not (a second review errors).
@@ -79,7 +101,9 @@ server = MCPServer(
         "Resources: pantry://countries lists the country spellings the "
         "server accepts, pantry://origins/coverage says how thin the "
         "evidence is, pantry://recipes and pantry://catalog/categories "
-        "are the library and the aisle list."
+        "are the library and the aisle list. plan_meals drafts one or two "
+        "weeks of counted dishes for the shopper's Meal plan; it saves and "
+        "approves nothing."
     ),
 )
 
@@ -115,6 +139,11 @@ class PipelineStatus(BaseModel):
     demo_mode: bool
     mcp_auth: str               # "required" (tokens configured) | "anonymous"
     write_tools: str            # "enabled" | "disabled" for THIS caller
+    # Added with Gemini support: the other two model specs ("gemini:<model>"
+    # or an Anthropic name) and whether a Gemini key is present.
+    classifier_model: str
+    nl2sql_model: str
+    gemini_key_configured: bool
 
 
 class TriageCandidate(BaseModel):
@@ -150,7 +179,7 @@ class ProductMatch(BaseModel):
 class ProductSearch(BaseModel):
     query: str
     tokens: list[str]
-    match: str                  # "direct" | "relaxed" | "none"
+    match: str                  # "direct" | "generic" | "relaxed" | "none"
     total: int                  # hits before `limit` trimmed the list
     items: list[ProductMatch]
     note: str
@@ -242,6 +271,21 @@ class OriginPage(BaseModel):
 # price, the provenance verdict — and `full` is attached only on request.
 
 class LeanLine(BaseModel):
+    """One purchase. `match` says how the ingredient met the catalog:
+    "exact" — every word as written; "form" — only once the purchase form
+    was swapped for its equivalent ("cumin powder" -> Cumin Ground 100g) or
+    dropped ("powdered tomato" -> tomato products); "generic" — only once
+    descriptor words were dropped too ("light brown sugar" -> Brown Sugar
+    1kg; the vocabulary is fixed: light, dark, toasted, roasted, ground,
+    whole, dried, fresh, frozen, boneless, skinless, bone-in, skin-on,
+    large, small, medium, extra, chopped, sliced, minced, diced, raw,
+    organic, smoked, unsalted, low/reduced sodium). Every generic line is
+    also named in the summary's notes. `line_no` is the ingredient's
+    position in the recipe as written. When several recipe lines chose the
+    same product it is bought ONCE: `also_lines` lists the other line
+    numbers, `ingredient` names every one of them ("ground Sichuan
+    peppercorn + Sichuan peppercorn"), and `packs` is how many packs their
+    summed need takes (`price` is for all of them); notes say so."""
     line_no: int
     ingredient: str
     product_id: int
@@ -253,6 +297,17 @@ class LeanLine(BaseModel):
     confidence: float
     origin_country: str         # "" unless the line's origin resolved
     origin_status: str          # the receipt status, or "none" when there is no receipt
+    match: MatchLevel
+    also_lines: list[int] = Field(default_factory=list)
+    packs: int = 1
+
+
+class PlanLine(LeanLine):
+    """A recipe plan's line, with where the recommended `trip` buys it and its price there:
+    the store to send the shopper to ("" and None when the plan has no trip). `store` and
+    `price` are the line's cheapest offer in range, which the trip may skip to save a stop."""
+    trip_store: str = ""
+    trip_price: float | None = None
 
 
 class Coverage(BaseModel):
@@ -290,17 +345,55 @@ class Trip(BaseModel):
 class PlanSummary(BaseModel):
     """`total_cost` is the sum of `lines`, each at its cheapest in-range
     store; `trip` is one realistic shopping trip priced at its own stores
-    (see Trip). They answer different questions and need not agree."""
+    (see Trip). They answer different questions and need not agree.
+
+    Both describe the PLANNED lines only, and so does `coverage`. A partial
+    plan (plan_from_text with allow_partial=true) lists what it left out:
+    `not_stocked` — the catalog has nothing matching the ingredient at all;
+    `out_of_range` — it is stocked, but no offer passes the distance
+    (lat/lon/max_km), price or diet constraints, and `reason` names the
+    nearest offer outside them and the limit it breaks ("beyond the 5 km
+    limit", "over the $5.00 per-item price cap"). `skipped` is never
+    planned, with or without allow_partial: water and ice (never bought),
+    lines past the 40-ingredient cap, and lines the selector returned no
+    product for. Each entry is {ingredient, reason, suggestions}. All three
+    lists are always present and empty when nothing was left out; when
+    something was, `notes` says "planned K of N ingredients". Every recipe
+    ingredient is in exactly one place: a line (by `line_no` or
+    `also_lines`), not_stocked, out_of_range or skipped."""
     recipe_slug: str
     recipe_name: str
-    total_cost: float
+    total_cost: float           # planned lines only
     origin_status: str          # not_requested | verified | unverified
-    coverage: Coverage | None   # only when an origin question was asked
-    lines: list[LeanLine]
+    coverage: Coverage | None   # only when an origin question was asked; planned lines only
+    lines: list[PlanLine]
     trip: Trip | None           # None when the planner produced no trip options
-    notes: list[str]            # interpretation, substitutions, coverage warnings
+    notes: list[str]            # interpretation, planned K of N, generic matches,
+                                # substitutions, coverage warnings
+    not_stocked: list[DroppedIngredient]
+    out_of_range: list[DroppedIngredient]
+    skipped: list[DroppedIngredient]
     llm_cost_usd: float
     latency_ms: int
+    # Where the plan's LLM time went, call by call and phase by phase (connect, TLS, waiting
+    # for Google, ...). For people and trace views: an agent can ignore it.
+    llm_calls: list[LlmCallTrace] = Field(default_factory=list)
+    # The Burr run that traced this plan, step by step (its app id in the Burr UI), and each of
+    # its steps' time in ms, in order ({step: ms}; the full plan has errors too). For people and
+    # trace views: an agent can ignore them.
+    burr_run: str = ""
+    pipeline: dict[str, float] = Field(default_factory=dict)
+    # Only with basis=true: what the plan was made from, for re-pricing and
+    # ranking alternatives without re-planning. Absent from the result
+    # otherwise, so a summary without it is byte for byte what it was.
+    basis: PlanBasis | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_basis(self, handler):
+        data = handler(self)
+        if self.basis is None:
+            data.pop("basis", None)
+        return data
 
 
 class PlanResult(BaseModel):
@@ -390,18 +483,57 @@ def _require_write(ctx: Context | None) -> str:
     return label
 
 
-def _gate_message(e) -> str:
+def _affected(alert) -> str:
+    """Each ingredient a gate names, with what the planner found to buy instead (the removed
+    products, the alternatives still available), so an agent can offer the shopper the trade
+    rather than only report the failure."""
+    if not alert or not alert.details:
+        return ""
+    parts = []
+    for d in alert.details:
+        options = [str(o) for o in d.get("suggestions") or []]
+        parts.append(str(d.get("name", "?"))
+                     + (f" (options: {'; '.join(options)})" if options else ""))
+    return f" Affected: {', '.join(parts)}."
+
+
+# Gates a partial plan gets past: allow_partial plans the rest and reports these ingredients.
+PARTIAL_CODES = ("missing_ingredients", "unavailable_within_constraints", "excluded_by_origin")
+
+
+def _partial_hint(alert, allow_partial: bool) -> str:
+    """Only when a partial plan would price something: with every ingredient missing (or out
+    of range, or excluded) the retry is a second paid parse certain to fail the same way."""
+    if (not allow_partial and alert is not None and alert.code.value in PARTIAL_CODES
+            and (alert.partial_would_plan or 0) > 0):
+        return " Retry with allow_partial=true to plan the rest."
+    return ""
+
+
+def _gate_message(e, allow_partial: bool = False) -> str:
     """One shape for every gate abort an agent can hit."""
     alert = e.execution.aborted
     steps = ", ".join(f"{s.step_id}:{s.outcome}" for s in e.execution.steps)
-    detail = ""
-    if alert and alert.details:
-        names = ", ".join(str(d.get("name", "?")) for d in alert.details)
-        detail = f" Affected: {names}."
     code = alert.code.value if alert else "unknown"
     msg = alert.message if alert else "plan aborted"
-    return (f"Plan aborted before product selection — {code}: {msg}{detail}"
+    return (f"Plan aborted before product selection — {code}: {msg}{_affected(alert)}"
+            f"{_partial_hint(alert, allow_partial)}"
             + (f" Steps: {steps}." if steps else ""))
+
+
+def _check_llm_budget() -> None:
+    """The REST daily LLM ceiling holds here too: /mcp is as public as the REST API."""
+    from . import limits
+
+    if limits.llm_paused():
+        raise ToolError(limits.PAUSED + " Today's LLM budget on this server is spent.")
+
+
+def _llm_message(e: LLMError) -> str:
+    """An LLM failure as a tool error. The SDK masks any other exception as
+    "Error executing tool", which would hide the one line that says what to
+    fix (the key, the model spec, the quota)."""
+    return f"LLM call failed — {e}"
 
 
 def _product_summary(p) -> ProductSummary:
@@ -420,11 +552,13 @@ def _location(lat: float | None, lon: float | None) -> tuple[float, float]:
             cfg.default_lon if lon is None else lon)
 
 
-def _planner_candidates(name: str, lat: float, lon: float) -> list:
-    """Exactly how the planner finds candidates for one ingredient
-    (flow._ingredient_pools): token-AND over the product_terms index, each
+def _planner_candidates(name: str, lat: float, lon: float, *,
+                        generic: bool = False) -> list:
+    """Exactly how the planner finds candidates for one ingredient it matches
+    by words (flow._ingredient_pools): token-AND over the product_terms index, each
     product pinned to its cheapest in-range store, cheapest first, uncapped.
-    A hit here is a candidate there; a miss here is a miss there."""
+    A hit here is a candidate there; a miss here is a miss there.
+    `generic` matches at the planner's generic level (descriptors dropped)."""
     from sqlalchemy import text
     from sqlalchemy.orm import Session
 
@@ -435,7 +569,8 @@ def _planner_candidates(name: str, lat: float, lon: float) -> list:
 
     sql, params = build_options_sql(
         Constraints(), [IngredientSpec(name=name)], relaxed=set(),
-        lat=lat, lon=lon, per_ingredient_limit=10_000)
+        lat=lat, lon=lon, per_ingredient_limit=10_000,
+        generic={0} if generic else None)
     with Session(db.engine()) as s:
         return [_row_to_product(r) for r in s.execute(text(sql), params).mappings()]
 
@@ -465,7 +600,8 @@ def _lean_line(li: PlanLineItem, products: dict[int, Product]) -> LeanLine:
         brand=p.brand if p else "", size=p.unit_size if p else "",
         store=li.store_name, price=li.price, confidence=li.confidence,
         origin_country=o.country if o else "",
-        origin_status=o.status if o else "none")
+        origin_status=o.status if o else "none", match=li.match,
+        also_lines=list(li.also_lines), packs=li.packs)
 
 
 def _coverage(c: OriginCoverage | None) -> Coverage | None:
@@ -495,6 +631,43 @@ def _substitution_notes(lines: list[PlanLineItem], prefix: str = "") -> list[str
             for li in lines if "substitut" in li.reasoning.lower()]
 
 
+def _generic_notes(lines: list[PlanLineItem], prefix: str = "") -> list[str]:
+    """Name every line that matched only after dropping descriptor words, so
+    a generic match is never reported as if it were the ingredient asked."""
+    return [f"{prefix}{li.ingredient_name} matched generically: {li.product_name}"
+            for li in lines if li.match == "generic"]
+
+
+def _planned_count(lines: list[PlanLineItem]) -> int:
+    """Recipe lines the purchases cover — a shared purchase covers several."""
+    return sum(1 + len(li.also_lines) for li in lines)
+
+
+def _partial_note(plan: ShoppingPlan) -> list[str]:
+    left_out = len(plan.not_stocked) + len(plan.out_of_range) + len(plan.skipped)
+    if not left_out:
+        return []
+    return [f"planned {_planned_count(plan.line_items)} of {plan.ingredient_count} "
+            f"ingredients: {len(plan.not_stocked)} not stocked, "
+            f"{len(plan.out_of_range)} out of range, {len(plan.skipped)} skipped "
+            "(see not_stocked / out_of_range / skipped); total_cost covers the "
+            "planned lines only"]
+
+
+def _shared_notes(lines: list[PlanLineItem]) -> list[str]:
+    """Name every purchase that covers more than one recipe line."""
+    out = []
+    for li in lines:
+        if not li.also_lines:
+            continue
+        nums = ", ".join(str(n) for n in [li.line_no, *li.also_lines])
+        out.append(f"lines {nums} ({li.ingredient_name}) share one purchase: "
+                   f"{li.product_name}"
+                   + (f", {li.packs} packs for their combined quantity"
+                      if li.packs > 1 else ", bought once"))
+    return out
+
+
 def _floor_note(c: OriginCoverage | None) -> list[str]:
     if c is None or c.meets_floor:
         return []
@@ -504,24 +677,61 @@ def _floor_note(c: OriginCoverage | None) -> list[str]:
             "basket clean"]
 
 
-def _summarize_plan(plan: ShoppingPlan) -> PlanSummary:
-    products = _products_by_id({li.product_id for li in plan.line_items})
+def _swap_notes(plan: ShoppingPlan, products: dict[int, Product]) -> list[str]:
+    """One note per line the shopper chose the product for (a re-price's pins), naming what
+    the planner had picked, so a summary never passes a shopper's choice off as the plan's."""
+    b = plan.basis
+    if b is None or not b.pins:
+        return []
+    lines = {ln.line_no: ln for ln in b.lines}
+
+    def name(pid: int | None) -> str:
+        p = products.get(pid) if pid is not None else None
+        return p.name if p is not None else f"product {pid}"
+
+    return [f"line {pin.line_no} ({lines[pin.line_no].name}): chosen by the shopper, "
+            f"{name(pin.product_id)} (was {name(lines[pin.line_no].product_id)})"
+            for pin in b.pins if pin.line_no in lines]
+
+
+def _summarize_plan(plan: ShoppingPlan, basis: bool = False) -> PlanSummary:
+    pins = plan.basis.pins if plan.basis is not None else []
+    was = {ln.product_id for ln in plan.basis.lines} if pins else set()
+    products = _products_by_id({li.product_id for li in plan.line_items}
+                               | {p.product_id for p in pins} | (was - {None}))
     notes = (list(plan.interpretation)
+             + _partial_note(plan)
+             + _shared_notes(plan.line_items)
+             + _generic_notes(plan.line_items)
              + _substitution_notes(plan.line_items)
+             + _swap_notes(plan, products)
              + _floor_note(plan.origin_coverage))
+    trip = _trip(plan.trip_options)
+    on_trip = {i.product_id: i for i in trip.items} if trip else {}
+    lines = []
+    for li in plan.line_items:
+        stop = on_trip.get(li.product_id)
+        lines.append(PlanLine(**_lean_line(li, products).model_dump(),
+                              trip_store=stop.store if stop else "",
+                              trip_price=stop.price if stop else None))
     return PlanSummary(
         recipe_slug=plan.recipe_slug, recipe_name=plan.recipe_name,
         total_cost=plan.total_cost, origin_status=plan.origin_status,
         coverage=_coverage(plan.origin_coverage),
-        lines=[_lean_line(li, products) for li in plan.line_items],
-        trip=_trip(plan.trip_options), notes=notes,
-        llm_cost_usd=plan.total_llm_cost_usd, latency_ms=plan.total_latency_ms)
+        lines=lines, trip=trip, notes=notes,
+        not_stocked=list(plan.not_stocked), out_of_range=list(plan.out_of_range),
+        skipped=list(plan.skipped),
+        llm_cost_usd=plan.total_llm_cost_usd, latency_ms=plan.total_latency_ms,
+        llm_calls=plan.llm_calls, burr_run=plan.burr_run,
+        pipeline={s["step"]: s["ms"] for s in plan.pipeline if s.get("ms") is not None},
+        basis=plan.basis if basis else None)
 
 
 def _summarize_week(plan: WeekPlan) -> WeekSummary:
     products = _products_by_id({li.product_id for d in plan.days for li in d.line_items})
     notes = list(plan.notes)
     for d in plan.days:
+        notes += _generic_notes(d.line_items, prefix=f"{d.recipe_name}: ")
         notes += _substitution_notes(d.line_items, prefix=f"{d.recipe_name}: ")
     notes += _floor_note(plan.origin_coverage)
     return WeekSummary(
@@ -629,31 +839,52 @@ def list_products(search: Annotated[str | None, Field(max_length=MAX_SEARCH)] = 
 def find_product(query: Annotated[str, Field(min_length=1, max_length=MAX_SEARCH)],
                  limit: Annotated[int, Field(ge=1, le=25)] = 8,
                  lat: float | None = None, lon: float | None = None) -> ProductSearch:
-    """Look up catalog products exactly the way the planner does, so a hit
-    here is a planning candidate there. `query` is an ingredient name
-    ("basmati rice", "gluten free penne"); every significant word must
-    match (lowercase, stemmed, "fresh"/"of" ignored — see `tokens`). Items
+    """Look up catalog products by their words, the way the planner matches
+    a name it cannot match by meaning (a name no seed knows, with the
+    embedding model down): a hit here is a planning candidate then. The
+    planner matches by meaning first, and rank_alternatives shows its
+    candidates (Same item, Works instead, Looser match). `query` is an
+    ingredient name ("basmati rice", "gluten free penne"); every
+    significant word must match (lowercase, stemmed, "fresh"/"of" ignored —
+    see `tokens`). Items
     come back cheapest first, each priced at its cheapest store near
     lat/lon (the default location when omitted). `total` is the hit count
     before `limit` trims. Free — no LLM calls.
 
     Read `match` before `items`: "direct" — every token matched;
-    "relaxed" — nothing matched all tokens, so these are same-aisle
-    alternatives on the last word only, which the planner would OFFER as
-    substitutes but never select; "none" — nothing at all (try
-    list_products(search=...) for substring matching). An empty result is
-    an answer, not an error. `origin_status`/`origin_country` come from
-    ingested evidence; "unknown" is the common case."""
+    "generic" — nothing matched every token, but dropping descriptor words
+    (light, dark, toasted, ground, whole, dried, ...) did: "light brown
+    sugar" finds Brown Sugar 1kg. These ARE planning candidates — the planner
+    selects them and labels the line match="generic"; "relaxed" — not
+    even that, so these are same-aisle alternatives on the last word only,
+    which the planner would OFFER as substitutes but never select; "none" —
+    nothing at all (try list_products(search=...) for substring matching),
+    or a non-purchase such as water or ice, which the planner never buys.
+    An empty result is an answer, not an error. `origin_status`/
+    `origin_country` come from ingested evidence; "unknown" is the common
+    case."""
     from . import origins
-    from .nlsearch.units import tokens
+    from .nlsearch.units import generic_tokens, is_non_purchase, tokens
 
     lat, lon = _location(lat, lon)
     toks = tokens(query)
+    if is_non_purchase(query):
+        # planner parity: a plan skips these before retrieval, so no product
+        # is ever a candidate for them ("in water" on a can is not water)
+        return ProductSearch(query=query, tokens=toks, match="none", total=0, items=[],
+                             note=(f"{query!r} is never bought: plans skip water and "
+                                   "ice and list them under summary.skipped."))
     hits = _planner_candidates(query, lat, lon) if toks else []
+    generic = generic_tokens(query)
     if hits:
         match = "direct"
         note = (f"{len(hits)} product(s) match every token in {query!r}; "
                 "each is priced at its cheapest store in range.")
+    elif generic and (hits := _planner_candidates(query, lat, lon, generic=True)):
+        match = "generic"
+        note = (f"No product matches every token in {query!r}; these match "
+                f"{' '.join(generic)!r} once descriptor words are dropped. The "
+                "planner selects them as a generic match and says so in its notes.")
     else:
         if len(toks) > 1:
             hits = _planner_candidates(toks[-1], lat, lon)
@@ -758,32 +989,58 @@ def get_product(product_id: int, lat: float | None = None,
 def plan_recipe(slug: str,
                 exclude_origin: Annotated[list[str] | None, Field(max_length=MAX_LIST)] = None,
                 preference: Annotated[list[str] | None, Field(max_length=MAX_LIST)] = None,
-                verbose: bool = False) -> PlanResult:
+                verbose: bool = False,
+                lat: Annotated[float | None, Field(ge=-90, le=90)] = None,
+                lon: Annotated[float | None, Field(ge=-180, le=180)] = None,
+                max_km: Annotated[float | None, Field(ge=0.5, le=100)] = None,
+                allow_partial: bool = False,
+                basis: bool = False) -> PlanResult:
     """Run the full shopping-plan pipeline for a seeded recipe: an LLM
     matches every ingredient to the best-value product, with a model
-    router escalating hard cases. SLOW (10-60s) and costs real Claude
-    API credits. Get slugs from list_recipes first.
+    router escalating hard cases. SLOW (10-60s) and costs LLM API credits
+    unless the server runs in demo mode. Get slugs from list_recipes first.
+
+    Pass the shopper's location to get stores: any of lat/lon/max_km makes
+    the plan store-aware. Each line is then priced at its cheapest store
+    within max_km (0.5-100) of lat/lon (the server's default point when
+    omitted; any distance when max_km is omitted), `summary.trip` is the
+    recommended store split, and a chosen product no store in range sells
+    goes to `summary.out_of_range` (naming the nearest offer) instead of
+    being priced. Without a location, lines carry catalog prices and no
+    store.
 
     `exclude_origin` drops candidates positively evidenced as coming from
     those countries (e.g. ["United States"]) before the model ever sees
-    them — never candidates that merely lack evidence. `preference` is soft
+    them — never candidates that merely lack evidence. When that leaves an
+    ingredient with no candidate the call fails naming it, with the removed
+    products and the alternatives still available; with allow_partial=true
+    the rest is planned and the ingredient goes to `summary.out_of_range`
+    with those options. `preference` is soft
     guidance. Read `summary.origin_status` and `summary.coverage`
     (`spend_fraction`, `meets_floor`) before describing a basket as clean,
     because unverified lines are not verified-clean lines; `summary.notes`
     carries substitutions and the coverage warning. `summary` is the
     token-lean result; `verbose=True` also attaches `full` (the complete
-    ShoppingPlan with per-line reasoning and every trip option)."""
+    ShoppingPlan with per-line reasoning and every trip option).
+    `basis=true` adds `summary.basis`, what the plan was made from, for a
+    client that re-prices or ranks alternatives later; an agent never needs
+    it."""
+    _check_llm_budget()
     from . import flow
     from .nlsearch import PlanAborted
 
     _check_countries(exclude_origin, preference)
     try:
-        plan = flow.run(slug, exclude=exclude_origin, preference=preference)
-        return PlanResult(summary=_summarize_plan(plan), full=plan if verbose else None)
+        plan = flow.run(slug, exclude=exclude_origin, preference=preference,
+                        lat=lat, lon=lon, max_km=max_km, allow_partial=allow_partial)
+        return PlanResult(summary=_summarize_plan(plan, basis),
+                          full=plan if verbose else None)
     except ValueError as e:
         raise ToolError(f"{e}. Call list_recipes for valid slugs.") from e
     except PlanAborted as e:
-        raise ToolError(_gate_message(e)) from e
+        raise ToolError(_gate_message(e, allow_partial)) from e
+    except LLMError as e:
+        raise ToolError(_llm_message(e)) from e
 
 
 @server.tool(title="Plan from recipe text", annotations=_PLAN)
@@ -791,23 +1048,56 @@ def plan_from_text(recipe_text: Annotated[str, Field(max_length=MAX_TEXT)],
                    lat: float | None = None, lon: float | None = None,
                    exclude_origin: Annotated[list[str] | None, Field(max_length=MAX_LIST)] = None,
                    preference: Annotated[list[str] | None, Field(max_length=MAX_LIST)] = None,
-                   verbose: bool = False) -> PlanResult:
+                   verbose: bool = False,
+                   max_km: Annotated[float | None, Field(ge=0.5, le=100)] = None,
+                   allow_partial: bool = False,
+                   basis: bool = False) -> PlanResult:
     """Plan a shopping basket from PASTED RECIPE TEXT — include the full
     ingredient list (quantities optional) and any shopping notes
-    (budget, dietary exclusions); lat/lon optionally set the shopping
-    location. Parses the text, runs a staged SQL retrieval plan, then
-    the LLM selector. SLOW (10-60s) and costs real Claude API credits.
-    `summary.notes` starts with how the text was interpreted; `trip` is
-    the recommended store split. `verbose=True` attaches `full` with the
-    retrieval `plan_trace` and every trip option."""
+    (budget, dietary exclusions). Parses the text, runs a staged SQL
+    retrieval plan, then the LLM selector. SLOW (10-60s) and costs real
+    Claude API credits.
+
+    "Nearby" is lat/lon plus max_km: lat/lon set the shopping location
+    (the server's default point when omitted) and max_km (0.5-100) is how
+    far a store may be. max_km overrides any distance written in the text;
+    with neither, every store counts, however far.
+
+    allow_partial=true plans what the catalog can supply instead of
+    failing on the first gap — use it for a real recipe (e.g. one fetched
+    from a link): ingredients the catalog does not stock go to
+    `summary.not_stocked`, ingredients stocked but with no offer within
+    the distance/price/diet constraints go to `summary.out_of_range` (the
+    reason names the nearest offer outside them and the limit it breaks),
+    and the rest is priced. `total_cost`, `coverage` and `trip` then cover
+    the planned lines only and `notes` says "planned K of N ingredients" —
+    report the dropped ingredients too, never only the priced basket. With
+    allow_partial false (the default) any such gap is an error naming the
+    ingredients; when nothing at all can be planned it is an error either
+    way, and so is a budget the cheapest basket exceeds (budget_infeasible).
+    Water and ice are never bought: they, and anything past the
+    40-ingredient cap, go to `summary.skipped` either way.
+
+    Each line's `match` is "exact", "form" (purchase form swapped or
+    dropped: "cumin powder" -> Cumin Ground 100g) or "generic" (descriptor
+    words such as light/dark/toasted dropped: "light brown sugar" -> Brown
+    Sugar 1kg); generic lines are named in `notes`. Recipe lines that chose
+    the same product are one purchase (`also_lines`, `packs`), priced once.
+    `summary.notes` starts with how the text was interpreted; `trip` is the
+    recommended store split. `verbose=True` attaches `full` with the
+    retrieval `plan_trace` and every trip option. `basis=true` adds
+    `summary.basis` (see plan_recipe); an agent never needs it."""
+    _check_llm_budget()
     _check_countries(exclude_origin, preference)
     from . import flow
     from .nlsearch import PlanAborted, UnparseableRecipe
 
     try:
         plan = flow.run_nl(recipe_text, lat=lat, lon=lon,
-                           exclude=exclude_origin, preference=preference)
-        return PlanResult(summary=_summarize_plan(plan), full=plan if verbose else None)
+                           exclude=exclude_origin, preference=preference,
+                           max_km=max_km, allow_partial=allow_partial)
+        return PlanResult(summary=_summarize_plan(plan, basis),
+                          full=plan if verbose else None)
     except UnparseableRecipe as e:
         raise ToolError(
             "Couldn't find an ingredient list in that text. Paste a recipe "
@@ -819,15 +1109,91 @@ def plan_from_text(recipe_text: Annotated[str, Field(max_length=MAX_TEXT)],
         alert = e.execution.aborted
         steps = ", ".join(
             f"{s.step_id}:{s.outcome}" for s in e.execution.steps)
-        detail = ""
-        if alert and alert.details:
-            names = ", ".join(str(d.get("name", "?")) for d in alert.details)
-            detail = f" Affected: {names}."
         raise ToolError(
             f"Plan aborted before product selection — "
             f"{alert.code.value if alert else 'gate'}: "
-            f"{alert.message if alert else 'constraint infeasible'}."
-            f"{detail} (steps: {steps})") from e
+            f"{(alert.message if alert else 'constraint infeasible').rstrip('.')}."
+            f"{_affected(alert)}{_partial_hint(alert, allow_partial)} (steps: {steps})") from e
+    except LLMError as e:
+        raise ToolError(_llm_message(e)) from e
+
+
+class LineIn(BaseModel):
+    """One reviewed ingredient line for plan_from_lines: planned exactly as given."""
+    name: Annotated[str, Field(min_length=1, max_length=MAX_SEARCH)]
+    # RecipeLine's bound, checked here so a bad amount is named as this tool's argument
+    quantity: Annotated[float | None,
+                        Field(ge=0, le=MAX_LINE_QUANTITY, allow_inf_nan=False)] = None
+    unit: Annotated[str, Field(max_length=40)] = ""
+    note: Annotated[str, Field(max_length=300)] = ""
+    text: Annotated[str, Field(max_length=300)] = ""
+    confirmed: bool = True
+    # Who stated the amount; the hub passes the reviewed doc's own. A client
+    # writing lines itself is an assistant writing them.
+    amount_basis: AmountBasis = "written_by_assistant"
+
+
+@server.tool(title="Plan from reviewed lines", annotations=_PLAN)
+def plan_from_lines(doc_key: Annotated[str, Field(min_length=1, max_length=100)],
+                    lines: Annotated[list[LineIn] | None,
+                                     Field(max_length=MAX_DOC_LINES)] = None,
+                    title: Annotated[str | None, Field(max_length=200)] = None,
+                    servings: Annotated[int | None, Field(ge=1, le=MAX_SERVINGS)] = None,
+                    lat: Annotated[float | None, Field(ge=-90, le=90)] = None,
+                    lon: Annotated[float | None, Field(ge=-180, le=180)] = None,
+                    max_km: Annotated[float | None, Field(ge=0.5, le=100)] = None,
+                    exclude_origin: Annotated[list[str] | None,
+                                              Field(max_length=MAX_LIST)] = None,
+                    preference: Annotated[list[str] | None, Field(max_length=MAX_LIST)] = None,
+                    allow_partial: bool = False,
+                    basis: bool = False,
+                    verbose: bool = False) -> PlanResult:
+    """Plan a recipe the shopper has already reviewed, line by line, exactly as
+    reviewed: each line's name, quantity and unit are planned as given, with no
+    re-reading of the recipe. Name the recipe by `doc_key` (for example
+    "imp:1", the key of a recipe the shopper imported); the app fills in its
+    reviewed lines. A client without such an app passes `lines` itself (at
+    most 60, each {name, quantity, unit, note}), with `title` and `servings`
+    when known. The selector still picks the products, so this is SLOW and
+    costs LLM credits unless the server runs in demo mode.
+
+    Location, origin and allow_partial work as in plan_from_text. Every line
+    must be confirmed; an unconfirmed one is an error naming it. The result
+    is shaped like plan_from_text's: read `summary.notes` and the left-out
+    lists the same way."""
+    _check_llm_budget()
+    from . import flow
+    from .models import RecipeDoc
+    from .nlsearch import PlanAborted, UnparseableRecipe
+    from .recipe_doc import UnconfirmedLines, to_recipe_text, to_spec
+
+    if not lines:
+        raise ToolError(f"No lines for {doc_key!r}: plan_from_lines plans reviewed lines, "
+                        "which the app fills in for a doc_key it holds. Without it, pass "
+                        "`lines` (at most 60) or use plan_from_text for recipe text.")
+    _check_countries(exclude_origin, preference)
+    doc = RecipeDoc(
+        key=doc_key, title=title or doc_key, servings=servings,
+        servings_stated=servings is not None,
+        lines=[RecipeLine(line_no=i, text=ln.text or ln.name, name=ln.name,
+                          quantity=ln.quantity, unit=ln.unit, note=ln.note,
+                          confirmed=ln.confirmed, amount_basis=ln.amount_basis)
+               for i, ln in enumerate(lines, start=1)],
+        source=RecipeSource(kind="assistant", method="agent_written"))
+    try:
+        plan = flow.run_spec(to_spec(doc), lat=lat, lon=lon, exclude=exclude_origin,
+                             preference=preference, max_km=max_km,
+                             allow_partial=allow_partial, display_text=to_recipe_text(doc))
+        return PlanResult(summary=_summarize_plan(plan, basis),
+                          full=plan if verbose else None)
+    except UnconfirmedLines as e:
+        raise ToolError(f"{e}.") from e
+    except UnparseableRecipe as e:
+        raise ToolError("Nothing to plan: every line was empty.") from e
+    except PlanAborted as e:
+        raise ToolError(_gate_message(e, allow_partial)) from e
+    except LLMError as e:
+        raise ToolError(_llm_message(e)) from e
 
 
 @server.tool(title="Plan a week of dinners", annotations=_PLAN)
@@ -848,6 +1214,7 @@ def plan_week(days: Annotated[int, Field(ge=1, le=14)] = 5,
     ["dairy", "gluten"]). `verbose=True` attaches `full` with the retrieval
     trace and every trip option. SLOW (runs the LLM selector per day) and
     costs real Claude API credits — roughly one plan_recipe per day."""
+    _check_llm_budget()
     _check_countries(exclude_origin, preference)
     from . import weekplan
     from .nlsearch import PlanAborted
@@ -864,13 +1231,123 @@ def plan_week(days: Annotated[int, Field(ge=1, le=14)] = 5,
         raise ToolError(
             f"Week plan aborted — "
             f"{alert.code.value if alert else 'gate'}: "
-            f"{alert.message if alert else 'constraint infeasible'}") from e
+            f"{alert.message if alert else 'constraint infeasible'}{_affected(alert)}") from e
+    except LLMError as e:
+        raise ToolError(_llm_message(e)) from e
+
+
+@server.tool(title="Plan meals for one or two weeks", annotations=_PLAN)
+def plan_meals(dishes: Annotated[list[MealDish] | None, Field(max_length=12)] = None,
+               days: Annotated[int | None, Field(ge=1, le=14)] = None,
+               household_servings: Annotated[int | None, Field(ge=1, le=20)] = None,
+               proposed: Annotated[list[ProposedDish] | None, Field(max_length=12)] = None,
+               start_date: dt.date | None = None,
+               current: MealPlanContext | None = None,
+               my_recipe_docs: Annotated[list[RecipeDoc] | None, Field(max_length=12)] = None,
+               lat: Annotated[float | None, Field(ge=-90, le=90)] = None,
+               lon: Annotated[float | None, Field(ge=-180, le=180)] = None,
+               max_km: Annotated[float | None, Field(ge=0.5, le=100)] = None,
+               verbose: bool = False) -> MealPlanResult:
+    """Plan one or two weeks of meals from counted dishes, as in "3 Pepperoni Pizza + 2
+    Chicken Fried Rice + 7 mango milkshakes in 2 weeks": each count is that many meals, each
+    serving the household. `dishes` are [{recipe, count, slot?}], `recipe` a library slug, a
+    demo starter or a title; `days` is 1-14. Returns a draft for the shopper's Meal plan: the
+    meals by date, suggested trips with totals (demo prices), proposals the shopper must
+    confirm and names not found. It saves and approves nothing.
+
+    Only a dish whose title matches a recipe exactly (or as a plural) is placed. A misspelt or
+    other name ("chicken briyani") comes back in `summary.proposals` for the shopper to accept
+    and is never placed; a name that fits several recipes, or none, is in `summary.unmatched`
+    with the recipes it could be. A dish you write yourself takes `lines` (one ingredient with
+    its amount each) and `servings`. `proposed` (dishes an app read from the shopper's words
+    that need their yes), `current` (the shopper's plan), `start_date` and `my_recipe_docs`
+    are for an app to fill.
+
+    Report the meals and trips briefly, ask about every proposal and unmatched name, and
+    never state a storage time yourself: each trip's `reason` cites it. Quote nutrition only
+    as `summary.nutrition` words it, with "at least" where it says so and "(demo amounts)"
+    whenever it says demo amounts; never estimate a number. Only the shopper approves a
+    trip, in the Meal plan. SLOW when live (each new recipe is matched to products by the
+    LLM selector, once); instant in demo mode. `verbose=True` attaches `full`, the schedule."""
+    _check_llm_budget()
+    from .mealplan.assistant import PlanMealsError
+    from .mealplan.assistant import plan_meals as draft_meals
+
+    try:
+        return draft_meals(dishes, proposed, days=days, start_date=start_date,
+                           current=current, my_recipe_docs=my_recipe_docs,
+                           household_servings=household_servings, lat=lat, lon=lon,
+                           max_km=max_km, verbose=verbose)
+    except PlanMealsError as e:
+        raise ToolError(str(e)) from e
+    except LLMError as e:
+        raise ToolError(_llm_message(e)) from e
 
 
 # --- Provenance tools ----------------------------------------
 # Origin here is evidence, never inference. Records are ingested from the
 # companion claude-chrome-container tooling (Open Food Facts lookups and
 # package-label photo reads); nothing in this server guesses a country.
+
+# ─── Plan follow-ups (fast — no LLM) ─────────────────────────
+# What a cart does after a plan: rank the other products for one of its lines
+# and price it again with the shopper's choices. Both work from the plan's
+# basis (plan tools with basis=true), so nothing is re-parsed or re-selected.
+# An app calls them; the demo hub hides them from its model.
+
+def _basis_error(e: Exception) -> ToolError:
+    return ToolError(f"{str(e).rstrip('.')}.")
+
+
+@server.tool(title="Rank alternatives for a plan line", annotations=_READ_IDEM)
+def rank_alternatives(basis: PlanBasis,
+                      line_no: Annotated[int, Field(ge=1, le=MAX_DOC_LINES)],
+                      limit: Annotated[int, Field(ge=1, le=25)] = 12) -> AlternativeRanking:
+    """The other products that could fill one planned line, best first, with the
+    cart's own pick always listed (`current`). `basis` is `summary.basis` from a plan
+    tool called with basis=true; `line_no` is a planned line. No LLM and no write.
+
+    Order: the same ingredient first, then how many of the recipe's words match, whether
+    the cart's packs cover the recipe's amount, the origin preference (only when the plan
+    had one), the trip total after the swap, the cost of the recipe's amount, rating
+    (only to break exact ties) and catalog id; `ranking_text` says it in words and each
+    row's `rank_reason` says why it is below the row above. Every fact is from the
+    catalog or stated as unknown. `held_back` lists products the plan's origin exclusion
+    drops, with their evidence; they cannot be chosen. `lines` are every line the
+    purchase covers: choose a row by pinning each of them (reprice_plan)."""
+    from . import alternatives as alts
+
+    _check_countries(basis.exclude_origin, basis.preference)
+    try:
+        return alts.rank_alternatives(basis, line_no, limit)
+    except (alts.BasisError, alts.PinError) as e:
+        raise _basis_error(e) from e
+
+
+@server.tool(title="Re-price a plan", annotations=_READ_IDEM)
+def reprice_plan(basis: PlanBasis,
+                 pins: Annotated[list[Pin], Field(max_length=40)] | None = None) -> PlanResult:
+    """Price a finished plan again with the shopper's choices: `pins` are
+    {line_no, product_id}, one per line to change (a pin equal to the plan's pick is
+    dropped, which undoes a swap). Every other line keeps the plan's pick; merges, packs,
+    each line's cheapest offer in range and the trip are recomputed exactly as the plan
+    computed them, so with no pins the summary is the plan's own. No LLM and no write.
+
+    A pin must be a candidate for its line (rank_alternatives lists them), not held back
+    by the plan's origin exclusion and sold within the plan's distance and price cap;
+    otherwise the error says why (naming the country and field, or the nearest offer).
+    The result's `summary.basis` carries the merged pins, and `summary.notes` names each
+    line the shopper chose."""
+    from . import alternatives as alts
+    from . import flow
+
+    _check_countries(basis.exclude_origin, basis.preference)
+    try:
+        plan = flow.reprice(basis, pins or [])
+    except (alts.BasisError, alts.PinError, flow.RepriceError) as e:
+        raise _basis_error(e) from e
+    return PlanResult(summary=_summarize_plan(plan, basis=True))
+
 
 @server.tool(title="Get product origins", annotations=_READ)
 def get_product_origins(product_ids: Annotated[list[int] | None, Field(max_length=MAX_IDS)] = None,
@@ -883,8 +1360,8 @@ def get_product_origins(product_ids: Annotated[list[int] | None, Field(max_lengt
     product id. Free, no LLM calls.
 
     `by_status` counts EVERY product the ids/search selected, before the
-    `status` filter and before paging, so one call answers "62 products:
-    2 resolved, 60 unknown"; then `status="resolved"` pages through just
+    `status` filter and before paging, so one call answers "161 products:
+    2 resolved, 159 unknown"; then `status="resolved"` pages through just
     those. Read `status` before using `country`: only "resolved" carries
     usable evidence. "unknown" means no source published an origin,
     "conflicting" means sources disagreed and no winner was picked,
@@ -1076,9 +1553,11 @@ def review_origin_submission(submission_id: int, decision: str,
 
 @server.tool(title="Pipeline status", annotations=_READ)
 def pipeline_status(ctx: Context = None) -> PipelineStatus:  # type: ignore[assignment]
-    """Active configuration: routing strategy, models, confidence
-    threshold, DB target, and whether this caller may submit origin
-    readings (`write_tools`). Free — no LLM calls."""
+    """Active configuration: routing strategy, models (each a spec:
+    "gemini:<model>" or an Anthropic name), confidence threshold, DB
+    target, which LLM keys are configured, and whether this caller may
+    submit origin readings (`write_tools`). Reflects runtime overrides
+    from POST /settings/runtime. Free — no LLM calls."""
     from .config import redact_db_url, settings
 
     cfg = settings()
@@ -1095,6 +1574,9 @@ def pipeline_status(ctx: Context = None) -> PipelineStatus:  # type: ignore[assi
         mcp_auth="required" if cfg.mcp_auth_tokens else "anonymous",
         write_tools=("disabled" if transport == "http" and label == "anonymous"
                      else "enabled"),
+        classifier_model=cfg.classifier_model,
+        nl2sql_model=cfg.nl2sql_model,
+        gemini_key_configured=bool(cfg.gemini_api_key),
     )
 
 
@@ -1226,14 +1708,18 @@ def plan_dinner(recipe: str, exclude_origin: str = "", budget: str = "") -> str:
         f"Plan dinner for: {recipe}.\n\n"
         "Steps:\n"
         "1. Call list_recipes. If the request names a seeded recipe, use its "
-        "slug with plan_recipe; otherwise pass the text to plan_from_text. "
+        "slug with plan_recipe; otherwise pass the text to plan_from_text "
+        "(for a full recipe from elsewhere, with allow_partial=true). "
         "If an ingredient is in doubt, call find_product for it first and "
         "read `match` — \"relaxed\" hits are alternatives the planner would "
         "only offer, not candidates.\n"
         f"2. {exclude}{budget_line}Call the plan tool once; it is slow and "
         "costs credits.\n"
         "3. Report summary.total_cost, every line (ingredient → product, store, "
-        "price) and the recommended trip.\n"
+        "price; say so when its `match` is \"generic\") and the recommended "
+        "trip. Then name every entry in summary.not_stocked, "
+        "summary.out_of_range and summary.skipped with its reason: when any "
+        "is non-empty the priced basket is not the whole recipe.\n"
         "4. Report summary.origin_status and summary.coverage.spend_fraction "
         "VERBATIM as numbers, with coverage.lines_known of coverage.lines_total. "
         "Never describe the basket as clean, verified or free of a country "
@@ -1241,6 +1727,10 @@ def plan_dinner(recipe: str, exclude_origin: str = "", budget: str = "") -> str:
         "a line with no evidence is unknown, not foreign and not domestic.\n"
         "5. Name every entry in summary.notes (interpretation, substitutions, "
         "the coverage-floor warning) rather than summarising them away.\n"
+        "6. Nutrition: quote a figure only as the result words it, with \"at "
+        "least\" for an incomplete total, and say \"demo amounts\" whenever "
+        "its amounts are demo house amounts (demo_amounts true); never "
+        "estimate a nutrient yourself.\n"
         "If the tool returns an error about an origin gate, report the gate's "
         "message and the affected ingredients; do not retry with the exclusion "
         "silently dropped."

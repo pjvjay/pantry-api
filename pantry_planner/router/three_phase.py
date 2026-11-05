@@ -30,9 +30,11 @@ class ThreePhaseRouter:
         phase_b = call_classifier(recipe, products)
 
         # Phase C — weighted-sum thresholding
+        cfg = settings()
         model, complexity, reason = decide(
             phase_a, phase_b,
-            escalation_model=settings().selector_model_escalation,
+            escalation_model=cfg.selector_model_escalation,
+            default_model=cfg.selector_model_default,
         )
 
         return PreselectResult(

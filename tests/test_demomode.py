@@ -118,3 +118,28 @@ def test_three_phase_router_works_in_demo_mode():
     metrics = call_classifier(recipe, db.load_all_products())
     assert metrics.cost_usd == 0.0
     assert 1 <= metrics.match_confidence_1_to_10 <= 10
+
+
+def _closeness_before(name: str, p) -> tuple[int, int, int]:
+    """The first three keys of demomode.select_products as they were written inline before
+    units.semantic_key existed (feat/origin-alternatives)."""
+    from pantry_planner.nlsearch.units import head_noun, index_text, tokens
+
+    toks = set(tokens(name))
+    want = tokens(name)[-1] if tokens(name) else None
+    fresh = "fresh" in name.lower().split()
+    return (-len(toks & set(tokens(index_text(p.name, p.description)))),
+            0 if not fresh or "fresh" in f"{p.name} {p.description}".lower() else 1,
+            0 if want is not None and head_noun(p.name) == want else 1)
+
+
+def test_semantic_key_is_the_demo_selectors_key_unchanged():
+    from pantry_planner import db
+    from pantry_planner.nlsearch.units import semantic_key
+
+    names = {i.name for r in db.load_all_recipes() for i in r.ingredients} | {
+        "fresh coriander", "flour", "mustard", "light brown sugar", "", "of", "ground beef"}
+    products = db.load_all_products()
+    for name in sorted(names):
+        for p in products:
+            assert semantic_key(name, p) == _closeness_before(name, p), (name, p.name)

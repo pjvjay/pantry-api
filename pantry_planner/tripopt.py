@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from functools import lru_cache
 from itertools import combinations, permutations
 
 from .models import TripItem, TripOption
@@ -39,9 +40,16 @@ def _km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return math.hypot((lat1 - lat2) * 111.0, (lon1 - lon2) * 111.0 * coslat)
 
 
-def _trip_km(home: tuple[float, float], stores: list[StoreInfo]) -> float:
+# The alternatives ranking re-optimises one basket per candidate product, and
+# every candidate visits the same few store subsets: remembering each loop
+# turns the permutation search into a lookup after the first candidate.
+# StoreInfo is frozen, so a tuple of them is a key; a store whose location
+# changed is a different StoreInfo and misses the cache.
+@lru_cache(maxsize=4096)
+def _trip_km(home: tuple[float, float], stores: tuple[StoreInfo, ...]) -> float:
     """Shortest loop home -> every store -> home. Exact: brute force over
-    permutations (fine for the store counts we enumerate)."""
+    permutations (fine for the store counts we enumerate). `stores` is a
+    tuple so the result can be cached."""
     if not stores:
         return 0.0
     best = math.inf
@@ -56,12 +64,16 @@ def _trip_km(home: tuple[float, float], stores: list[StoreInfo]) -> float:
 
 def optimize_trips(matrix_rows: list[dict], basket: list[tuple[int, str]],
                    *, home_lat: float, home_lon: float,
-                   cost_per_km: float) -> list[TripOption]:
+                   cost_per_km: float,
+                   packs: dict[int, int] | None = None) -> list[TripOption]:
     """`matrix_rows`: mappings from build_price_matrix_sql. `basket`:
-    (product_id, product_name) per plan line — duplicates allowed and
-    priced per line. Returns the per-stop-count frontier sorted by number
-    of stops; exactly one option carries recommended=True and its per-item
-    store assignment."""
+    (product_id, product_name) per purchase — callers pass each product
+    once (flow.group_purchases, the week's merged list). `packs`: how many
+    packs of a product the basket buys (default 1); an item's price is the
+    store's pack price times that. Returns the per-stop-count frontier
+    sorted by number of stops; exactly one option carries recommended=True
+    and its per-item store assignment."""
+    packs = packs or {}
     stores: dict[int, StoreInfo] = {}
     price: dict[int, dict[int, float]] = {}          # store_id -> product -> price
     for r in matrix_rows:
@@ -93,11 +105,11 @@ def optimize_trips(matrix_rows: list[dict], basket: list[tuple[int, str]],
                     break
                 p, s = min(offers, key=lambda t: (t[0], t[1].id))
                 assignment[pid] = s
-                basket_cost += p
+                basket_cost += p * packs.get(pid, 1)
             if not feasible:
                 continue
             used = sorted({assignment[pid] for pid, _ in basket}, key=lambda s: s.id)
-            travel_km = _trip_km(home, used)
+            travel_km = _trip_km(home, tuple(used))
             total = basket_cost + travel_km * cost_per_km
             option = TripOption(
                 stores=[s.name for s in used],
@@ -120,7 +132,7 @@ def optimize_trips(matrix_rows: list[dict], basket: list[tuple[int, str]],
     best_option.items = [
         TripItem(product_id=pid, product_name=name,
                  store_name=best_assignment[pid].name,
-                 price=price[best_assignment[pid].id][pid])
+                 price=round(price[best_assignment[pid].id][pid] * packs.get(pid, 1), 2))
         for pid, name in basket
     ]
     return [opt for _t, opt, _a in options]

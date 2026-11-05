@@ -64,13 +64,12 @@ def _ids_named(fragment):
 
 
 def _pools(recipe):
-    """Per-ingredient candidate ids — the ground truth a line must respect."""
+    """Per-ingredient candidate ids — the ground truth a line must respect: the candidates
+    the library plan reads (flow.ingredient_pools; by meaning, the same item)."""
     from pantry_planner import flow
-    from pantry_planner.config import settings
 
-    cfg = settings()
-    raw = flow._ingredient_pools(recipe, cfg.default_lat, cfg.default_lon)
-    # Direct candidates only: relaxed (head-noun) matches are alternatives the
+    raw = flow.ingredient_pools(recipe)[0]
+    # Direct candidates only: relaxed matches (what works instead) are alternatives the
     # gate may offer, never candidates — see test_origin_round3.py.
     return {recipe.ingredients[k].name: {p.id for p in v["direct"]} for k, v in raw.items()}
 
@@ -155,7 +154,9 @@ def test_excluded_origin_never_ships_in_a_week_plan():
     from pantry_planner import db, weekplan
     from pantry_planner.nlsearch import PlanAborted
 
-    _mark([p.id for p in db.load_all_products()][:20])
+    # the first 20 by id: load_all_products has no order, and on Postgres a reseed after
+    # autovacuum can put rows back in another physical order than SQLite's rowid order
+    _mark(sorted(p.id for p in db.load_all_products())[:20])
     baseline = weekplan.plan_week(days=3)
     shipped = [w for w in baseline.shopping_list
                if w.origin and w.origin.manufactured_in == "United States"]
@@ -263,48 +264,47 @@ def test_preference_never_overrides_semantic_match():
 
 
 def _equal_match_pair():
-    """Find an ingredient with two candidates that tie on semantic match.
+    """Find an ingredient with two same-item candidates whose matcher scores are closer than
+    what a first-choice origin preference is worth (matcher.WEIGHTS["origin"]): the matcher
+    ranks one first with no preference, and the preference may turn it.
 
-    Preference is only a tie-break (rule 7), so the test needs a real tie.
-    Searching the seeded recipes for one is honest; inventing equality is not.
-    """
-    from pantry_planner import db
-    from pantry_planner.nlsearch.units import tokens
+    Preference only weighs in among products that are the same item (the group comes
+    first), so the test needs two of them that close. Searching the seeded recipes for them
+    is honest; inventing closeness is not. Returns (slug, ingredient, first, second)."""
+    from pantry_planner import db, flow
+    from pantry_planner.matching import matcher
 
     products = {p.id: p for p in db.load_all_products()}
     for recipe in db.load_all_recipes():
-        for ing_name, ids in _pools(recipe).items():
-            toks = set(tokens(ing_name))
-            by_overlap: dict[int, list] = {}
-            for pid in ids:
-                p = products[pid]
-                ov = len(toks & set(tokens(f"{p.name} {p.description}")))
-                by_overlap.setdefault(ov, []).append(p)
-            top = max(by_overlap) if by_overlap else None
-            if top is not None and len(by_overlap[top]) >= 2:
-                tied = sorted(by_overlap[top], key=lambda p: (p.price, p.id))
-                return recipe.slug, ing_name, tied[0], tied[-1]
+        pools, meanings = flow.ingredient_pools(recipe)
+        for k, pool in pools.items():
+            ranked = [r for r in matcher.rank_pool(meanings[k], pool["direct"])
+                      if r.group == "same_item"]
+            for a, b in zip(ranked, ranked[1:], strict=False):
+                if a.score - b.score < matcher.WEIGHTS["origin"] * 0.9:
+                    return (recipe.slug, recipe.ingredients[k].name, products[a.product_id],
+                            products[b.product_id])
     return None
 
 
 def test_preference_reaches_the_classic_planner():
-    """A genuine semantic tie, broken by preference toward the Canadian
-    product even though it costs more. Skips explicitly if the seeded
-    catalog offers no tie — a skip is visible; a vacuous pass is not."""
+    """Two products that are the same item with close scores; preference toward the Canadian
+    one turns the pick, though the matcher ranks it second without one. Skips explicitly if
+    the seeded catalog offers no such pair — a skip is visible; a vacuous pass is not."""
     from pantry_planner import flow
 
     pair = _equal_match_pair()
     if pair is None:
         pytest.skip("seeded catalog has no equal-match pair to break a tie on")
-    slug, ing_name, cheap, dear = pair
-    assert cheap.id != dear.id
-    _mark([dear.id], country="Canada", claim="product-of")
+    slug, ing_name, first, second = pair
+    assert first.id != second.id
+    _mark([second.id], country="Canada", claim="product-of")
 
     plain = {li.ingredient_name: li.product_id for li in flow.run(slug).line_items}
     pref = {li.ingredient_name: li.product_id
             for li in flow.run(slug, preference=["Canada"]).line_items}
-    assert plain[ing_name] == cheap.id, "no preference: cheapest of the tie"
-    assert pref[ing_name] == dear.id, "preference: the Canadian one of the tie"
+    assert plain[ing_name] == first.id, "no preference: the matcher's first"
+    assert pref[ing_name] == second.id, "preference: the Canadian one of the close pair"
 
 
 def test_preference_alone_marks_the_plan_as_an_origin_question():

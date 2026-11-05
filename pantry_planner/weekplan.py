@@ -97,12 +97,44 @@ def _week_coverage(shopping, origins_map, dropped):
         origins=origins_map or None, excluded_lines=dropped)
 
 
+def _attach_nutrition(day_plans: list[DayPlan], recipes: list[Recipe], notes: list[str],
+                      targets: dict | None) -> list:
+    """Each dinner's nutrition per serving, from the recipe's demo house amounts (never the
+    products or packs the selector chose), and a day total that counts dinner only. Returns
+    the sources behind the numbers. With the tables missing every day keeps nutrition None
+    and the plan says why."""
+    from . import nutrition
+
+    by_slug = {r.slug: r for r in recipes}
+    planned = [by_slug[dp.recipe_slug] for dp in day_plans]
+    if not planned:
+        return []
+    ref = nutrition.library_reference(planned)
+    if ref is None:
+        notes.append(nutrition.NOT_DEPLOYED)
+        return []
+    amounts = db.load_line_amounts([r.slug for r in planned])
+    cited: set[str] = set()
+    for i, (dp, recipe) in enumerate(zip(day_plans, planned, strict=True), start=1):
+        rn = nutrition.recipe_nutrition(
+            recipe, None if amounts is None else amounts.get(recipe.slug, {}), ref)
+        dp.nutrition = rn.nutrition
+        dp.day_totals = nutrition.day_totals(
+            [nutrition.day_meal(f"day{i}", f"lib:{recipe.slug}", recipe.name, "dinner",
+                                rn.nutrition)],
+            meals_counted=["dinner"], all_meals_planned=False, note=nutrition.DINNER_ONLY,
+            targets=targets)
+        cited.update(rn.nutrition.source_ids)
+    return nutrition.sources(ref, cited)
+
+
 def plan_week(*, days: int = 5, max_total_budget: float | None = None,
               exclude_tags: list[str] | None = None,
               lat: float | None = None, lon: float | None = None,
               max_distance_km: float | None = None,
               exclude_origin: list[str] | None = None,
-              preference: list[str] | None = None) -> WeekPlan:
+              preference: list[str] | None = None,
+              targets: dict | None = None) -> WeekPlan:
     cfg = settings()
     lat = lat if lat is not None else cfg.default_lat
     lon = lon if lon is not None else cfg.default_lon
@@ -149,6 +181,7 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
 
         # ── w2: head-noun fallback for strict-AND misses ──
         empty = [g for g in range(len(specs)) if not pools.get(g)]
+        rescued: set[int] = set()       # global ing_no answered by the fallback
         if empty:
             fb_specs = []
             fb_map = []
@@ -165,6 +198,7 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
                 for i, g in enumerate(fb_map):
                     if fb_pools.get(i):
                         pools[g] = fb_pools[i]
+                        rescued.add(g)
 
         # ── origin filter ──
         # Applied AFTER w1 and the w2 fallback, because w2 repopulates empty
@@ -173,6 +207,7 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
         # verdict — and origin_coverage below is what stops that leniency
         # from reading as a clean basket.
         from . import origins as origins_mod
+        from .flow import candidates_are
         all_ids = {p.id for pool in pools.values() for p in pool}
         origins_map = origins_mod.resolve_all(list(all_ids))
         origin_requested = bool(exclude_origin or preference)
@@ -242,8 +277,8 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
                              f"listed per ingredient."),
                     details=[{
                         "name": name,
-                        "reason": (f"all {len(by_name[name])} candidate(s) are evidenced "
-                                   f"as coming from an excluded country"),
+                        "reason": (f"{candidates_are(len(by_name[name]))} evidenced as "
+                                   "coming from an excluded country"),
                         "suggestions": [
                             f"{p.name} (${_charged(p):.2f}) — {country} via {field}"
                             for p, country, field in by_name[name][:5]],
@@ -325,6 +360,11 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
             llm_cost += result.cost_usd
             by_id = {p.id: p for p in products}
             by_line = {i.line_no: i for i in recipe.ingredients}
+            # A line the head-noun fallback rescued ("White Chocolate" ->
+            # chocolate products) matched only after dropping words: generic.
+            ri = next(i for i, r in enumerate(recipes) if r is recipe)
+            generic_lines = {ing.line_no for li, ing in enumerate(recipe.ingredients)
+                             if g_of[(ri, li)] in rescued}
             items, day_cost = [], 0.0
             for sel in result.selections:
                 prod, ing = by_id.get(sel.product_id), by_line.get(sel.line_no)
@@ -338,12 +378,16 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
                     confidence=sel.confidence, reasoning=sel.reasoning,
                     model_used=result.model_used,
                     store_name=prod.store_name, store_price=prod.store_price,
-                    origin=origins_mod.origin_receipt(origins_map.get(prod.id))))
+                    origin=origins_mod.origin_receipt(origins_map.get(prod.id)),
+                    match="generic" if sel.line_no in generic_lines else "exact"))
                 day_cost += charged
             day_plans.append(DayPlan(recipe_slug=recipe.slug,
                                      recipe_name=recipe.name,
                                      line_items=items,
                                      day_cost=round(day_cost, 2)))
+
+        # ── nutrition per dinner (recipe amounts only: selection and prices untouched) ──
+        nutrition_sources = _attach_nutrition(day_plans, recipes, notes, targets)
 
         # ── merged shopping list (shared products counted once) ──
         merged: dict[int, WeekItem] = {}
@@ -393,4 +437,5 @@ def plan_week(*, days: int = 5, max_total_budget: float | None = None,
                     budget=max_total_budget, notes=notes,
                     plan_trace=execution.steps, trip_options=trip_options,
                     origin_coverage=coverage, origin_status=origin_status,
-                    total_llm_cost_usd=round(llm_cost, 6))
+                    total_llm_cost_usd=round(llm_cost, 6),
+                    nutrition_sources=nutrition_sources)

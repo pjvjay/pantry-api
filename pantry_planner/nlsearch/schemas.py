@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from ..models import Product, Recipe
-
 
 class IngredientSpec(BaseModel):
     name: str                              # base or compound product name: "tomato sauce"
@@ -17,7 +15,12 @@ class IngredientSpec(BaseModel):
 
 class RecipeSpec(BaseModel):
     title: str = "Untitled recipe"
-    servings: int = 1
+    # None only between the parse and validate_parsed, which records it in
+    # servings_stated and clamps it to at least 1 (planning needs a number).
+    servings: int | None = 1
+    # False when the recipe did not say how many it serves, so the 1 above
+    # is a placeholder: a plan reports servings None rather than claim it.
+    servings_stated: bool = True
     ingredients: list[IngredientSpec] = Field(default_factory=list)
 
 
@@ -38,14 +41,21 @@ class ParsedInput(BaseModel):
     recipe: RecipeSpec = Field(default_factory=RecipeSpec)
     constraints: Constraints = Field(default_factory=Constraints)
     ignored: list[str] = Field(default_factory=list)   # values dropped by validation
+    # ingredients past the 40-ingredient cap (validate_parsed): not planned,
+    # but reported by name on the plan's `skipped` list
+    over_cap: list[IngredientSpec] = Field(default_factory=list)
     cost_usd: float = 0.0
     latency_ms: int = 0
     error: str | None = None
+    # The parse call's httptrace record (Gemini): where its latency went. Not shown to users.
+    http: dict | None = Field(default=None, exclude=True)
 
     def display_lines(self) -> list[str]:
         """The UI's 'Interpreted as:' chips."""
+        serves = (f"serves {self.recipe.servings}" if self.recipe.servings_stated
+                  else "servings not stated")
         out = [
-            f"{self.recipe.title} · serves {self.recipe.servings} · "
+            f"{self.recipe.title} · {serves} · "
             f"{len(self.recipe.ingredients)} ingredients"
         ]
         c = self.constraints
