@@ -31,8 +31,8 @@ first product left scored. Unlabelled products count as not a substitute.
 
 | Method | Sub@1 (first offer works instead) | Something offered | First offer would add an allergen without the rule |
 |---|---|---|---|
-| Words | 52% | 87% | 13% |
-| Meaning | 74% | 85% | 13% |
+| Words | 54% | 87% | 13% |
+| Meaning | 74% | 85% | 15% |
 
 | Ingredient | Words: first offer | Meaning: first offer |
 |---|---|---|
@@ -42,7 +42,7 @@ first product left scored. Unlabelled products count as not a substitute.
 | Butter | nothing | Ghee 400g (S) |
 | Canned Tomatoes | Roma Tomato (S) | Roma Tomato (S) |
 | Canned Tuna | Canned Corn Kernels 341ml (I) | Frozen White Fish 400g (S) |
-| Canola Oil | Toasted Sesame Oil 250ml (I) | Extra Virgin Olive Oil 500ml (S) |
+| Canola Oil | Extra Virgin Olive Oil 500ml (S) | Extra Virgin Olive Oil 500ml (S) |
 | Carrots | Fresh Garlic (I) | nothing |
 | Cheddar Cheese | Paneer 350g (S) | Mozzarella Shredded 200g (S) |
 | Chicken Breast | Chicken Thighs Bone-In (S) | Chicken Thighs Bone-In (S) |
@@ -80,7 +80,7 @@ first product left scored. Unlabelled products count as not a substitute.
 | Spaghetti | Penne Rigate 500g (S) | Fusilli Family Pack 900g (S) |
 | Turmeric | Cumin Ground 100g (I) | Curry Powder 100g (S) |
 | Wheat Bread | Sourdough Loaf (S) | Sourdough Loaf (S) |
-| Whole Milk | Coconut Milk Canned 400ml (S) | Oat Milk 1L (S) |
+| Whole Milk | Coconut Milk Canned 400ml (S) | Whipping Cream 35% 473ml (S) |
 | Yellow Onion | Green Onions (S) | Red Onion (S) |
 
 ## Per ingredient

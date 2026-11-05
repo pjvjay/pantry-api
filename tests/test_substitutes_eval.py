@@ -86,23 +86,26 @@ def test_with_the_exact_item_missing_the_first_safe_offer_is_scored():
         return Product(id=pid, name=name, description="", price=1.0, category="pantry",
                        dietary_tags=tags)
 
-    catalog = {1: p(1, "Penne", "gluten"), 2: p(2, "Gluten-Free Penne"),
-               3: p(3, "Spaghetti", "gluten"), 4: p(4, "Rice Noodles"), 5: p(5, "Pesto", "nuts")}
-    labels = {1: "E", 2: "E", 3: "S", 4: "S", 5: "C"}
+    # ids no catalog product has: seeds/allergens.json is read by product id
+    a, b, c, d, e = 9001, 9002, 9003, 9004, 9005
+    catalog = {a: p(a, "Penne", "gluten"), b: p(b, "Gluten-Free Penne"),
+               c: p(c, "Spaghetti", "gluten"), d: p(d, "Rice Noodles"), e: p(e, "Pesto", "nuts")}
+    labels = {a: "E", b: "E", c: "S", d: "S", e: "C"}
     # the plan bought Penne (this method's first E): spaghetti adds nothing, so it is offered
-    got = missing_exact([1, 2, 3, 4, 5], labels, catalog)
-    assert got["sub"] and got["first"] == (3, "S") and not got["unsafe_before_rule"]
+    got = missing_exact([a, b, c, d, e], labels, catalog)
+    assert got["sub"] and got["first"] == (c, "S") and not got["unsafe_before_rule"]
     # the plan bought the gluten-free penne: spaghetti adds gluten, so rice noodles come first
-    got = missing_exact([2, 1, 3, 4], labels, catalog)
-    assert got["first"] == (4, "S") and got["unsafe_before_rule"]
+    got = missing_exact([b, a, c, d], labels, catalog)
+    assert got["first"] == (d, "S") and got["unsafe_before_rule"]
     # nothing safe is left
-    got = missing_exact([2, 3, 5], {2: "E", 3: "S", 5: "C"}, catalog)
+    got = missing_exact([b, c, e], {b: "E", c: "S", e: "C"}, catalog)
     assert not got["offered"] and not got["sub"]
-    assert missing_exact([3], {3: "S"}, catalog) == {"applies": False}
+    assert missing_exact([c], {c: "S"}, catalog) == {"applies": False}
 
 
 def test_with_the_exact_item_missing_meaning_offers_a_substitute_more_often_than_words():
-    """Measured 2026-11-05: words Sub@1 52%, meaning 74% (evals/reports/substitutes.md)."""
+    """Measured 2026-11-05, with the reviewed allergens: words Sub@1 54%, meaning 74%
+    (evals/reports/substitutes.md)."""
     from evals import substitutes_eval
 
     share = substitutes_eval.score_missing()["share"]
