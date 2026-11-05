@@ -344,9 +344,12 @@ def build_substitute_sql(c: Constraints, subcategory: str, exclude_ids: list[int
 # ─── t5: full price matrix for the split-trip optimizer ──────
 
 def build_price_matrix_sql(product_ids: list[int], lat: float, lon: float,
-                           max_km: float | None = None) -> tuple[str, dict]:
+                           max_km: float | None = None,
+                           exclude_stores: list[int] | None = None) -> tuple[str, dict]:
     """Every (store, product) offer for the chosen basket, with store
-    distance — the input to the deterministic split-trip enumeration."""
+    distance — the input to the deterministic split-trip enumeration.
+    `exclude_stores`: store ids whose offers are left out (the meal plan's
+    stores the shopper turned off)."""
     params: dict = {f"mp{i}": pid for i, pid in enumerate(product_ids)}
     _location_params(params, lat, lon)
     # "IN ()" parses on SQLite and is a syntax error on Postgres — an empty
@@ -357,6 +360,10 @@ def build_price_matrix_sql(product_ids: list[int], lat: float, lon: float,
     if max_km is not None:
         params["maxdist2"] = max_km * max_km
         where.append(f"{DIST_EXPR} <= :maxdist2")
+    off = sorted(set(exclude_stores or []))
+    if off:
+        params.update({f"xs{i}": sid for i, sid in enumerate(off)})
+        where.append(f"sp.store_id NOT IN ({', '.join(f':xs{i}' for i in range(len(off)))})")
     sql = (
         "SELECT s.id AS store_id, s.name AS store_name, s.lat AS lat, s.lon AS lon,\n"
         f"       {DIST_EXPR} AS dist_km2, sp.product_id AS product_id, sp.price AS price\n"
@@ -364,6 +371,19 @@ def build_price_matrix_sql(product_ids: list[int], lat: float, lon: float,
         f"WHERE {' AND '.join(where)}\n"
         "ORDER BY s.id, sp.product_id"
     )
+    return sql, params
+
+
+def build_store_distances_sql(lat: float, lon: float) -> tuple[str, dict]:
+    """Every store with its place and its squared distance from (lat, lon), as the price
+    matrix measures it: the meal plan's list and map of stores to turn off and on."""
+    params: dict = {}
+    _location_params(params, lat, lon)
+    sql = ("SELECT s.id AS store_id, s.name AS store_name, s.address AS address,\n"
+           "       s.lat AS lat, s.lon AS lon,\n"
+           f"       {DIST_EXPR} AS dist_km2\n"
+           "FROM stores s\n"
+           "ORDER BY dist_km2, s.id")
     return sql, params
 
 

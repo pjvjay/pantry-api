@@ -82,6 +82,27 @@ def test_doc_bounds():
         _doc([{**LINES[0], "amount_basis": "a guess"}])
 
 
+def test_a_sources_image_url_is_a_link_to_an_http_or_https_image():
+    """The page's own preview image, kept as a link: an absolute http(s) URL of at most 2,000
+    characters, or none."""
+    def source(**kw) -> dict:
+        return {"kind": "web", "method": "jsonld", "url": "https://blog.example/dal", **kw}
+
+    assert _doc(LINES, source=source()).source.image_url is None
+    for url in ("https://blog.example/img/dal.jpg", "http://cdn.example/a.webp?w=640",
+                "HTTPS://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg",
+                "https://cdn.example/" + "a" * (2000 - 20)):
+        assert _doc(LINES, source=source(image_url=url)).source.image_url == url
+    for url in ("/img/dal.jpg", "//cdn.example/dal.jpg", "data:image/png;base64,iVBORw0KGgo=",
+                "javascript:alert(1)", "file:///etc/passwd", "ftp://cdn.example/dal.jpg",
+                "https://", "https://cdn.example/a b.jpg", "https://cdn.example/a\nb.jpg",
+                "https://[::1/x.jpg", "", "https://cdn.example/" + "a" * (2001 - 20)):
+        with pytest.raises(ValidationError):
+            _doc(LINES, source=source(image_url=url))
+    doc = _doc(LINES, source=source(image_url="https://blog.example/dal.jpg"))
+    assert RecipeDoc.model_validate(doc.model_dump(mode="json")) == doc
+
+
 def test_to_recipe_text_is_the_pasted_format():
     text = to_recipe_text(_doc(LINES, servings=2))
     assert text == ("Garlic Pasta (serves 2)\n"

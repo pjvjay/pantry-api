@@ -1,0 +1,12 @@
+{
+  "synthetic": true,
+  "label": "synthetic demo product",
+  "about": "Four made-up catalog items that the demo starter recipes need and the catalog lacks. Names, sizes, descriptions and prices are invented for the demo and are not any retailer's listing. Each row is in the exact products.json row format with the next free ids (166-169), so it can be appended to both products.json copies (pantry-api and pantry-db) unchanged.",
+  "price_basis": "synthetic demo prices in CAD, set near the catalog's other demo prices; not observed at any store",
+  "products": [
+  {"id": 166, "name": "Frozen Mango Chunks 600g", "description": "Frozen mango chunks, ready for smoothies and milkshakes, 600g bag", "price": 4.99, "category": "frozen", "subcategory": "fruit", "dietary_tags": "", "unit_size": "600g", "unit_qty": 600, "unit_uom": "g"},
+  {"id": 167, "name": "Sliced Pepperoni 175g", "description": "Sliced pepperoni, dry-cured pork and beef sausage, 175g pack", "price": 5.49, "category": "meat", "subcategory": "deli", "dietary_tags": "meat", "unit_size": "175g", "unit_qty": 175, "unit_uom": "g"},
+  {"id": 168, "name": "Pizza Dough 500g", "description": "Fresh refrigerated pizza dough ball, ready to stretch, 500g", "price": 3.99, "category": "bakery", "subcategory": "dough", "dietary_tags": "gluten", "unit_size": "500g", "unit_qty": 500, "unit_uom": "g"},
+  {"id": 169, "name": "Instant Yeast 3-Pack", "description": "Instant dry yeast (quick-rise), three 8g packets, 24g", "price": 2.49, "category": "pantry", "subcategory": "baking", "dietary_tags": "", "unit_size": "24g", "unit_qty": 24, "unit_uom": "g"}
+  ]
+}

@@ -202,7 +202,7 @@ def load_products(state: State, exclude: list | None = None,
                           "origins", "origin_dropped", "preference",
                           "origin_requested", "not_stocked", "out_of_range",
                           "skipped", "pool_hints", "match_levels",
-                          "ingredient_count", "exclude", "plan_path"])
+                          "ingredient_count", "exclude", "plan_path", "substitutes"])
 def parse_and_retrieve(state: State, recipe_text: str,
                        lat: float | None = None,
                        lon: float | None = None,
@@ -223,6 +223,7 @@ def parse_and_retrieve(state: State, recipe_text: str,
     (run_spec): it is planned as given, with no parse call of either kind,
     and `recipe_text` is only what the trace and the plan display."""
     from . import nlsearch
+    from .nlsearch.planner import substitutes_by_line, union_of_pools
 
     # With an exclusion active, retrieve wider than the usual cheapest-8 so
     # the 9th-cheapest non-excluded product is still there after filtering;
@@ -242,15 +243,9 @@ def parse_and_retrieve(state: State, recipe_text: str,
     if exclude and kept_pools:
         def price(p):
             return p.store_price if p.store_price is not None else p.price
-        seen: set[int] = set()
-        kept = []
-        for key, (direct, alts) in kept_pools.items():
-            if key in excluded:
-                continue
-            for p in sorted(direct, key=price)[:PER_INGREDIENT_LIMIT] + alts:
-                if p.id not in seen:
-                    seen.add(p.id)
-                    kept.append(p)
+        kept = union_of_pools([
+            sorted(direct, key=price)[:PER_INGREDIENT_LIMIT] + alts
+            for key, (direct, alts) in kept_pools.items() if key not in excluded])
     result = {
         "ingredient_count": len(r.recipe.ingredients),
         "product_count": len(kept),
@@ -279,6 +274,10 @@ def parse_and_retrieve(state: State, recipe_text: str,
         retrieval_stats=r.stats, not_stocked=r.not_stocked,
         out_of_range=[*r.out_of_range, *excluded.values()], skipped=r.skipped,
         pool_hints=pool_hints,
+        # Per line, the products its own pool holds only as t4 substitutes: the flat
+        # `products` list cannot say which line a substitute is for.
+        substitutes=substitutes_by_line(r.recipe, {
+            i: pool for i, pool in r.pools.items() if i not in excluded}),
         match_levels=r.match_levels, ingredient_count=r.ingredient_count)
 
 
@@ -320,6 +319,7 @@ def select_products(state: State) -> tuple[dict, State]:
                                           planned={i.name for i in recipe.ingredients}),
         origins_by_id=state.get("origins") or {},
         preference=state.get("preference") or [],
+        substitutes=state.get("substitutes"),
     )
 
     span = llm_span(
@@ -370,6 +370,7 @@ def escalate_if_needed(state: State) -> tuple[dict, State]:
         products,
         model=decision.escalation_model,
         enable_thinking=settings().enable_thinking_on_escalation,
+        substitutes=state.get("substitutes"),
     )
 
     merged = merge_selections(initial, escalated, decision.ingredients_to_rerun)
@@ -800,6 +801,11 @@ def _ingredient_pools(recipe, lat, lon):
             for g in range(len(specs)) if direct.get(g) or relaxed_by_g.get(g)}
 
 
+def candidates_are(n: int) -> str:
+    """'its only candidate is' or 'all 3 candidates are': the subject of an origin reason."""
+    return "its only candidate is" if n == 1 else f"all {n} candidates are"
+
+
 def apply_origin_constraint(products, pools, names, *, exclude, preference,
                             allow_partial: bool = False):
     """Filter `products` on origin and gate per ingredient.
@@ -878,7 +884,7 @@ def apply_origin_constraint(products, pools, names, *, exclude, preference,
 
     def reason(removed):
         countries = sorted({country for _, country, _ in removed})
-        return (f"all {len(removed)} candidate(s) are evidenced as coming from "
+        return (f"{candidates_are(len(removed))} evidenced as coming from "
                 f"{', '.join(countries)}, which this plan excludes")
 
     def suggestions(removed, alts):

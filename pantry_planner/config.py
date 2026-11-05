@@ -184,6 +184,10 @@ class Settings:
     # one nobody measured.
     origin_min_coverage: float
 
+    # Nutrition: a meal counted for fewer than this share of its ingredients, by count or by
+    # weight, is labelled below the floor ("totals are minimums"), never shown as clean.
+    nutrition_min_coverage: float
+
     # Split-trip optimizer: how a km of driving trades against basket
     # savings ("save $4 by adding a 6 km detour?"). CAD per km.
     travel_cost_per_km: float
@@ -224,6 +228,10 @@ class Settings:
     # "(demo)" on ratings) says so. A deployment with real offers sets it
     # false; the data stays labelled until someone decides it is real.
     offers_synthetic: bool = True
+    # STORES_SYNTHETIC (default on): the catalog's stores are fictional, so a calendar export
+    # names each as "<store> (demo store)" and never gives its seeded street address. Off only
+    # for a deployment whose stores are real.
+    stores_synthetic: bool = True
 
     @staticmethod
     def from_env() -> Settings:
@@ -253,6 +261,8 @@ class Settings:
             ),
             origin_min_coverage=float(
                 os.environ.get("ORIGIN_MIN_COVERAGE", "0.6")),
+            nutrition_min_coverage=float(
+                os.environ.get("NUTRITION_MIN_COVERAGE", "0.8")),
             default_lat=float(os.environ.get("DEFAULT_LAT", "49.28")),
             default_lon=float(os.environ.get("DEFAULT_LON", "-123.12")),
             travel_cost_per_km=float(os.environ.get("TRAVEL_COST_PER_KM", "0.50")),
@@ -269,6 +279,8 @@ class Settings:
             llm_daily_cost_cap_usd=_cost_cap(os.environ.get("LLM_DAILY_COST_CAP_USD", "")),
             offers_synthetic=os.environ.get("OFFERS_SYNTHETIC", "true").strip().lower()
             not in {"0", "false", "no"},
+            stores_synthetic=os.environ.get("STORES_SYNTHETIC", "true").strip().lower()
+            not in {"0", "false", "no", "off"},
         )
 
 

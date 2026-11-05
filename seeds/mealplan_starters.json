@@ -1,0 +1,1246 @@
+{
+  "v": 1,
+  "label": "demo recipe",
+  "synthetic": true,
+  "about": "Demo starter recipes for the example '3 Pepperoni Pizza + 2 Chicken Fried Rice + 3 chicken briyani + 7 mango milkshakes in 2 weeks', and the breakfasts, lunches and dinners the meal plan wizard offers for each diet, made only of products in products.json. Written for the demo: the quantities are demo house amounts, not from a published recipe, and every surface shows them as 'demo recipe'.",
+  "aliases_note": "`aliases` are whole alternative names matched at the alias step; `token_aliases` map one recipe-title token to misspellings of it. Plurals are also handled by the singularise rule; the plural aliases are listed so the alias step alone covers the example sentence.",
+  "diets_note": "`slot` is where a recipe is offered; `diets` lists which of vegan, vegetarian and pescatarian it satisfies and `contains` the contains-tags of the products its lines resolve to in demo mode, a seafood product's meat tag read as fish, and what the lines' own names say (a White Chocolate line is dairy whatever its product's tags) (mealplan/diets.py). `library_meta` says the same of the library recipes, whose recipes.json pantry-db shares byte for byte. tests/test_mealplan_seeds.py checks every entry against those products and names.",
+  "image_note": "`image_wiki` is the English Wikipedia article whose lead image shows the dish, or the closest dish there is a picture of: the console shows that image through the demo hub (GET /hub/images/wiki?title=), credited to Wikipedia and linked back. Only the title is kept here, never an image. Checked by hand against Wikipedia's API on 2026-10-10 (each title is an article with a lead image); the tests never call Wikipedia.",
+  "needs_demo_products": {
+    "Instant Yeast": 169,
+    "Pepperoni": 167,
+    "Frozen Mango": 166
+  },
+  "starters": [
+    {
+      "key": "pepperoni_pizza",
+      "doc_key": "starter:pepperoni_pizza",
+      "title": "Pepperoni Pizza",
+      "servings": 2,
+      "slot": "dinner",
+      "diets": [],
+      "contains": [
+        "dairy",
+        "gluten",
+        "meat"
+      ],
+      "image_wiki": "Pepperoni",
+      "label": "demo recipe",
+      "amounts_basis": "demo_house_amounts",
+      "aliases": [
+        "pepperoni pizzas",
+        "pizza pepperoni",
+        "pepperoni pie"
+      ],
+      "token_aliases": {
+        "pepperoni": [
+          "peperoni",
+          "pepperonni"
+        ]
+      },
+      "lines": [
+        {
+          "line_no": 1,
+          "text": "250 g All-Purpose Flour, for the dough",
+          "name": "All-Purpose Flour",
+          "quantity": 250,
+          "unit": "g",
+          "note": "for the dough",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 2,
+          "text": "4 g Instant Yeast, about 1 teaspoon",
+          "name": "Instant Yeast",
+          "quantity": 4,
+          "unit": "g",
+          "note": "about 1 teaspoon",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 3,
+          "text": "4 g Salt",
+          "name": "Salt",
+          "quantity": 4,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 4,
+          "text": "160 ml Water, lukewarm",
+          "name": "Water",
+          "quantity": 160,
+          "unit": "ml",
+          "note": "lukewarm",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 5,
+          "text": "15 ml Olive Oil, 1 tablespoon",
+          "name": "Olive Oil",
+          "quantity": 15,
+          "unit": "ml",
+          "note": "1 tablespoon",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 6,
+          "text": "120 ml Passata, for the sauce",
+          "name": "Passata",
+          "quantity": 120,
+          "unit": "ml",
+          "note": "for the sauce",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 7,
+          "text": "150 g Mozzarella",
+          "name": "Mozzarella",
+          "quantity": 150,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 8,
+          "text": "60 g Pepperoni, sliced",
+          "name": "Pepperoni",
+          "quantity": 60,
+          "unit": "g",
+          "note": "sliced",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 9,
+          "text": "1 g Dried Oregano",
+          "name": "Dried Oregano",
+          "quantity": 1,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        }
+      ],
+      "text": "Pepperoni Pizza (serves 2)\n- 250 g All-Purpose Flour, for the dough\n- 4 g Instant Yeast, about 1 teaspoon\n- 4 g Salt\n- 160 ml Water, lukewarm\n- 15 ml Olive Oil, 1 tablespoon\n- 120 ml Passata, for the sauce\n- 150 g Mozzarella\n- 60 g Pepperoni, sliced\n- 1 g Dried Oregano\n"
+    },
+    {
+      "key": "chicken_fried_rice",
+      "doc_key": "starter:chicken_fried_rice",
+      "title": "Chicken Fried Rice",
+      "servings": 4,
+      "slot": "dinner",
+      "diets": [],
+      "contains": [
+        "egg",
+        "gluten",
+        "meat",
+        "soy"
+      ],
+      "image_wiki": "Fried rice",
+      "label": "demo recipe",
+      "amounts_basis": "demo_house_amounts",
+      "aliases": [
+        "chicken fried rices",
+        "fried rice with chicken",
+        "chicken fried-rice"
+      ],
+      "token_aliases": {},
+      "lines": [
+        {
+          "line_no": 1,
+          "text": "300 g Jasmine Rice, cooked the day before and chilled",
+          "name": "Jasmine Rice",
+          "quantity": 300,
+          "unit": "g",
+          "note": "cooked the day before and chilled",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 2,
+          "text": "400 g Chicken Breast, diced",
+          "name": "Chicken Breast",
+          "quantity": 400,
+          "unit": "g",
+          "note": "diced",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 3,
+          "text": "3 each Eggs",
+          "name": "Eggs",
+          "quantity": 3,
+          "unit": "each",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 4,
+          "text": "100 g Carrots, diced",
+          "name": "Carrots",
+          "quantity": 100,
+          "unit": "g",
+          "note": "diced",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 5,
+          "text": "40 g Green Onions, about 4, sliced",
+          "name": "Green Onions",
+          "quantity": 40,
+          "unit": "g",
+          "note": "about 4, sliced",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 6,
+          "text": "8 g Garlic, about 2 cloves",
+          "name": "Garlic",
+          "quantity": 8,
+          "unit": "g",
+          "note": "about 2 cloves",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 7,
+          "text": "45 ml Soy Sauce, 3 tablespoons",
+          "name": "Soy Sauce",
+          "quantity": 45,
+          "unit": "ml",
+          "note": "3 tablespoons",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 8,
+          "text": "10 ml Sesame Oil, 2 teaspoons",
+          "name": "Sesame Oil",
+          "quantity": 10,
+          "unit": "ml",
+          "note": "2 teaspoons",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 9,
+          "text": "30 ml Canola Oil, 2 tablespoons",
+          "name": "Canola Oil",
+          "quantity": 30,
+          "unit": "ml",
+          "note": "2 tablespoons",
+          "amount_basis": "demo_house_amounts"
+        }
+      ],
+      "text": "Chicken Fried Rice (serves 4)\n- 300 g Jasmine Rice, cooked the day before and chilled\n- 400 g Chicken Breast, diced\n- 3 each Eggs\n- 100 g Carrots, diced\n- 40 g Green Onions, about 4, sliced\n- 8 g Garlic, about 2 cloves\n- 45 ml Soy Sauce, 3 tablespoons\n- 10 ml Sesame Oil, 2 teaspoons\n- 30 ml Canola Oil, 2 tablespoons\n"
+    },
+    {
+      "key": "chicken_biryani",
+      "doc_key": "starter:chicken_biryani",
+      "title": "Chicken Biryani",
+      "servings": 4,
+      "slot": "dinner",
+      "diets": [],
+      "contains": [
+        "dairy",
+        "meat"
+      ],
+      "image_wiki": "Biryani",
+      "label": "demo recipe",
+      "amounts_basis": "demo_house_amounts",
+      "aliases": [
+        "chicken briyani",
+        "chicken biriyani",
+        "chicken biriani",
+        "chicken biryanis"
+      ],
+      "token_aliases": {
+        "biryani": [
+          "briyani",
+          "biriyani",
+          "biriani"
+        ]
+      },
+      "lines": [
+        {
+          "line_no": 1,
+          "text": "800 g Chicken Thighs",
+          "name": "Chicken Thighs",
+          "quantity": 800,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 2,
+          "text": "400 g Basmati Rice",
+          "name": "Basmati Rice",
+          "quantity": 400,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 3,
+          "text": "200 g Plain Yogurt, for the marinade",
+          "name": "Plain Yogurt",
+          "quantity": 200,
+          "unit": "g",
+          "note": "for the marinade",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 4,
+          "text": "300 g Yellow Onion, 2 medium, sliced",
+          "name": "Yellow Onion",
+          "quantity": 300,
+          "unit": "g",
+          "note": "2 medium, sliced",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 5,
+          "text": "15 g Garlic, about 4 cloves",
+          "name": "Garlic",
+          "quantity": 15,
+          "unit": "g",
+          "note": "about 4 cloves",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 6,
+          "text": "20 g Ginger, a thumb-sized piece",
+          "name": "Ginger",
+          "quantity": 20,
+          "unit": "g",
+          "note": "a thumb-sized piece",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 7,
+          "text": "10 g Green Chilies, 2, slit",
+          "name": "Green Chilies",
+          "quantity": 10,
+          "unit": "g",
+          "note": "2, slit",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 8,
+          "text": "10 g Garam Masala",
+          "name": "Garam Masala",
+          "quantity": 10,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 9,
+          "text": "3 g Turmeric",
+          "name": "Turmeric",
+          "quantity": 3,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 10,
+          "text": "5 g Chili Powder",
+          "name": "Chili Powder",
+          "quantity": 5,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 11,
+          "text": "40 g Ghee",
+          "name": "Ghee",
+          "quantity": 40,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 12,
+          "text": "10 g Fresh Mint, a handful of leaves",
+          "name": "Fresh Mint",
+          "quantity": 10,
+          "unit": "g",
+          "note": "a handful of leaves",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 13,
+          "text": "15 g Cilantro, a handful",
+          "name": "Cilantro",
+          "quantity": 15,
+          "unit": "g",
+          "note": "a handful",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 14,
+          "text": "3 g Green Cardamom Pods, about 6 pods",
+          "name": "Green Cardamom Pods",
+          "quantity": 3,
+          "unit": "g",
+          "note": "about 6 pods",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 15,
+          "text": "8 g Salt",
+          "name": "Salt",
+          "quantity": 8,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        }
+      ],
+      "text": "Chicken Biryani (serves 4)\n- 800 g Chicken Thighs\n- 400 g Basmati Rice\n- 200 g Plain Yogurt, for the marinade\n- 300 g Yellow Onion, 2 medium, sliced\n- 15 g Garlic, about 4 cloves\n- 20 g Ginger, a thumb-sized piece\n- 10 g Green Chilies, 2, slit\n- 10 g Garam Masala\n- 3 g Turmeric\n- 5 g Chili Powder\n- 40 g Ghee\n- 10 g Fresh Mint, a handful of leaves\n- 15 g Cilantro, a handful\n- 3 g Green Cardamom Pods, about 6 pods\n- 8 g Salt\n"
+    },
+    {
+      "key": "mango_milkshake",
+      "doc_key": "starter:mango_milkshake",
+      "title": "Mango Milkshake",
+      "servings": 2,
+      "slot": "snack",
+      "diets": [
+        "vegetarian",
+        "pescatarian"
+      ],
+      "contains": [
+        "dairy"
+      ],
+      "image_wiki": "Milkshake",
+      "label": "demo recipe",
+      "amounts_basis": "demo_house_amounts",
+      "aliases": [
+        "mango milkshakes",
+        "mango milk shake",
+        "mango milk shakes",
+        "mango shake",
+        "mango shakes"
+      ],
+      "token_aliases": {
+        "milkshake": [
+          "milkshakes",
+          "milk shake",
+          "milk shakes"
+        ]
+      },
+      "lines": [
+        {
+          "line_no": 1,
+          "text": "250 g Frozen Mango",
+          "name": "Frozen Mango",
+          "quantity": 250,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 2,
+          "text": "500 ml Whole Milk, 2 cups",
+          "name": "Whole Milk",
+          "quantity": 500,
+          "unit": "ml",
+          "note": "2 cups",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 3,
+          "text": "20 g Granulated Sugar, to taste",
+          "name": "Granulated Sugar",
+          "quantity": 20,
+          "unit": "g",
+          "note": "to taste",
+          "amount_basis": "demo_house_amounts"
+        }
+      ],
+      "text": "Mango Milkshake (serves 2)\n- 250 g Frozen Mango\n- 500 ml Whole Milk, 2 cups\n- 20 g Granulated Sugar, to taste\n"
+    },
+    {
+      "key": "scrambled_eggs_on_toast",
+      "doc_key": "starter:scrambled_eggs_on_toast",
+      "title": "Scrambled Eggs on Toast",
+      "servings": 2,
+      "slot": "breakfast",
+      "diets": [
+        "vegetarian",
+        "pescatarian"
+      ],
+      "contains": [
+        "dairy",
+        "egg",
+        "gluten"
+      ],
+      "image_wiki": "Scrambled eggs",
+      "label": "demo recipe",
+      "amounts_basis": "demo_house_amounts",
+      "aliases": [
+        "eggs on toast",
+        "scrambled egg on toast",
+        "scrambled eggs and toast"
+      ],
+      "token_aliases": {},
+      "lines": [
+        {
+          "line_no": 1,
+          "text": "4 each Eggs, beaten",
+          "name": "Eggs",
+          "quantity": 4,
+          "unit": "each",
+          "note": "beaten",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 2,
+          "text": "15 g Butter",
+          "name": "Butter",
+          "quantity": 15,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 3,
+          "text": "150 g Wheat Bread, about 4 slices, toasted",
+          "name": "Wheat Bread",
+          "quantity": 150,
+          "unit": "g",
+          "note": "about 4 slices, toasted",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 4,
+          "text": "10 g Green Onions, sliced",
+          "name": "Green Onions",
+          "quantity": 10,
+          "unit": "g",
+          "note": "sliced",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 5,
+          "text": "1 g Salt, a pinch",
+          "name": "Salt",
+          "quantity": 1,
+          "unit": "g",
+          "note": "a pinch",
+          "amount_basis": "demo_house_amounts"
+        }
+      ],
+      "text": "Scrambled Eggs on Toast (serves 2)\n- 4 each Eggs, beaten\n- 15 g Butter\n- 150 g Wheat Bread, about 4 slices, toasted\n- 10 g Green Onions, sliced\n- 1 g Salt, a pinch\n"
+    },
+    {
+      "key": "yogurt_fruit_bowl",
+      "doc_key": "starter:yogurt_fruit_bowl",
+      "title": "Yogurt Fruit Bowl",
+      "servings": 2,
+      "slot": "breakfast",
+      "diets": [
+        "vegetarian",
+        "pescatarian"
+      ],
+      "contains": [
+        "dairy"
+      ],
+      "image_wiki": "Yogurt",
+      "label": "demo recipe",
+      "amounts_basis": "demo_house_amounts",
+      "aliases": [
+        "yogurt fruit bowls",
+        "fruit yogurt bowl",
+        "fruit and yogurt bowl"
+      ],
+      "token_aliases": {},
+      "lines": [
+        {
+          "line_no": 1,
+          "text": "300 g Plain Yogurt",
+          "name": "Plain Yogurt",
+          "quantity": 300,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 2,
+          "text": "200 g Frozen Mango, thawed overnight in the fridge",
+          "name": "Frozen Mango",
+          "quantity": 200,
+          "unit": "g",
+          "note": "thawed overnight in the fridge",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 3,
+          "text": "10 g Granulated Sugar, to taste",
+          "name": "Granulated Sugar",
+          "quantity": 10,
+          "unit": "g",
+          "note": "to taste",
+          "amount_basis": "demo_house_amounts"
+        }
+      ],
+      "text": "Yogurt Fruit Bowl (serves 2)\n- 300 g Plain Yogurt\n- 200 g Frozen Mango, thawed overnight in the fridge\n- 10 g Granulated Sugar, to taste\n"
+    },
+    {
+      "key": "ginger_congee",
+      "doc_key": "starter:ginger_congee",
+      "title": "Ginger Congee",
+      "servings": 2,
+      "slot": "breakfast",
+      "diets": [
+        "vegan",
+        "vegetarian",
+        "pescatarian"
+      ],
+      "contains": [
+        "gluten",
+        "soy"
+      ],
+      "image_wiki": "Congee",
+      "label": "demo recipe",
+      "amounts_basis": "demo_house_amounts",
+      "aliases": [
+        "ginger congees",
+        "congee with ginger",
+        "ginger porridge"
+      ],
+      "token_aliases": {},
+      "lines": [
+        {
+          "line_no": 1,
+          "text": "150 g Jasmine Rice, rinsed",
+          "name": "Jasmine Rice",
+          "quantity": 150,
+          "unit": "g",
+          "note": "rinsed",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 2,
+          "text": "1500 ml Water",
+          "name": "Water",
+          "quantity": 1500,
+          "unit": "ml",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 3,
+          "text": "15 g Ginger, cut in thin matchsticks",
+          "name": "Ginger",
+          "quantity": 15,
+          "unit": "g",
+          "note": "cut in thin matchsticks",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 4,
+          "text": "20 g Green Onions, sliced",
+          "name": "Green Onions",
+          "quantity": 20,
+          "unit": "g",
+          "note": "sliced",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 5,
+          "text": "15 ml Soy Sauce, 1 tablespoon",
+          "name": "Soy Sauce",
+          "quantity": 15,
+          "unit": "ml",
+          "note": "1 tablespoon",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 6,
+          "text": "5 ml Sesame Oil, 1 teaspoon",
+          "name": "Sesame Oil",
+          "quantity": 5,
+          "unit": "ml",
+          "note": "1 teaspoon",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 7,
+          "text": "2 g Salt",
+          "name": "Salt",
+          "quantity": 2,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        }
+      ],
+      "text": "Ginger Congee (serves 2)\n- 150 g Jasmine Rice, rinsed\n- 1500 ml Water\n- 15 g Ginger, cut in thin matchsticks\n- 20 g Green Onions, sliced\n- 15 ml Soy Sauce, 1 tablespoon\n- 5 ml Sesame Oil, 1 teaspoon\n- 2 g Salt\n"
+    },
+    {
+      "key": "tomato_garlic_toast",
+      "doc_key": "starter:tomato_garlic_toast",
+      "title": "Tomato Garlic Toast",
+      "servings": 2,
+      "slot": "breakfast",
+      "diets": [
+        "vegan",
+        "vegetarian",
+        "pescatarian"
+      ],
+      "contains": [
+        "gluten"
+      ],
+      "image_wiki": "Pa amb tomàquet",
+      "label": "demo recipe",
+      "amounts_basis": "demo_house_amounts",
+      "aliases": [
+        "tomato garlic toasts",
+        "garlic tomato toast",
+        "tomato toast"
+      ],
+      "token_aliases": {},
+      "lines": [
+        {
+          "line_no": 1,
+          "text": "150 g Wheat Bread, about 4 slices, toasted",
+          "name": "Wheat Bread",
+          "quantity": 150,
+          "unit": "g",
+          "note": "about 4 slices, toasted",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 2,
+          "text": "200 ml Diced Tomatoes, about a quarter of a can",
+          "name": "Diced Tomatoes",
+          "quantity": 200,
+          "unit": "ml",
+          "note": "about a quarter of a can",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 3,
+          "text": "5 g Garlic, 1 clove, halved",
+          "name": "Garlic",
+          "quantity": 5,
+          "unit": "g",
+          "note": "1 clove, halved",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 4,
+          "text": "15 ml Olive Oil, 1 tablespoon",
+          "name": "Olive Oil",
+          "quantity": 15,
+          "unit": "ml",
+          "note": "1 tablespoon",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 5,
+          "text": "1 g Salt, a pinch",
+          "name": "Salt",
+          "quantity": 1,
+          "unit": "g",
+          "note": "a pinch",
+          "amount_basis": "demo_house_amounts"
+        }
+      ],
+      "text": "Tomato Garlic Toast (serves 2)\n- 150 g Wheat Bread, about 4 slices, toasted\n- 200 ml Diced Tomatoes, about a quarter of a can\n- 5 g Garlic, 1 clove, halved\n- 15 ml Olive Oil, 1 tablespoon\n- 1 g Salt, a pinch\n"
+    },
+    {
+      "key": "salmon_scrambled_eggs",
+      "doc_key": "starter:salmon_scrambled_eggs",
+      "title": "Salmon Scrambled Eggs",
+      "servings": 2,
+      "slot": "breakfast",
+      "diets": [
+        "pescatarian"
+      ],
+      "contains": [
+        "dairy",
+        "egg",
+        "fish"
+      ],
+      "image_wiki": "Smoked salmon",
+      "label": "demo recipe",
+      "amounts_basis": "demo_house_amounts",
+      "aliases": [
+        "salmon and scrambled eggs",
+        "scrambled eggs with salmon",
+        "salmon scramble"
+      ],
+      "token_aliases": {},
+      "lines": [
+        {
+          "line_no": 1,
+          "text": "4 each Eggs, beaten",
+          "name": "Eggs",
+          "quantity": 4,
+          "unit": "each",
+          "note": "beaten",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 2,
+          "text": "150 g Salmon Fillet, cooked and flaked",
+          "name": "Salmon Fillet",
+          "quantity": 150,
+          "unit": "g",
+          "note": "cooked and flaked",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 3,
+          "text": "10 g Butter",
+          "name": "Butter",
+          "quantity": 10,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 4,
+          "text": "10 g Green Onions, sliced",
+          "name": "Green Onions",
+          "quantity": 10,
+          "unit": "g",
+          "note": "sliced",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 5,
+          "text": "1 g Salt, a pinch",
+          "name": "Salt",
+          "quantity": 1,
+          "unit": "g",
+          "note": "a pinch",
+          "amount_basis": "demo_house_amounts"
+        }
+      ],
+      "text": "Salmon Scrambled Eggs (serves 2)\n- 4 each Eggs, beaten\n- 150 g Salmon Fillet, cooked and flaked\n- 10 g Butter\n- 10 g Green Onions, sliced\n- 1 g Salt, a pinch\n"
+    },
+    {
+      "key": "tuna_melt",
+      "doc_key": "starter:tuna_melt",
+      "title": "Tuna Melt",
+      "servings": 2,
+      "slot": "lunch",
+      "diets": [
+        "pescatarian"
+      ],
+      "contains": [
+        "dairy",
+        "fish",
+        "gluten"
+      ],
+      "image_wiki": "Melt sandwich",
+      "label": "demo recipe",
+      "amounts_basis": "demo_house_amounts",
+      "aliases": [
+        "tuna melts",
+        "tuna melt sandwich",
+        "tuna melt sandwiches"
+      ],
+      "token_aliases": {},
+      "lines": [
+        {
+          "line_no": 1,
+          "text": "170 g Canned Tuna, 1 can, drained",
+          "name": "Canned Tuna",
+          "quantity": 170,
+          "unit": "g",
+          "note": "1 can, drained",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 2,
+          "text": "60 g Cheddar Cheese, grated",
+          "name": "Cheddar Cheese",
+          "quantity": 60,
+          "unit": "g",
+          "note": "grated",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 3,
+          "text": "150 g Wheat Bread, about 4 slices",
+          "name": "Wheat Bread",
+          "quantity": 150,
+          "unit": "g",
+          "note": "about 4 slices",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 4,
+          "text": "10 g Butter, for the pan",
+          "name": "Butter",
+          "quantity": 10,
+          "unit": "g",
+          "note": "for the pan",
+          "amount_basis": "demo_house_amounts"
+        }
+      ],
+      "text": "Tuna Melt (serves 2)\n- 170 g Canned Tuna, 1 can, drained\n- 60 g Cheddar Cheese, grated\n- 150 g Wheat Bread, about 4 slices\n- 10 g Butter, for the pan\n"
+    },
+    {
+      "key": "garlic_broccoli_penne",
+      "doc_key": "starter:garlic_broccoli_penne",
+      "title": "Garlic Broccoli Penne",
+      "servings": 2,
+      "slot": "lunch",
+      "diets": [
+        "vegan",
+        "vegetarian",
+        "pescatarian"
+      ],
+      "contains": [
+        "gluten"
+      ],
+      "image_wiki": "Pasta primavera",
+      "label": "demo recipe",
+      "amounts_basis": "demo_house_amounts",
+      "aliases": [
+        "garlic broccoli pennes",
+        "broccoli penne",
+        "penne with broccoli and garlic"
+      ],
+      "token_aliases": {},
+      "lines": [
+        {
+          "line_no": 1,
+          "text": "200 g Penne",
+          "name": "Penne",
+          "quantity": 200,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 2,
+          "text": "250 g Broccoli, cut in florets",
+          "name": "Broccoli",
+          "quantity": 250,
+          "unit": "g",
+          "note": "cut in florets",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 3,
+          "text": "10 g Garlic, about 3 cloves, sliced",
+          "name": "Garlic",
+          "quantity": 10,
+          "unit": "g",
+          "note": "about 3 cloves, sliced",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 4,
+          "text": "30 ml Olive Oil, 2 tablespoons",
+          "name": "Olive Oil",
+          "quantity": 30,
+          "unit": "ml",
+          "note": "2 tablespoons",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 5,
+          "text": "1 g Chili Powder, a pinch",
+          "name": "Chili Powder",
+          "quantity": 1,
+          "unit": "g",
+          "note": "a pinch",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 6,
+          "text": "2 g Salt",
+          "name": "Salt",
+          "quantity": 2,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        }
+      ],
+      "text": "Garlic Broccoli Penne (serves 2)\n- 200 g Penne\n- 250 g Broccoli, cut in florets\n- 10 g Garlic, about 3 cloves, sliced\n- 30 ml Olive Oil, 2 tablespoons\n- 1 g Chili Powder, a pinch\n- 2 g Salt\n"
+    },
+    {
+      "key": "tomato_pilaf",
+      "doc_key": "starter:tomato_pilaf",
+      "title": "Tomato Pilaf",
+      "servings": 2,
+      "slot": "lunch",
+      "diets": [
+        "vegan",
+        "vegetarian",
+        "pescatarian"
+      ],
+      "contains": [],
+      "image_wiki": "Pilaf",
+      "label": "demo recipe",
+      "amounts_basis": "demo_house_amounts",
+      "aliases": [
+        "tomato pilafs",
+        "tomato pulao",
+        "tomato pilau"
+      ],
+      "token_aliases": {},
+      "lines": [
+        {
+          "line_no": 1,
+          "text": "200 g Basmati Rice, rinsed",
+          "name": "Basmati Rice",
+          "quantity": 200,
+          "unit": "g",
+          "note": "rinsed",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 2,
+          "text": "200 ml Diced Tomatoes",
+          "name": "Diced Tomatoes",
+          "quantity": 200,
+          "unit": "ml",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 3,
+          "text": "100 g Yellow Onion, 1 small, sliced",
+          "name": "Yellow Onion",
+          "quantity": 100,
+          "unit": "g",
+          "note": "1 small, sliced",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 4,
+          "text": "5 g Garlic, 1 clove, minced",
+          "name": "Garlic",
+          "quantity": 5,
+          "unit": "g",
+          "note": "1 clove, minced",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 5,
+          "text": "5 g Ginger, grated",
+          "name": "Ginger",
+          "quantity": 5,
+          "unit": "g",
+          "note": "grated",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 6,
+          "text": "1 g Turmeric",
+          "name": "Turmeric",
+          "quantity": 1,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 7,
+          "text": "2 g Chili Powder",
+          "name": "Chili Powder",
+          "quantity": 2,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 8,
+          "text": "20 ml Canola Oil, 4 teaspoons",
+          "name": "Canola Oil",
+          "quantity": 20,
+          "unit": "ml",
+          "note": "4 teaspoons",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 9,
+          "text": "3 g Salt",
+          "name": "Salt",
+          "quantity": 3,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 10,
+          "text": "5 g Cilantro, chopped, to finish",
+          "name": "Cilantro",
+          "quantity": 5,
+          "unit": "g",
+          "note": "chopped, to finish",
+          "amount_basis": "demo_house_amounts"
+        }
+      ],
+      "text": "Tomato Pilaf (serves 2)\n- 200 g Basmati Rice, rinsed\n- 200 ml Diced Tomatoes\n- 100 g Yellow Onion, 1 small, sliced\n- 5 g Garlic, 1 clove, minced\n- 5 g Ginger, grated\n- 1 g Turmeric\n- 2 g Chili Powder\n- 20 ml Canola Oil, 4 teaspoons\n- 3 g Salt\n- 5 g Cilantro, chopped, to finish\n"
+    },
+    {
+      "key": "ginger_soy_salmon",
+      "doc_key": "starter:ginger_soy_salmon",
+      "title": "Ginger Soy Salmon",
+      "servings": 2,
+      "slot": "dinner",
+      "diets": [
+        "pescatarian"
+      ],
+      "contains": [
+        "fish",
+        "gluten",
+        "soy"
+      ],
+      "image_wiki": "Fish steak",
+      "label": "demo recipe",
+      "amounts_basis": "demo_house_amounts",
+      "aliases": [
+        "ginger soy salmons",
+        "soy ginger salmon",
+        "ginger salmon"
+      ],
+      "token_aliases": {},
+      "lines": [
+        {
+          "line_no": 1,
+          "text": "400 g Salmon Fillet, 2 portions",
+          "name": "Salmon Fillet",
+          "quantity": 400,
+          "unit": "g",
+          "note": "2 portions",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 2,
+          "text": "200 g Jasmine Rice",
+          "name": "Jasmine Rice",
+          "quantity": 200,
+          "unit": "g",
+          "note": "",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 3,
+          "text": "250 g Broccoli, cut in florets",
+          "name": "Broccoli",
+          "quantity": 250,
+          "unit": "g",
+          "note": "cut in florets",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 4,
+          "text": "30 ml Soy Sauce, 2 tablespoons",
+          "name": "Soy Sauce",
+          "quantity": 30,
+          "unit": "ml",
+          "note": "2 tablespoons",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 5,
+          "text": "10 g Ginger, grated",
+          "name": "Ginger",
+          "quantity": 10,
+          "unit": "g",
+          "note": "grated",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 6,
+          "text": "5 g Garlic, 1 clove, grated",
+          "name": "Garlic",
+          "quantity": 5,
+          "unit": "g",
+          "note": "1 clove, grated",
+          "amount_basis": "demo_house_amounts"
+        },
+        {
+          "line_no": 7,
+          "text": "10 ml Sesame Oil, 2 teaspoons",
+          "name": "Sesame Oil",
+          "quantity": 10,
+          "unit": "ml",
+          "note": "2 teaspoons",
+          "amount_basis": "demo_house_amounts"
+        }
+      ],
+      "text": "Ginger Soy Salmon (serves 2)\n- 400 g Salmon Fillet, 2 portions\n- 200 g Jasmine Rice\n- 250 g Broccoli, cut in florets\n- 30 ml Soy Sauce, 2 tablespoons\n- 10 g Ginger, grated\n- 5 g Garlic, 1 clove, grated\n- 10 ml Sesame Oil, 2 teaspoons\n"
+    }
+  ],
+  "library_meta": {
+    "pbj_sandwich": {
+      "slot": "lunch",
+      "diets": [
+        "vegetarian",
+        "pescatarian"
+      ],
+      "contains": [
+        "dairy",
+        "gluten",
+        "nuts"
+      ],
+      "image_wiki": "Peanut butter and jelly sandwich"
+    },
+    "spaghetti_bolognese": {
+      "slot": "dinner",
+      "diets": [],
+      "contains": [
+        "dairy",
+        "gluten",
+        "meat"
+      ],
+      "image_wiki": "Bolognese sauce"
+    },
+    "chicken_curry": {
+      "slot": "dinner",
+      "diets": [],
+      "contains": [
+        "meat"
+      ],
+      "image_wiki": "Chicken karahi"
+    },
+    "grilled_cheese": {
+      "slot": "lunch",
+      "diets": [
+        "vegetarian",
+        "pescatarian"
+      ],
+      "contains": [
+        "dairy",
+        "gluten"
+      ],
+      "image_wiki": "Grilled cheese"
+    },
+    "veggie_stirfry": {
+      "slot": "dinner",
+      "diets": [
+        "vegan",
+        "vegetarian",
+        "pescatarian"
+      ],
+      "contains": [],
+      "image_wiki": "Stir frying"
+    },
+    "beef_rice_bowl": {
+      "slot": "dinner",
+      "diets": [],
+      "contains": [
+        "meat"
+      ],
+      "image_wiki": "Beef and broccoli"
+    },
+    "tomato_penne": {
+      "slot": "dinner",
+      "diets": [
+        "vegetarian",
+        "pescatarian"
+      ],
+      "contains": [
+        "dairy",
+        "gluten"
+      ],
+      "image_wiki": "Pasta al pomodoro"
+    }
+  }
+}

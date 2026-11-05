@@ -80,12 +80,20 @@ def select_products(ingredients: list[RecipeIngredient],
                     enable_thinking: bool = False,
                     constraints: dict | None = None,
                     origins_by_id: dict | None = None,
-                    preference: list[str] | None = None) -> SelectorResult:
+                    preference: list[str] | None = None,
+                    substitutes: dict[int, list[int]] | None = None) -> SelectorResult:
     """Token-overlap, then "fresh" when the ingredient says it, then head
     noun, then origin preference, then offer price; direct matches before
     t4 substitutes. Confidence is fixed at 0.9
     — above the cascade threshold, so demo mode never triggers a (would-be)
     escalation.
+
+    A t4 substitute is a substitute for the line whose thin pool fetched it,
+    not for every line: `substitutes` (line_no -> product ids, the NL and
+    spec paths) keeps each line's own substitutes out of that line's choice
+    only, so Fresh Ginger, fetched as a same-aisle substitute for garlic, is
+    still the pick for ginger. Without it (the library path, where nothing
+    is a substitute) the products' own flags are read.
 
     The head-noun key breaks overlap ties the way a shopper would: for
     "flour", All-Purpose Flour (about flour) beats Flour Tortillas (about
@@ -97,7 +105,11 @@ def select_products(ingredients: list[RecipeIngredient],
     preference = [c for c in (preference or []) if c.strip()]
     selections: list[Selection] = []
     for ing in ingredients:
-        pool = [p for p in products if not p.substitute] or products
+        if substitutes is None:
+            pool = [p for p in products if not p.substitute] or products
+        else:
+            subs = set(substitutes.get(ing.line_no, ()))
+            pool = [p for p in products if p.id not in subs] or products
         if not pool:
             continue
         # semantic_key is the ranking the alternatives share: overlap, then
