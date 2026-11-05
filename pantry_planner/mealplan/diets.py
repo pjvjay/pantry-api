@@ -2,7 +2,10 @@
 
 A product's contains-tags are its own dietary_tags (dairy, egg, gluten, meat, nuts, soy),
 except that a seafood product's "meat" is read as "fish": the catalog tags fish as meat, and a
-pescatarian eats fish. A product is seafood when its aisle is seafood or its name or
+pescatarian eats fish. To them are added its priority allergens from seeds/allergens.json
+(ALLERGENS: Health Canada's list, with gluten sources and sulphites), reviewed by hand for every
+product; "nuts" stays as the catalog's word for peanuts or tree nuts, so an older avoid list of
+"nuts" still leaves both out. A product is seafood when its aisle is seafood or its name or
 description names a fish or shellfish (FISH_WORDS), since canned tuna and fish sauce sit in
 the pantry aisles.
 
@@ -27,7 +30,9 @@ unknown otherwise.
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
+from functools import lru_cache
 
 from ..models import Product
 from ..nlsearch.units import tokens
@@ -37,7 +42,14 @@ DIETS = ("vegan", "vegetarian", "pescatarian")
 # What each diet leaves out, and the order a refusal names it in.
 EXCLUDES = {"vegan": ("meat", "fish", "dairy", "egg", "honey"),
             "vegetarian": ("meat", "fish"), "pescatarian": ("meat",)}
-CONTAINS = ("dairy", "egg", "fish", "gluten", "honey", "meat", "nuts", "soy")
+# Health Canada's priority allergens, with gluten sources and added sulphites, as this app names
+# them: dairy is milk, shellfish is crustaceans and molluscs, gluten covers wheat and triticale.
+ALLERGENS = ("peanuts", "tree_nuts", "sesame", "dairy", "egg", "fish", "shellfish", "soy",
+             "gluten", "mustard", "sulphites")
+CONTAINS = ("dairy", "egg", "fish", "gluten", "honey", "meat", "mustard", "nuts", "peanuts",
+            "sesame", "shellfish", "soy", "sulphites", "tree_nuts")
+SHELLFISH_WORDS = frozenset({"shrimp", "prawn", "crab", "lobster", "oyster", "mussel", "clam",
+                             "scallop", "squid"})
 FISH_WORDS = frozenset({"fish", "seafood", "salmon", "tuna", "cod", "anchovy", "anchovie",
                         "sardine", "mackerel", "trout", "shrimp", "prawn", "crab", "lobster",
                         "oyster", "mussel", "clam", "scallop", "squid"})
@@ -52,6 +64,12 @@ NAME_WORDS = {
     "meat": frozenset({"chicken", "beef", "pork", "bacon", "ham", "pepperoni", "sausage",
                        "lamb", "turkey"}),
     "honey": frozenset({"honey"}),
+    "shellfish": SHELLFISH_WORDS,
+    "peanuts": frozenset({"peanut"}),
+    "tree_nuts": frozenset({"almond", "cashew", "walnut", "pecan", "pistachio", "hazelnut",
+                            "macadamia"}),
+    "sesame": frozenset({"sesame", "tahini"}),
+    "mustard": frozenset({"mustard"}),
 }
 DAIRY_CHOCOLATE = frozenset({"white", "milk"})
 # A word right before a guarded one that makes it a plant food.
@@ -59,12 +77,25 @@ PLANT_WORDS = frozenset({"peanut", "almond", "cashew", "coconut", "oat", "soy", 
                          "shea", "vegan", "plant", "veggie", "apple"})
 
 
+@lru_cache(maxsize=1)
+def allergen_file() -> dict[int, frozenset[str]]:
+    """seeds/allergens.json: each product's reviewed priority allergens, by product id."""
+    from ..db import SEEDS_DIR
+
+    data = json.loads((SEEDS_DIR / "allergens.json").read_text(encoding="utf-8"))
+    return {int(pid): frozenset(row["contains"]) for pid, row in data["products"].items()}
+
+
 def product_contains(p: Product) -> set[str]:
-    """The product's tags, its meat read as fish when it is seafood."""
+    """The product's tags, its meat read as fish when it is seafood, with its reviewed
+    allergens (allergen_file); "nuts" is added for peanuts or tree nuts."""
     tags = {t.strip() for t in (p.dietary_tags or "").split(",") if t.strip()}
     if "meat" in tags and (p.subcategory == "seafood"
                            or FISH_WORDS & set(tokens(f"{p.name} {p.description}"))):
         tags = (tags - {"meat"}) | {"fish"}
+    tags |= allergen_file().get(p.id, frozenset())
+    if tags & {"peanuts", "tree_nuts"}:
+        tags.add("nuts")
     return tags
 
 
@@ -79,6 +110,12 @@ def name_contains(name: str) -> set[str]:
         out |= {tag for tag, guarded in NAME_WORDS.items() if w in guarded}
         if w == "chocolate" and before in DAIRY_CHOCOLATE:
             out.add("dairy")
+    # An allergen a name says is there whatever word comes before it ("peanut butter" is
+    # peanuts, "almond milk" tree nuts): only the dairy and meat words above are cancelled.
+    out |= {tag for tag in ("peanuts", "tree_nuts", "sesame", "mustard", "shellfish")
+            for w in words if w in NAME_WORDS[tag]}
+    if out & {"peanuts", "tree_nuts"}:
+        out.add("nuts")
     return out
 
 
