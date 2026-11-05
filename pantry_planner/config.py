@@ -233,6 +233,15 @@ class Settings:
     # for a deployment whose stores are real.
     stores_synthetic: bool = True
 
+    # Product matching by meaning (matching/): OLLAMA_URL is the local Ollama that embeds
+    # ingredient names no seed knows, with EMBEDDING_MODEL; "" turns it off, and those names
+    # are then matched by words. PANTRY_DATA_DIR holds the embedding cache and the matching
+    # event log (matching/events.py); MATCHING_EVENTS=0 stops the log.
+    ollama_url: str = "http://127.0.0.1:11434"
+    embedding_model: str = "embeddinggemma"
+    data_dir: str = "~/.pantry-data"
+    matching_events: bool = True
+
     @staticmethod
     def from_env() -> Settings:
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -280,6 +289,11 @@ class Settings:
             offers_synthetic=os.environ.get("OFFERS_SYNTHETIC", "true").strip().lower()
             not in {"0", "false", "no"},
             stores_synthetic=os.environ.get("STORES_SYNTHETIC", "true").strip().lower()
+            not in {"0", "false", "no", "off"},
+            ollama_url=os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").strip(),
+            embedding_model=os.environ.get("EMBEDDING_MODEL", "").strip() or "embeddinggemma",
+            data_dir=os.environ.get("PANTRY_DATA_DIR", "").strip() or "~/.pantry-data",
+            matching_events=os.environ.get("MATCHING_EVENTS", "1").strip().lower()
             not in {"0", "false", "no", "off"},
         )
 

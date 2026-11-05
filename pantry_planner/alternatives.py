@@ -5,19 +5,32 @@ for each, and the constraints, location and origin rules it was planned under.
 From that alone, with no LLM call and no write, this module answers "what else
 could fill this line, and what would choosing it do to my trip?":
 
-  fetch      ONE build_options_sql call finds every product matching the line
-             at each level the planner knows (exact, equivalent form, form,
-             generic) plus the line's head noun ("related"); a thin pool adds
-             same-aisle substitutes (one build_substitute_sql call), as the
-             planner's t4 does. The origin exclusion splits off what the plan
-             would never buy (held_back), with the planner's own filter_pool.
+  fetch      the matcher's candidates for the line (matching/matcher.py): the
+             products that are the same item, those that work instead and its
+             nearest looser matches, by meaning. A name no seed knows that cannot
+             be embedded is matched by words instead, as it always was: ONE
+             build_options_sql call finds every product matching the line at
+             each level the planner knows (exact, equivalent form, form,
+             generic) plus the line's head noun ("related"), and a thin pool
+             adds same-aisle substitutes (one build_substitute_sql call), as the
+             planner's t4 does; the ranking says which (`matching`). The origin
+             exclusion splits off what the plan would never buy (held_back),
+             with the planner's own filter_pool, and the hard rules below what
+             it must not offer (filtered).
+  rules      a candidate is never choosable when it adds a contains-tag the
+             plan's own product lacks (peanut butter's nuts, for butter), when
+             it contains what the plan's diet, avoid list or constraints leave
+             out (a dairy-free plan never sees a dairy substitute), or when no
+             store that is on sells it in range (unavailable, out_of_reach).
   facts      origin evidence, review statistics and pack fit, from database
              rows only; what is not known is said to be unknown.
   trip       ONE price-matrix query over the basket and the candidates, then,
              per candidate, the same pricing and trip optimisation flow.reprice
              runs, so a row's trip total is what choosing it would cost.
-  order      ORDER below; rank_reason says why each row sits under the one
-             above it.
+  order      by meaning: group, then the matcher's score with the trip filled
+             in (ORDER_MEANING), then catalog id, so Options agree with the
+             plan's first pick; by words: ORDER. rank_reason says why each row
+             sits under the one above it.
 
 validate_pins is the check every shopper pin passes before anything is priced:
 the line is planned, the product is one of its candidates, the origin
@@ -38,6 +51,7 @@ from sqlalchemy.orm import Session
 
 from . import db
 from .config import settings
+from .matching import matcher
 from .models import (
     AltBuy,
     AltCounts,
@@ -48,6 +62,7 @@ from .models import (
     AltRating,
     AltTrip,
     BasisLine,
+    Filtered,
     HeldBack,
     OutOfReach,
     Pin,
@@ -89,6 +104,17 @@ THIN_POOL = 3           # as the planner's t4: fewer same-ingredient hits adds s
 # the order is total.
 ORDER = ["tier", "semantic_key", "pack_fit", "preference", "trip_total", "cost_for_need",
          "rating", "id"]
+# By meaning: the group (Same item, Works instead, Looser match), then the matcher's weighted
+# sum (matching/matcher.py WEIGHTS: relevance, form and variant, pack fit, value, origin
+# preference and the trip total), then the catalog id.
+ORDER_MEANING = ["group", "score", "id"]
+RANKING_TEXT_MEANING = (
+    "Products that are the same item come first, then products that work instead, then looser "
+    "matches, as the matcher grouped them by meaning. Within a group, a weighted score: how "
+    "close the product is to the ingredient in meaning (35%), whether it is the form and "
+    "variant the recipe asks for (15%), whether its packs fit the recipe's amount (15%), its "
+    "price per unit against the group's best (15%), your origin preference (10%, only when "
+    "you gave one) and the trip total after the swap (10%). Last, the catalog number.")
 RANKING_TEXT = (
     "Products that are the same ingredient come first. Then: how many of the recipe's words "
     "the product matches, and whether it is named for and mainly the ingredient itself (for "
@@ -107,6 +133,18 @@ _TIER = {"exact": "same", "form": "same", "generic": "same", "related": "other",
          "substitute": "other", "outside": "outside"}
 _TIER_RANK = {"same": 0, "other": 1, "outside": 2}
 _FIT_RANK = {"covers": 0, "unknown": 1, "short": 2}
+# Groups by meaning, and the words-era match level each one is reported as.
+_GROUP_RANK = {"same_item": 0, "works_instead": 1, "looser_match": 2, "outside": 3}
+_LEVEL_OF = {"same_item": "exact", "works_instead": "substitute", "looser_match": "related"}
+_GROUP_OF = {"exact": "same_item", "form": "same_item", "generic": "same_item",
+             "substitute": "works_instead", "related": "looser_match", "outside": "outside"}
+GROUP_LABELS = {"same_item": "Same item", "works_instead": "Works instead",
+                "looser_match": "Looser match", "outside": "Not a candidate"}
+WORDS_NOTE = ("Matched by words: {why}. Products are found by the recipe's words until it can "
+              "be matched by meaning again.")
+MEANING_NOTE = "Matched by meaning."
+# Contains-tags a hard rule reads (diets.product_contains, plus honey from the name).
+_TAGS = ("dairy", "egg", "fish", "gluten", "honey", "meat", "nuts", "soy")
 
 
 class BasisError(ValueError):
@@ -313,20 +351,40 @@ def _spec(line: BasisLine, name: str | None = None) -> IngredientSpec:
 
 @dataclass
 class _Pool:
-    """Every product found for one line: product id -> its strictest match."""
+    """Every product found for one line: product id -> its strictest match, and how the line
+    was matched (`meaning`); by meaning, each product's matcher candidate too."""
     found: dict[int, str] = field(default_factory=dict)
+    meaning: matcher.Meaning | None = None
+    cands: dict[int, matcher.Candidate] = field(default_factory=dict)
+
+    @property
+    def by_meaning(self) -> bool:
+        return self.meaning is not None and self.meaning.matching == "meaning"
 
 
 def _fetch_pools(s: Session, basis: PlanBasis, lines: list[BasisLine],
                  catalog: dict[int, Product], current: dict[int, int]) -> dict[int, _Pool]:
-    """One options query for every line in `lines` (five specs each), then a substitute
-    query for each line whose same-ingredient pool is thin. Matches are taken from every
-    store (max_km None) so a product sold only out of range is still found, and counted as
-    unavailable later instead of vanishing. Substitutes match none of the line's words; they
-    are a few same-aisle products, the cheapest the shopper can buy, so like the planner's
-    t4 they come only from stores in range, and none is counted as unavailable."""
+    """Each line's candidates. By meaning, the matcher's, from the whole catalog, so a
+    product sold only out of range is still found, and counted as unavailable later instead
+    of vanishing. By words (a name no seed knows that cannot be embedded): one options query
+    for every such line (five specs each), then a substitute query for each line whose
+    same-ingredient pool is thin. Word matches are taken from every store (max_km None), for
+    the same reason. Substitutes match none of the line's words; they are a few same-aisle
+    products, the cheapest the shopper can buy, so like the planner's t4 they come only from
+    stores in range, and none is counted as unavailable."""
     from .nlsearch.sql_builder import build_options_sql, build_substitute_sql
 
+    meanings = matcher.meanings([(ln.name, ln.form) for ln in lines])
+    pools = {line.line_no: _Pool(meaning=m) for line, m in zip(lines, meanings, strict=True)}
+    for line in lines:
+        pool = pools[line.line_no]
+        if pool.by_meaning:
+            for c in matcher.candidates(pool.meaning, catalog):
+                pool.found[c.product_id] = _LEVEL_OF[c.group]
+                pool.cands[c.product_id] = c
+    lines = [ln for ln in lines if not pools[ln.line_no].by_meaning]
+    if not lines:
+        return pools
     specs: list[IngredientSpec] = []
     relaxed: set[int] = set()
     equivalent: set[int] = set()
@@ -342,7 +400,6 @@ def _fetch_pools(s: Session, basis: PlanBasis, lines: list[BasisLine],
     sql, params = build_options_sql(basis.constraints, specs, relaxed, lat, lon, None,
                                     per_ingredient_limit=10_000, generic=generic,
                                     equivalent=equivalent)
-    pools = {line.line_no: _Pool() for line in lines}
     for row in s.execute(text(sql), params).mappings():
         if row["ing_no"] < 0:
             continue
@@ -430,14 +487,18 @@ def effective_picks(basis: PlanBasis, pins: dict[int, int] | None = None) -> dic
 def validate_pins(basis: PlanBasis, pins: list[Pin] | None = None, *,
                   catalog: dict[int, Product] | None = None,
                   session: Session | None = None,
-                  open_lines: bool = False) -> dict[int, ValidPin]:
+                  open_lines: bool = False,
+                  forbid: frozenset[str] = frozenset()) -> dict[int, ValidPin]:
     """The basis's own pins merged with `pins` (a later pin for a line wins), each checked:
-    the line is planned, the product exists, it is a candidate for the line (any level,
-    or a same-aisle substitute), the plan's origin exclusion does not hold it back, and it
-    has an offer in range under the plan's price cap. A pin equal to the plan's own pick
-    is dropped, which is how a swap is undone. Raises PinError naming the problem.
-    `open_lines`: a pin may also fill a line of the basis the plan bought nothing for (a
-    meal plan's line the resolve left out), checked the same way."""
+    the line is planned, the product exists, it is a candidate for the line (by meaning:
+    the same item, works instead or a looser match; by words: any level, or a same-aisle
+    substitute), no hard rule keeps it out (rule: it adds no contains-tag the plan's own
+    product lacks, and contains nothing the plan's constraints or `forbid` leave out), the
+    plan's origin exclusion does not hold it back, and it has an offer in range under the
+    plan's price cap. A pin equal to the plan's own pick is dropped, which is how a swap is
+    undone. Raises PinError naming the problem. `open_lines`: a pin may also fill a line of
+    the basis the plan bought nothing for (a meal plan's line the resolve left out), checked
+    the same way."""
     pins = list(pins or [])
     if len(pins) > MAX_PINS:
         raise PinError(f"at most {MAX_PINS} pins, got {len(pins)}")
@@ -482,8 +543,14 @@ def validate_pins(basis: PlanBasis, pins: list[Pin] | None = None, *,
                            f"({line.name}): {_unavailable(basis, None)}", line_no)
         if match is None:
             raise PinError(f"{product.name} is not an option for line {line_no} "
-                           f"({line.name}): {_why_not(basis, line, product, near.get(pid))}",
+                           f"({line.name}): "
+                           f"{_why_not(basis, line, product, near.get(pid), g.pools[line_no])}",
                            line_no)
+        broken = rule(product, catalog.get(line.product_id) if line.product_id else None,
+                      set(basis.constraints.exclude_tags) | set(forbid), basis.constraints)
+        if broken is not None:
+            raise PinError(f"{product.name} is not an option for line {line_no} "
+                           f"({line.name}): it {broken[2]}", line_no)
         if not _available(basis, offers.get(pid)):
             raise PinError(f"{product.name} cannot be bought for line {line_no} "
                            f"({line.name}): {_unavailable(basis, near.get(pid))}", line_no)
@@ -497,9 +564,11 @@ def _where(country: str, fld: str) -> str:
             "conflicting_evidence": f"{country} by some of its evidence"}.get(fld, country)
 
 
-def _why_not(basis: PlanBasis, line: BasisLine, product: Product, anywhere: dict | None) -> str:
+def _why_not(basis: PlanBasis, line: BasisLine, product: Product, anywhere: dict | None,
+             pool: _Pool | None = None) -> str:
     """Why a product the shopper chose is not among the line's candidates, from its own
-    catalog row: a diet, aisle or price limit of the plan, or the words do not match."""
+    catalog row: a diet, aisle or price limit of the plan, or it does not match (by meaning,
+    or by the words)."""
     c = basis.constraints
     tags = {t.strip() for t in product.dietary_tags.split(",") if t.strip()}
     for tag in c.exclude_tags:
@@ -517,7 +586,53 @@ def _why_not(basis: PlanBasis, line: BasisLine, product: Product, anywhere: dict
             and anywhere["price"] > c.max_item_price):
         return (f"its cheapest offer, ${anywhere['price']:.2f}, is over the "
                 f"${c.max_item_price:.2f} per-item price cap")
+    if pool is not None and pool.by_meaning:
+        return (f"it is not the same item as {line.name!r}, does not work instead, and is not "
+                "near it in meaning")
     return f"it does not match the words of {line.name!r}"
+
+
+def contains(p: Product) -> set[str]:
+    """The contains-tags a hard rule reads: the catalog's own (dietary_tags), with a seafood
+    product's meat also read as fish (diets.product_contains), and honey when the name says
+    it."""
+    from .mealplan.diets import product_contains
+
+    raw = {t.strip() for t in (p.dietary_tags or "").split(",") if t.strip()}
+    return raw | product_contains(p) | ({"honey"} if "honey" in tokens(p.name) else set())
+
+
+def _and(words: list[str]) -> str:
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1]
+
+
+def rule(p: Product, original: Product | None, forbid: set[str],
+         c=None) -> tuple[str, list[str], str] | None:
+    """The hard rule that keeps `p` out of a line whose plan bought `original` (None for a
+    line it bought nothing for), as (why, tags, words), or None when none does: it contains
+    what `forbid` (the plan's diet, avoid list and excluded tags) leaves out; it lacks a tag
+    or aisle the constraints `c` require; or it contains what `original` does not."""
+    tags = contains(p)
+    bad = sorted(tags & forbid)
+    if bad:
+        return "diet", bad, f"contains {_and(bad)}, which this plan leaves out"
+    if c is not None:
+        own = {t.strip() for t in (p.dietary_tags or "").split(",") if t.strip()}
+        lacking = [t for t in c.require_tags if t not in own]
+        if lacking:
+            return ("constraints", lacking,
+                    f"is not marked {_and(lacking)}, which this plan requires")
+        if ((c.categories and p.category not in c.categories)
+                or (c.subcategories and p.subcategory not in c.subcategories)
+                or p.category in c.exclude_categories
+                or p.subcategory in c.exclude_subcategories):
+            return "constraints", [], "is outside the aisles this plan is limited to"
+    if original is not None and original.id != p.id:
+        added = sorted(tags - contains(original))
+        if added:
+            return ("adds_tags", added,
+                    f"contains {_and(added)}, which {original.name} does not")
+    return None
 
 
 def _unavailable(basis: PlanBasis, nearest: dict | None) -> str:
@@ -697,6 +812,15 @@ class _Row:
     # why a row the trip effect was worked out for has none (TripEffect): "its price on your
     # plan's trips is unknown (...)"
     trip_note: str = ""
+    # Matched by meaning: the row's group, its candidate facts and the matcher's score
+    group: str = "outside"
+    candidate: matcher.Candidate | None = None
+    facts: matcher.Facts | None = None
+    by_meaning: bool = False
+
+    @property
+    def score(self) -> float | None:
+        return self.facts.score() if self.facts is not None else None
 
     def trip_cents(self, located: bool) -> float:
         if self.trip is not None:
@@ -708,6 +832,8 @@ class _Row:
         return math.inf
 
     def key(self, located: bool, use_pref: bool) -> tuple:
+        if self.by_meaning:
+            return (_GROUP_RANK[self.group], -(self.score or 0.0), self.product.id)
         rating = (0, -self.rating.avg) if self.rating is not None else (1, 0.0)
         cost = round(self.cost_for_need * 100) if self.cost_for_need is not None else math.inf
         return (_TIER_RANK[self.tier], self.semantic, _FIT_RANK[self.pack_fit],
@@ -715,8 +841,36 @@ class _Row:
                 self.product.id)
 
     def pre_key(self, use_pref: bool) -> tuple:
+        if self.by_meaning:
+            return (_GROUP_RANK[self.group], -(self.score or 0.0), self.product.id)
         return (_TIER_RANK[self.tier], self.semantic, _FIT_RANK[self.pack_fit],
                 self.pref if use_pref else 0, self.product.id)
+
+
+def _score(rows: list[_Row], need: tuple[float, str] | None, preference: list[str],
+           located: bool) -> None:
+    """The matcher's facts for every row matched by meaning (matching/matcher.py): relevance
+    and form/variant from its candidate, pack fit (the packs the cart buys against the need),
+    value from unit prices within its group, origin preference, and the trip total against
+    its group's cheapest trip (0 when the trip is not worked out)."""
+    for group in matcher.GROUPS:
+        members = [r for r in rows if r.by_meaning and r.group == group]
+        # Unit prices at the cheapest offer in range, as the planner's first pick reads them.
+        value = matcher.values({id(r): matcher.unit_price(r.product, r.offer.price)
+                                for r in members})
+        # The trip total after the swap, or with no location what the cart pays for it.
+        trips = [r.trip_cents(located) for r in members if r.trip_cents(located) != math.inf]
+        best = min(trips) / 100 if trips else None
+        smallest = matcher.smallest_pack([r.product for r in members], need)
+        for r in members:
+            r.facts = matcher.Facts(
+                relevance=r.candidate.relevance, form_variant=r.candidate.form_variant,
+                pack_fit=matcher.pack_fit(r.product, need, r.packs, smallest),
+                value=value[id(r)],
+                origin=matcher.origin_component(r.pref, preference),
+                trip=matcher.trip_component(
+                    r.trip_cents(located) / 100 if r.trip_cents(located) != math.inf else None,
+                    best))
 
 
 def _trip_of(options) -> tuple[float, list[str], dict[int, str]] | None:
@@ -743,7 +897,10 @@ class TripEffect:
                choosing it costs there;
     where      how the reasons name the trip total ("your plan's trips");
     stores_off the stores that planner's shopper turned off: no offer of theirs counts, so a
-               candidate sold in range only there is unavailable.
+               candidate sold in range only there is unavailable;
+    forbid     the contains-tags that planner's shopper leaves out (the plan's diet and avoid
+               list, and for a line bought nothing for, the recipe's own diets): no
+               candidate that contains one is choosable (rule).
 
     The current pick may have no offer in range any more (a line no longer stocked, the
     reason to look for another product): it is then left out of the rows instead of making
@@ -755,20 +912,23 @@ class TripEffect:
     where: str = "your trip"
     max_eval: int = MAX_TRIP_EVAL
     stores_off: frozenset[int] = frozenset()
+    forbid: frozenset[str] = frozenset()
 
 
 def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT, *,
                       effect: TripEffect | None = None,
                       open_lines: bool = False) -> AlternativeRanking:
-    """The other products that could fill `line_no`, in ORDER, with the cart's pick always
-    included and flagged current. Deterministic for the same basis and database; no LLM,
-    no write. Raises BasisError or PinError (a bad basis, an unplanned line, a bad pin).
-    `effect`: another planner's trips stand in for the cart's (TripEffect).
+    """The other products that could fill `line_no`, in order (ORDER_MEANING, or ORDER when
+    the line is matched by words), with the cart's pick always included and flagged
+    current. Deterministic for the same basis and database; no LLM, no write. Raises
+    BasisError or PinError (a bad basis, an unplanned line, a bad pin). `effect`: another
+    planner's trips stand in for the cart's (TripEffect).
 
     `open_lines`: `line_no` may be a line the plan bought nothing for. It then has no
     current pick: the rows are every product that could fill it (and each unpicked line of
     the same name, which one choice fills too), none flagged current."""
     from . import flow
+    from .matching import events
     from .origins import preference_rank
 
     check_basis(basis)
@@ -779,8 +939,10 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
     if line_no not in planned:
         raise LineNotPlannedError(_not_planned(line_no, planned))
     catalog = _catalog()
+    forbid = set(basis.constraints.exclude_tags) | set(effect.forbid if effect else ())
     with Session(db.engine()) as s:
-        valid = validate_pins(basis, [], catalog=catalog, session=s)
+        valid = validate_pins(basis, [], catalog=catalog, session=s,
+                              forbid=frozenset(effect.forbid) if effect else frozenset())
         picks = effective_picks(basis, {n: v.product_id for n, v in valid.items()})
         current_id = picks.get(line_no)
         if current_id is None:
@@ -795,16 +957,32 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
                                   "the catalog; plan the recipe again")
         g = _gather(s, basis, group, catalog, picks,
                     set() if current_id is None else {current_id})
+        pool = g.pools[line_no]
+        by_meaning = all(g.pools[n].by_meaning for n in group)
         # A shared purchase is swapped for every line it covers, so a candidate must fill
         # each of them; it carries the loosest of its matches.
         found: dict[int, str] = dict(g.pools[group[0]].found)
         for n in group[1:]:
             other = g.pools[n].found
-            found = {pid: max(m, other[pid], key=_MATCH_RANK.__getitem__)
-                     for pid, m in found.items() if pid in other}
-        held = sorted((pid for pid in g.pools[line_no].found if pid in g.held),
+            if by_meaning:
+                found = {pid: max(m, other[pid], key=lambda lv: _GROUP_RANK[_GROUP_OF[lv]])
+                         for pid, m in found.items() if pid in other}
+            else:
+                found = {pid: max(m, other[pid], key=_MATCH_RANK.__getitem__)
+                         for pid, m in found.items() if pid in other}
+        held = sorted((pid for pid in pool.found if pid in g.held),
                       key=lambda pid: (catalog[pid].name, pid))
         selectable = {pid: m for pid, m in found.items() if pid not in g.held}
+        # The hard rules (rule): never choosable, and said why.
+        original = catalog.get(planned[line_no].product_id) \
+            if planned[line_no].product_id is not None else None
+        ruled: dict[int, tuple[str, list[str], str]] = {}
+        for pid in list(selectable):
+            broken = (rule(catalog[pid], original, forbid, basis.constraints)
+                      if pid != current_id else None)
+            if broken is not None:
+                ruled[pid] = broken
+                del selectable[pid]
         if current_id is not None and current_id not in selectable:
             selectable[current_id] = "outside"
         stats = _stats(s, sorted(selectable))
@@ -825,18 +1003,24 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
                    if pid != current_id and not _available(basis, offers.get(pid))]
     for pid in unavailable:
         del selectable[pid]
+
+    def best_first(pid: int) -> tuple:
+        if by_meaning:
+            c = pool.cands.get(pid)
+            return (_GROUP_RANK[_GROUP_OF[found[pid]]], -(c.relevance if c else 0.0), pid)
+        return (_TIER_RANK[_TIER[found[pid]]], closeness(planned[line_no].name, catalog[pid]),
+                pid)
+
     reach = []
     if effect is not None and located and unavailable:
-        reach = sorted(unavailable, key=lambda pid: (
-            _TIER_RANK[_TIER[found[pid]]], closeness(planned[line_no].name, catalog[pid]),
-            pid))[:limit]
-        reach = _out_of_reach(basis, reach, catalog, effect.stores_off)
+        reach = _out_of_reach(basis, sorted(unavailable, key=best_first)[:limit], catalog,
+                              effect.stores_off)
 
     synthetic = settings().offers_synthetic
-    # A row whose words match but which is another food moves to the other tier.
+    # By words, a row whose words match but which is another food moves to the other tier.
     word = _strong_head(planned[line_no].name)
     aisle = _aisle_of(word, catalog.get(current_id) if current_id is not None else None,
-                      g.pools[line_no].found, catalog)
+                      pool.found, catalog)
     needs = [effect.needs.get(n) for n in group] if effect else _needs(basis, group)
     lines = [planned[n] for n in group]
     library = basis.path == "library"
@@ -865,17 +1049,24 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
         rating = (AltRating(avg=st[0], count=st[1], synthetic=synthetic)
                   if st is not None and st[1] > 0 and st[0] is not None else None)
         pref = preference_rank(g.origins.get(pid), basis.preference) if use_pref else worst
+        tier = ("other" if not by_meaning and _TIER[match] == "same"
+                and _another_food(p, word, aisle) else _TIER[match])
         rows.append(_Row(
-            product=p, match=match,
-            tier=("other" if _TIER[match] == "same" and _another_food(p, word, aisle)
-                  else _TIER[match]), current=pid == current_id,
+            product=p, match=match, tier=tier, current=pid == current_id,
             offer=offer, packs=cart_packs, pack_fit=fit, cost_for_need=cost,
             pack_reason=pack_reason, unit_price=unit_price, unit_basis=unit_basis,
             origin=_alt_origin(g.origins.get(pid), pid in g.demo),
             pref=pref, preferred=pref < worst,
             rating=rating, organic="organic" in tokens(f"{p.name} {p.description}"),
-            semantic=closeness(planned[line_no].name, p)))
+            semantic=closeness(planned[line_no].name, p),
+            group=("looser_match" if tier == "other" and _TIER[match] == "same"
+                   else _GROUP_OF[match]),
+            candidate=pool.cands.get(pid) if match != "outside" else None,
+            by_meaning=by_meaning))
 
+    need = _total_need(needs)
+    if by_meaning:
+        _score(rows, need, list(basis.preference), located)
     max_eval = effect.max_eval if effect else MAX_TRIP_EVAL
     if located and (base_trip is not None or effect is not None):
         rows.sort(key=lambda r: r.pre_key(use_pref))
@@ -902,19 +1093,23 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
                 # this module's own (unknown when it leaves the packs unknown).
                 r.cost_for_need = charged
             r.unit_price, r.unit_basis = _unit_price(r.product, price)
+        if by_meaning:
+            _score(rows, need, list(basis.preference), located)
 
     rows.sort(key=lambda r: r.key(located, use_pref))
     where = effect.where if effect else "your trip"
     items = [_item(i + 1, r, rows[i - 1] if i else None, planned[line_no], located, use_pref,
-                   synthetic, where=where, max_eval=max_eval)
+                   synthetic, where=where, max_eval=max_eval, original=original,
+                   meaning=pool.meaning)
              for i, r in enumerate(rows)]
     shown = items[:limit] + [it for it in items[limit:] if it.current]
-    need = _total_need(needs)
-    return AlternativeRanking(
+    ruled_rows = sorted(ruled, key=best_first)[:limit]
+    ranking = AlternativeRanking(
         line_no=line_no, lines=group, ingredient=" + ".join(ln.name for ln in lines),
         need=_fmt_qty(*need) if need else "", need_note=_no_need(needs, lines, library),
         need_qty=need[0] if need else None, need_uom=need[1] if need else None,
-        order=list(ORDER), ranking_text=RANKING_TEXT,
+        order=list(ORDER_MEANING if by_meaning else ORDER),
+        ranking_text=RANKING_TEXT_MEANING if by_meaning else RANKING_TEXT,
         items=shown,
         held_back=[_held(pid, catalog, g) for pid in held], out_of_reach=reach,
         total=len(items), unavailable=len(unavailable),
@@ -924,8 +1119,23 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
                             and it.trip.stops_delta <= 0),
             preferred_origin=sum(1 for r in rows if r.preferred),
             says_organic=sum(1 for it in items if it.says_organic),
-            rated=sum(1 for it in items if it.rating is not None)),
-        data_note=DATA_NOTE if synthetic else "")
+            rated=sum(1 for it in items if it.rating is not None),
+            same_item=sum(1 for it in items if it.group == "same_item"),
+            works_instead=sum(1 for it in items if it.group == "works_instead"),
+            looser_match=sum(1 for it in items if it.group == "looser_match")),
+        data_note=DATA_NOTE if synthetic else "",
+        matching="meaning" if by_meaning else "words",
+        matching_note=(MEANING_NOTE if by_meaning else WORDS_NOTE.format(
+            why=next((g.pools[n].meaning.why_words for n in group
+                      if g.pools[n].meaning is not None and g.pools[n].meaning.why_words),
+                     "this name is not one the matcher knows"))),
+        filtered=[Filtered(product_id=pid, product=catalog[pid].name,
+                           group=_GROUP_OF[found[pid]] if _GROUP_OF[found[pid]] != "outside"
+                           else "looser_match", why=ruled[pid][0], tags=ruled[pid][1],
+                           text=f"{catalog[pid].name} {ruled[pid][2]}")
+                  for pid in ruled_rows])
+    events.shown(ranking)
+    return ranking
 
 
 def _out_of_reach(basis: PlanBasis, pids: list[int], catalog: dict[int, Product],
@@ -1028,7 +1238,8 @@ def _held(pid: int, catalog: dict[int, Product], g: _Gathered) -> HeldBack:
 
 def _item(rank: int, r: _Row, above: _Row | None, line: BasisLine, located: bool,
           use_pref: bool, synthetic: bool, *, where: str = "your trip",
-          max_eval: int = MAX_TRIP_EVAL) -> RankedAlternative:
+          max_eval: int = MAX_TRIP_EVAL, original: Product | None = None,
+          meaning: matcher.Meaning | None = None) -> RankedAlternative:
     p = r.product
     return RankedAlternative(
         rank=rank, current=r.current, product_id=p.id, product=p.name, brand=p.brand,
@@ -1037,7 +1248,38 @@ def _item(rank: int, r: _Row, above: _Row | None, line: BasisLine, located: bool
         unit_basis=r.unit_basis, trip=r.trip, origin=r.origin, rating=r.rating,
         says_organic=r.organic, reasons=_reasons(r, line, located, synthetic, where),
         rank_reason=_rank_reason(rank, r, above, line, located, use_pref, synthetic,
-                                 where=where, max_eval=max_eval))
+                                 where=where, max_eval=max_eval, meaning=meaning),
+        group=r.group, group_label=GROUP_LABELS[r.group],
+        score=round(r.score, 4) if r.score is not None else None,
+        summary=_summary(r, original))
+
+
+def _type_of(p: Product) -> str:
+    from .matching import seeds
+
+    prof = seeds.load().profiles.get(p.id)
+    return prof.product_type if prof is not None else p.name.lower()
+
+
+def _summary(r: _Row, original: Product | None) -> str:
+    """The row on one line: what it is, how its pack meets the need, and its allergens
+    against the plan's own product ("butter · 454 g covers 80 g · no new allergens")."""
+    p = r.product
+    size = p.unit_size or (_fmt_qty(p.unit_qty, p.unit_uom) if p.unit_qty else "")
+    pack = r.pack_reason.text
+    if r.pack_fit == "covers" and r.pack_reason.text.startswith("Covers the recipe's "):
+        need = r.pack_reason.text.removeprefix("Covers the recipe's ").split(" in ")[0]
+        pack = f"{size} covers {need}" if size else f"covers {need}"
+    elif r.pack_fit == "short" and size:
+        pack = f"{size} falls short"
+    tags = sorted(contains(p) & set(_TAGS))
+    if original is not None:
+        added = sorted(set(tags) - contains(original))
+        allergens = ("no new allergens" if not added
+                     else f"adds {_and(added)}")
+    else:
+        allergens = f"contains {_and(tags)}" if tags else "no listed allergens"
+    return " · ".join(x for x in (_type_of(p), pack[:1].lower() + pack[1:], allergens) if x)
 
 
 def _money(cents: float) -> str:
@@ -1050,6 +1292,8 @@ def _reasons(r: _Row, line: BasisLine, located: bool, synthetic: bool,
     the trip and the rating. Unknowns are stated as unknown."""
     p = r.product
     head = _head_word(line.name)
+    if r.by_meaning:
+        return _meaning_reasons(r, line, located, synthetic, where)
     match = {
         "exact": Reason(code="match", text=f"Matches every word of {line.name!r}", tone="plus"),
         "form": Reason(code="match", text=f"Matches {line.name!r} in another form",
@@ -1072,6 +1316,29 @@ def _reasons(r: _Row, line: BasisLine, located: bool, synthetic: bool,
         word = _strong_head(line.name)
         match = Reason(code="match", text=f"Mentions {word}, but it is "
                        f"{_what_it_is(p, word)}; not the same ingredient", tone="minus")
+    return _fact_reasons(r, match, located, synthetic, where)
+
+
+def _meaning_reasons(r: _Row, line: BasisLine, located: bool, synthetic: bool,
+                     where: str) -> list[Reason]:
+    """The reasons of a row matched by meaning: its group first, then the same facts."""
+    kind = _type_of(r.product)
+    match = {
+        "same_item": Reason(code="match", text=f"Same item: {kind}", tone="plus"),
+        "works_instead": Reason(code="match",
+                                text=f"Works instead of {line.name}: {kind}; not the same item",
+                                tone="info"),
+        "looser_match": Reason(code="match",
+                               text=f"Looser match: {kind}, near {line.name} in meaning; not "
+                                    "the same item", tone="minus"),
+        "outside": Reason(code="match",
+                          text=f"The cart's pick; not a candidate for {line.name}", tone="info"),
+    }[r.group]
+    return _fact_reasons(r, match, located, synthetic, where)
+
+
+def _fact_reasons(r: _Row, match: Reason, located: bool, synthetic: bool,
+                  where: str) -> list[Reason]:
     o = r.origin
     origin_text = o.label + (f': "{o.verbatim}"' if o.verbatim else "") + (
         " (demo label photo)" if o.demo else "")
@@ -1112,14 +1379,61 @@ def _reasons(r: _Row, line: BasisLine, located: bool, synthetic: bool,
 
 def _rank_reason(rank: int, r: _Row, above: _Row | None, line: BasisLine, located: bool,
                  use_pref: bool, synthetic: bool, *, where: str = "your trip",
-                 max_eval: int = MAX_TRIP_EVAL) -> str:
+                 max_eval: int = MAX_TRIP_EVAL, meaning: matcher.Meaning | None = None) -> str:
     """Why `r` sits below the row above it: the first ranking key on which it is worse,
-    in plain words."""
+    in plain words; by meaning, its group, or the score component that costs it most."""
     if above is None:
         return "Ranked first: nothing ranks above it."
-    why = _first_difference(r, above, line, located, use_pref, synthetic, where=where,
-                            max_eval=max_eval)
+    if r.by_meaning:
+        why = _meaning_difference(r, above, line, located, where=where, max_eval=max_eval,
+                                  meaning=meaning)
+    else:
+        why = _first_difference(r, above, line, located, use_pref, synthetic, where=where,
+                                max_eval=max_eval)
     return f"Below #{rank - 1}: {why}."
+
+
+_FIT_WORDS = {"short": "its packs fall short of the recipe's amount",
+              "catering": "its pack is many times the recipe's amount",
+              "unknown": "its pack can't be compared with the recipe's amount"}
+
+
+def _meaning_difference(r: _Row, above: _Row, line: BasisLine, located: bool, *,
+                        where: str, max_eval: int, meaning: matcher.Meaning | None) -> str:
+    if _GROUP_RANK[r.group] > _GROUP_RANK[above.group]:
+        return {"works_instead": "it works instead; it is not the same item",
+                "looser_match": "it is a looser match: near in meaning, but not the same item "
+                                "and not known to work instead",
+                "outside": "it is not a candidate for the line"}[r.group]
+    if r.facts is None or above.facts is None or r.score == above.score:
+        return "it ties on every count; listed by catalog number"
+    # The component that costs it most against the row above, weighted.
+    gaps = {k: w * (getattr(above.facts, k) - getattr(r.facts, k))
+            for k, w in matcher.WEIGHTS.items()}
+    worst = max(gaps, key=lambda k: (gaps[k], k))
+    scores = f" (score {r.score:.2f} against {above.score:.2f})"
+    if worst == "relevance":
+        why = f"it is further from {line.name} in meaning"
+    elif worst == "form_variant":
+        asked = " ".join(x for x in (meaning.form, meaning.variant) if x) if meaning else ""
+        why = (f"it is not the {asked} the recipe asks for" if asked
+               else "it is not the form or variant the recipe asks for")
+    elif worst == "pack_fit":
+        fit = {0.3: "short", 0.25: "catering", 0.5: "unknown"}.get(r.facts.pack_fit, "")
+        why = _FIT_WORDS.get(fit, "its packs are further from the recipe's amount")
+    elif worst == "value":
+        why = (f"it costs more per {r.unit_basis}" if r.unit_basis
+               else "its price per unit is unknown")
+    elif worst == "origin":
+        why = "its origin is further down your preference"
+    else:
+        mine, theirs = r.trip_cents(located), above.trip_cents(located)
+        if mine == math.inf:
+            why = r.trip_note or f"its trip effect was not worked out (only the first " \
+                                 f"{max_eval} are)"
+        else:
+            why = f"{_money(mine - theirs)} more on {where}"
+    return why + scores
 
 
 def _first_difference(r: _Row, above: _Row, line: BasisLine, located: bool, use_pref: bool,

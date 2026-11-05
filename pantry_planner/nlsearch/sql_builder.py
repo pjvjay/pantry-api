@@ -161,7 +161,8 @@ def build_options_sql(c: Constraints, ingredients: list[IngredientSpec],
                       per_ingredient_limit: int = PER_INGREDIENT_LIMIT, *,
                       generic: set[int] | None = None,
                       equivalent: set[int] | None = None,
-                      nearest_store: bool = False) -> tuple[str, dict]:
+                      nearest_store: bool = False,
+                      candidates: dict[int, list[int]] | None = None) -> tuple[str, dict]:
     """All ingredients resolved in one pass: token VALUES -> product_terms
     join -> token-AND -> per-product cheapest in-range store (rn_store) ->
     per-ingredient size-fit/price ranking (rn) capped at :lim.
@@ -170,16 +171,30 @@ def build_options_sql(c: Constraints, ingredients: list[IngredientSpec],
     resolved at the form, generic or equivalent-form level (see
     _ingredient_terms). `nearest_store` pins each product to its NEAREST
     store instead of its cheapest — the attribution probe uses it to name
-    the closest offer outside a distance limit."""
+    the closest offer outside a distance limit.
+
+    `candidates`: ingredient index -> the product ids matching by meaning
+    found for it (matching/matcher.py). Such an ingredient has no terms: its
+    candidates join as they are (CANDIDATE_MATCH), and every one with an offer
+    under the constraints comes back, with no size cap and no :lim, because
+    the matcher ranks them itself."""
     params: dict = {"lim": per_ingredient_limit}
     _location_params(params, lat, lon)
     generic = generic or set()
     equivalent = equivalent or set()
+    candidates = candidates or {}
 
     term_rows: list[str] = []
     count_rows: list[str] = []
     need_rows: list[str] = []
+    cand_rows: list[str] = []
     for n, ing in enumerate(ingredients):
+        if n in candidates:                                # CANDIDATE_MATCH
+            for j, pid in enumerate(candidates[n]):
+                params[f"i{n}c{j}"] = int(pid)
+                cand_rows.append(f"({n}, :i{n}c{j})")
+            count_rows.append(f"({n}, 0)")
+            continue
         toks = _ingredient_terms(ing, relaxed=(n in relaxed), generic=(n in generic),
                                  equivalent=(n in equivalent))
         for j, t in enumerate(toks):
@@ -247,20 +262,27 @@ def build_options_sql(c: Constraints, ingredients: list[IngredientSpec],
         term_rows = ["(-1, :noterm)"]
     if not count_rows:
         count_rows = ["(-1, 0)"]
+    # Candidate rows go in only when some ingredient has them, so a recipe
+    # matched by words alone runs the statement it always ran.
+    cand_cte = (f",\n ing_cands(ing_no, product_id) AS (VALUES {', '.join(cand_rows)})"
+                if cand_rows else "")
+    cand_union = ("\n   UNION\n   SELECT ic.ing_no, ic.product_id FROM ing_cands ic"
+                  if cand_rows else "")
+    by_meaning = " OR b.ing_no IN (SELECT ing_no FROM ing_cands)" if cand_rows else ""
 
     store_order = (f"{DIST_EXPR} ASC, sp.price ASC, s.id ASC" if nearest_store
                    else "sp.price ASC, s.id ASC")
     sql = (
         f"WITH ing_terms(ing_no, term) AS (VALUES {', '.join(term_rows)}),\n"
         f" ing_counts(ing_no, ntok) AS (VALUES {', '.join(count_rows)})"
-        f"{need_cte},\n"
+        f"{need_cte}{cand_cte},\n"
         " matches AS (\n"
         "   SELECT it.ing_no, pt.product_id\n"
         "   FROM ing_terms it\n"
         "   JOIN product_terms pt ON pt.term = it.term\n"
         "   JOIN ing_counts c ON c.ing_no = it.ing_no\n"
         "   GROUP BY it.ing_no, pt.product_id, c.ntok\n"
-        "   HAVING COUNT(DISTINCT it.term) = c.ntok),\n"
+        f"   HAVING COUNT(DISTINCT it.term) = c.ntok{cand_union}),\n"
         " offers AS (\n"
         f"   SELECT m.ing_no AS ing_no, {PRODUCT_COLS},\n"
         "          sp.price AS store_price, s.name AS store_name,\n"
@@ -278,7 +300,7 @@ def build_options_sql(c: Constraints, ingredients: list[IngredientSpec],
         f"      {rank_order}) AS rn\n"
         f"  FROM offers b{rank_join}\n"
         f"  WHERE b.rn_store = 1{size_cap}) ranked\n"
-        "WHERE rn <= :lim\n"
+        f"WHERE rn <= :lim{by_meaning.replace('b.ing_no', 'ranked.ing_no')}\n"
         "ORDER BY ing_no, rn"
     )
     return sql, params

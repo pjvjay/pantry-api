@@ -18,6 +18,7 @@ HOME = {"lat": 49.28, "lon": -123.12}
 MIXED = ("Mixed\n- 500g penne\n- 2 cloves garlic\n- 1 can crushed tomatoes\n"
          "- 1 cup light brown sugar\n- 1 tsp cumin powder\n- 200g red onion\n")
 _TIER = {"same": 0, "other": 1, "outside": 2}
+_GROUP = {"same_item": 0, "works_instead": 1, "looser_match": 2, "outside": 3}
 _FIT = {"covers": 0, "unknown": 1, "short": 2}
 
 
@@ -188,7 +189,9 @@ def _key_prefix(ranking, line_name, catalog, use_pref, prefs):
     return out
 
 
-def test_rows_never_go_up_on_tier_words_pack_fit_preference_then_trip():
+def test_rows_never_go_up_on_their_ranking_keys():
+    """Matched by meaning: group, then the matcher's score, then the catalog id. Matched by
+    words (here, the MIXED lines no seed knows): tier, words, pack fit, preference, trip."""
     from pantry_planner import db, flow, origins
 
     _save([_evidence(_id("Penne Rigate 500g"), "Italy", claim="product-of"),
@@ -205,15 +208,19 @@ def test_rows_never_go_up_on_tier_words_pack_fit_preference_then_trip():
             if ln.product_id is None:
                 continue
             ranking = _rank(plan, ln.name)
-            keys = _key_prefix(ranking, ln.name, catalog, use_pref, prefs)
+            if ranking.matching == "meaning":
+                keys = [(_GROUP[it.group], -it.score if it.score is not None else 0.0,
+                         it.product_id) for it in ranking.items]
+            else:
+                keys = _key_prefix(ranking, ln.name, catalog, use_pref, prefs)
             assert [it.rank for it in ranking.items] == list(range(1, len(keys) + 1))
             assert keys == sorted(keys), (plan.recipe_slug, ln.name)
 
 
-def test_a_line_ending_in_its_ingredient_word_keeps_the_demo_selectors_order():
-    """The demo selector picks by units.semantic_key. Where the line's last word is its
-    ingredient word, the ranking only breaks semantic_key's ties, so within a tier it never
-    puts a product the selector thinks less close above a closer one."""
+def test_a_line_ending_in_its_ingredient_word_keeps_the_demo_selectors_order(by_words):
+    """Matched by words, the demo selector picks by units.semantic_key. Where the line's last
+    word is its ingredient word, the ranking only breaks semantic_key's ties, so within a
+    tier it never puts a product the selector thinks less close above a closer one."""
     from pantry_planner import db
     from pantry_planner.nlsearch.units import semantic_key, tokens
 
@@ -246,14 +253,16 @@ def test_a_line_ending_in_a_form_word_ranks_by_its_ingredient_word():
     assert not any("powder" in it.rank_reason for it in items)
 
 
-def test_a_closer_but_dearer_product_ranks_above_a_cheaper_less_close_one():
+def test_the_same_item_ranks_above_a_cheaper_product_that_works_instead():
     from pantry_planner import flow
 
     ranking = _rank(flow.run("grilled_cheese", max_km=12, **HOME), "Butter")
     rows = _by_name(ranking)
-    salted, peanut = rows["Butter Salted 454g"], rows["Canadian Peanut Butter Cream"]
-    assert salted.rank < peanut.rank
-    assert salted.trip.total > peanut.trip.total
+    salted, canola = rows["Butter Salted 454g"], rows["Canola Oil 1L"]
+    assert (salted.group, canola.group) == ("same_item", "works_instead")
+    assert salted.rank < canola.rank
+    assert salted.trip.total > canola.trip.total
+
 
 
 def test_rating_breaks_only_exact_cent_ties():
@@ -302,25 +311,65 @@ SAME_OR_NOT = ("Same or not\n- 400 g chicken breast\n- 1 can canned tomatoes\n"
                "- 2 tbsp olive oil\n- 15 g butter\n")
 
 
-def test_a_product_that_matches_the_words_but_is_another_food_is_not_the_same_ingredient():
-    """Canadian Peanut Butter Cream matches every word of "butter", but it is peanut butter,
-    from the spreads, not the butter aisle: the other tier, saying so, below every butter.
-    Products named another way but mainly the ingredient, or from its aisle, stay the same
-    ingredient, and the planner's picks do not change."""
+def test_butter_never_gets_peanut_butter_and_olive_oil_gets_extra_virgin_as_the_same_item():
+    """Matched by meaning: peanut butter is not butter (its seed lists it as unrelated), so it
+    is no candidate at all, and it would add nuts besides; extra virgin olive oil is olive oil;
+    tomato paste is not canned tomatoes; a jarred pasta sauce works instead of them."""
     from pantry_planner import flow
-    from tests.seed_catalog import SEED_PRODUCTS
 
-    aisle = {p["id"]: p["subcategory"] for p in SEED_PRODUCTS}
+    peanut = _id("Canadian Peanut Butter Cream")
     for plan, name in ((flow.run_nl(SAME_OR_NOT), "butter"),
                        (flow.run("grilled_cheese", max_km=12, **HOME), "Butter")):
-        rows = _by_name(_rank(plan, name))
-        butter, peanut = rows["Butter Salted 454g"], rows["Canadian Peanut Butter Cream"]
+        ranking = _rank(plan, name)
+        rows = _by_name(ranking)
+        butter = rows["Butter Salted 454g"]
+        assert ranking.matching == "meaning"
+        assert butter.current and (butter.group, butter.match, butter.tier) == (
+            "same_item", "exact", "same")
+        assert butter.reasons[0].text == "Same item: butter"
+        assert peanut not in {it.product_id for it in ranking.items}
+        assert peanut not in {f.product_id for f in ranking.filtered}
+        assert all(it.group != "same_item" for it in ranking.items if it.product_id != butter
+                   .product_id)
+    plan = flow.run_nl(SAME_OR_NOT)
+    for line, product in (("olive oil", "Extra Virgin Olive Oil 500ml"),
+                          ("olive oil", "Olive Oil 1L"),
+                          ("chicken breast", "Boneless Skinless Chicken Breast"),
+                          ("tomatoes", "Crushed Tomatoes Canned 796ml"),
+                          ("tomatoes", "Canned Diced Tomatoes")):
+        row = _by_name(_rank(plan, line))[product]
+        assert (row.group, row.tier) == ("same_item", "same"), (line, product)
+        assert row.reasons[0].text.startswith("Same item: "), (line, product)
+    tomatoes = _by_name(_rank(plan, "tomatoes"))
+    assert tomatoes["Tomato Paste 156ml"].group != "same_item"
+    sauce = tomatoes["Tomato Sauce Jar 650ml"]
+    assert (sauce.group, sauce.tier, sauce.match) == ("works_instead", "other", "substitute")
+    assert sauce.reasons[0].text == ("Works instead of tomatoes: pasta sauce; not the same "
+                                     "item")
+
+
+def test_a_product_that_matches_the_words_but_is_another_food_is_not_the_same_ingredient(
+        by_words):
+    """Matched by words: Canadian Peanut Butter Cream matches every word of "butter", but it
+    is peanut butter, and it adds nuts, which the plan's butter does not have: a hard rule
+    keeps it out of the rows and says why (filtered). Products named another way but mainly
+    the ingredient, or from its aisle, stay the same ingredient; a jarred tomato sauce is
+    another food, from another aisle: the other tier, saying so. The planner's picks do not
+    change."""
+    from pantry_planner import flow
+
+    for plan, name in ((flow.run_nl(SAME_OR_NOT), "butter"),
+                       (flow.run("grilled_cheese", max_km=12, **HOME), "Butter")):
+        ranking = _rank(plan, name)
+        assert ranking.matching == "words"
+        butter = _by_name(ranking)["Butter Salted 454g"]
         assert butter.current and (butter.match, butter.tier) == ("exact", "same")
-        assert (peanut.match, peanut.tier) == ("exact", "other")
-        assert (peanut.reasons[0].text, peanut.reasons[0].tone) == (
-            "Mentions butter, but it is peanut butter; not the same ingredient", "minus")
-        assert peanut.rank_reason == f"Below #{peanut.rank - 1}: not the same ingredient."
-        assert aisle[peanut.product_id] != aisle[butter.product_id]
+        held = {f.product: f for f in ranking.filtered}
+        peanut = held["Canadian Peanut Butter Cream"]
+        assert (peanut.why, peanut.tags) == ("adds_tags", ["nuts"])
+        assert peanut.text == ("Canadian Peanut Butter Cream contains nuts, which Butter "
+                               "Salted 454g does not")
+        assert "Canadian Peanut Butter Cream" not in _by_name(ranking)
     plan = flow.run_nl(SAME_OR_NOT)
     for line, product in (("olive oil", "Extra Virgin Olive Oil 500ml"),
                           ("olive oil", "Olive Oil 1L"),
@@ -358,7 +407,19 @@ def test_with_no_pick_the_ingredients_aisle_is_the_one_its_own_products_share():
     assert not _another_food(catalog[peanut], "butter", None)
 
 
-def test_a_thin_pool_adds_same_aisle_substitutes():
+def test_what_works_instead_of_garlic_is_what_its_seed_says():
+    from pantry_planner import flow
+    from pantry_planner.matching import seeds
+
+    ranking = _rank(flow.run_nl(MIXED), "garlic")
+    instead = [it for it in ranking.items if it.group == "works_instead"]
+    allowed = set(seeds.load().ingredients["garlic"].substitute_types)
+    assert instead and all(it.match == "substitute" and it.tier == "other" for it in instead)
+    assert {seeds.load().profiles[it.product_id].product_type for it in instead} <= allowed
+    assert all(it.reasons[0].text.startswith("Works instead of garlic: ") for it in instead)
+
+
+def test_a_thin_pool_adds_same_aisle_substitutes(by_words):
     from pantry_planner import flow
     from tests.seed_catalog import SEED_PRODUCTS
 
@@ -401,8 +462,10 @@ def test_one_options_query_and_at_most_one_substitute_query_per_call():
     try:
         for ln in plan.basis.lines:
             statements.clear()
-            rank_alternatives(plan.basis, ln.line_no)
-            assert sum("ing_counts(ing_no, ntok)" in st for st in statements) == 1, ln.name
+            ranking = rank_alternatives(plan.basis, ln.line_no)
+            # matched by meaning, the candidates need no query; by words, one
+            assert sum("ing_counts(ing_no, ntok)" in st for st in statements) == (
+                0 if ranking.matching == "meaning" else 1), ln.name
             assert sum(":sub_subcat" in st or "p.subcategory = " in st
                        for st in statements if "ing_counts" not in st) <= 1, ln.name
             assert len(statements) <= 6, (ln.name, len(statements))
@@ -583,13 +646,15 @@ def test_choosing_another_lines_product_says_it_merges_and_reprice_agrees():
     from pantry_planner import flow
     from pantry_planner.models import Pin
 
-    plan = flow.run_nl("Onions\n- 300g yellow onion\n- 200g red onion\n")
+    # 200 g of yellow onion buys one 200 g onion (300 g, matched by meaning, buys a bag the
+    # red onion's words do not reach)
+    plan = flow.run_nl("Onions\n- 200g yellow onion\n- 200g red onion\n")
     yellow = _id("Yellow Onion")
     row = _by_name(_rank(plan, "red onion"))["Yellow Onion"]
     assert row.trip.merges_with_line == 1
     again = flow.reprice(plan.basis, [Pin(line_no=2, product_id=yellow)])
     (li,) = again.line_items
-    assert li.also_lines == [2] and li.packs == row.packs == 3
+    assert li.also_lines == [2] and li.packs == row.packs == 2
     assert any("already bought for line 1" in r.text for r in row.reasons)
 
 

@@ -6,7 +6,8 @@ The recipes are the library's, the demo starters and the shopper's own (RecipeDo
 request). Each line's product is the one resolve picks in demo mode: the resolve's own
 retrieval and origin filter (flow's load_recipe and load_products for a library recipe, and
 parse_and_retrieve for a RecipeDoc, called as functions), then the demo selector
-(demomode.select_products: shared words, head noun, origin preference, price). Live, the
+(demomode.select_products: the matcher's first candidate, matching/matcher.py; by words, shared
+words, head noun, origin preference, price). Live, the
 resolve's selector is a model and may choose another product in the Ingredients stage; the
 estimate is this code's, and est_basis says what it rests on.
 
@@ -153,7 +154,7 @@ def picks(ref: RecipeRef, doc: RecipeDoc, s: PlanSettings) -> Picks:
     chosen = demomode.select_products(
         st["recipe"].ingredients, st["products"], model="demo-deterministic",
         origins_by_id=st.get("origins") or {}, preference=st.get("preference") or [],
-        substitutes=st.get("substitutes"))
+        substitutes=st.get("substitutes"), order=st.get("match_order"))
     by_line = {sel.line_no: sel.product_id for sel in chosen.selections}
     why = {d.ingredient: (NOT_STOCKED, d.reason) for d in st.get("not_stocked") or []}
     for d in st.get("out_of_range") or []:

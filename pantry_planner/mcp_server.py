@@ -553,8 +553,8 @@ def _location(lat: float | None, lon: float | None) -> tuple[float, float]:
 
 def _planner_candidates(name: str, lat: float, lon: float, *,
                         generic: bool = False) -> list:
-    """Exactly how the planner finds candidates for one ingredient
-    (flow._ingredient_pools): token-AND over the product_terms index, each
+    """Exactly how the planner finds candidates for one ingredient it matches
+    by words (flow._ingredient_pools): token-AND over the product_terms index, each
     product pinned to its cheapest in-range store, cheapest first, uncapped.
     A hit here is a candidate there; a miss here is a miss there.
     `generic` matches at the planner's generic level (descriptors dropped)."""
@@ -838,10 +838,14 @@ def list_products(search: Annotated[str | None, Field(max_length=MAX_SEARCH)] = 
 def find_product(query: Annotated[str, Field(min_length=1, max_length=MAX_SEARCH)],
                  limit: Annotated[int, Field(ge=1, le=25)] = 8,
                  lat: float | None = None, lon: float | None = None) -> ProductSearch:
-    """Look up catalog products exactly the way the planner does, so a hit
-    here is a planning candidate there. `query` is an ingredient name
-    ("basmati rice", "gluten free penne"); every significant word must
-    match (lowercase, stemmed, "fresh"/"of" ignored — see `tokens`). Items
+    """Look up catalog products by their words, the way the planner matches
+    a name it cannot match by meaning (a name no seed knows, with the
+    embedding model down): a hit here is a planning candidate then. The
+    planner matches by meaning first, and rank_alternatives shows its
+    candidates (Same item, Works instead, Looser match). `query` is an
+    ingredient name ("basmati rice", "gluten free penne"); every
+    significant word must match (lowercase, stemmed, "fresh"/"of" ignored —
+    see `tokens`). Items
     come back cheapest first, each priced at its cheapest store near
     lat/lon (the default location when omitted). `total` is the hit count
     before `limit` trims. Free — no LLM calls.

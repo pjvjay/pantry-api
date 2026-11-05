@@ -310,6 +310,10 @@ class TripOption(BaseModel):
 #             light/dark/toasted/ground/...): "light brown sugar" -> Brown Sugar.
 #             On the week path, a line rescued by the head-noun fallback.
 MatchLevel = Literal["exact", "form", "generic"]
+# Product matching (matching/matcher.py): by meaning, or by words when a name no seed knows
+# cannot be embedded; and the group a product is in for an ingredient (ESCI-style).
+MatchingMode = Literal["meaning", "words"]
+MatchGroup = Literal["same_item", "works_instead", "looser_match"]
 
 
 class DroppedIngredient(BaseModel):
@@ -348,6 +352,11 @@ class PlanLineItem(BaseModel):
     # unstated amount, or a teaspoon and a gram on one purchase).
     need_qty: float | None = None
     need_uom: Literal["g", "ml", "each"] | None = None
+    # How the lines were matched to products (matching/matcher.py): "meaning", or "words"
+    # when a name no seed knows could not be embedded; and the product's group for the first
+    # line (same_item | works_instead). None when not known (a re-priced plan).
+    matching: MatchingMode | None = None
+    group: MatchGroup | None = None
 
 
 # ─── Plan basis: what a plan was made from ───────────────────
@@ -474,6 +483,7 @@ class ShoppingPlan(BaseModel):
 
 AltTier = Literal["same", "other", "outside"]
 AltMatch = Literal["exact", "form", "generic", "related", "substitute", "outside"]
+AltGroup = Literal["same_item", "works_instead", "looser_match", "outside"]
 
 
 class Reason(BaseModel):
@@ -554,11 +564,15 @@ class AltRating(BaseModel):
 
 class RankedAlternative(BaseModel):
     """One candidate product for the line. `current` marks the cart's own
-    pick. `tier`: same (the ingredient, at the exact, form or generic level),
-    other (shares the head noun, a same-aisle substitute, or matches the
-    words but is another food from another aisle, as peanut butter is for
-    butter) or outside (the cart's pick when it matches none of the line's
-    words). `packs` is what
+    pick. `group` is how the matcher sees it (Same item, Works instead, Looser
+    match); `tier` and `match` say the same in the words-era terms the console
+    already reads: matched by meaning, a Same item is tier same, match exact;
+    Works instead is other, substitute; a Looser match other, related.
+    Matched by words, `tier` is same (the ingredient, at the exact, form or
+    generic level), other (shares the head noun, a same-aisle substitute, or
+    matches the words but is another food from another aisle, as peanut butter
+    is for butter) or outside (the cart's pick when it matches none of the
+    line's words). `packs` is what
     the cart would buy; `pack_fit` whether that covers the recipe's need;
     `cost_for_need` the price of enough packs for the need (None when the
     need or the pack size is unknown or in another unit), at the price a
@@ -587,6 +601,15 @@ class RankedAlternative(BaseModel):
     says_organic: bool = False
     reasons: list[Reason] = Field(default_factory=list)
     rank_reason: str = ""
+    # Matching by meaning (matching/matcher.py): the row's group, ESCI-style, and its plain
+    # name ("Same item", "Works instead", "Looser match"; "Not a candidate" for the cart's pick
+    # when it is none); `score` the matcher's weighted sum (None when matched by words);
+    # `summary` the row's short reasons on one line ("butter · 454 g covers 80 g · no new
+    # allergens").
+    group: AltGroup = "same_item"
+    group_label: str = ""
+    score: float | None = None
+    summary: str = ""
 
 
 class HeldBack(BaseModel):
@@ -615,13 +638,31 @@ class OutOfReach(BaseModel):
     nearest: AltBuy | None = None
 
 
+class Filtered(BaseModel):
+    """A product that would fill the line but fails a hard rule, so it is never choosable:
+    `why` is adds_tags (it contains something the plan's own product does not: `tags`),
+    diet (it contains something the plan's diet or avoid list leaves out, or its constraints
+    exclude: `tags`) or constraints (outside the plan's required tags or aisles). `text`
+    says it in plain words."""
+    product_id: int
+    product: str
+    group: MatchGroup
+    why: Literal["adds_tags", "diet", "constraints"]
+    tags: list[str] = Field(default_factory=list)
+    text: str
+
+
 class AltCounts(BaseModel):
-    """How many ranked rows have each property, for filter chips."""
+    """How many ranked rows have each property, for filter chips; and how many are in each
+    group."""
     exact: int = 0
     no_new_stop: int = 0
     preferred_origin: int = 0
     says_organic: int = 0
     rated: int = 0
+    same_item: int = 0
+    works_instead: int = 0
+    looser_match: int = 0
 
 
 class AlternativeRanking(BaseModel):
@@ -657,6 +698,12 @@ class AlternativeRanking(BaseModel):
     unavailable: int = 0
     counts: AltCounts = Field(default_factory=AltCounts)
     data_note: str = ""
+    # How the line was matched: "meaning" (matching/matcher.py), or "words" when its name is
+    # one no seed knows and the embedding model could not be reached; `matching_note` says it
+    # in plain words for the console. `filtered`: candidates a hard rule keeps out (Filtered).
+    matching: MatchingMode = "meaning"
+    matching_note: str = ""
+    filtered: list[Filtered] = Field(default_factory=list)
 
 
 # ─── Recipe documents: one schema for every recipe the shopper reviews ──

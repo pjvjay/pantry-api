@@ -179,7 +179,16 @@ def health() -> dict:
         "gemini_key_configured": bool(cfg.gemini_api_key),
         # Today's estimated LLM spend on this replica and the ceiling (None: no ceiling).
         "llm_budget": limits.budget(),
+        # Product matching (matching/matcher.py): its seeds, and whether a name no seed knows
+        # is embedded now or matched by words.
+        "matching": _matching_state(),
     }
+
+
+def _matching_state() -> dict:
+    from .matching import matcher
+
+    return matcher.state()
 
 
 # ─── Runtime settings (demo UI) ──────────────────────────────

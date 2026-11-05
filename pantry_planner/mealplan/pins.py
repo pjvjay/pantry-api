@@ -78,13 +78,33 @@ def meal_basis(draft: MealPlanDraft, key: str, doc: RecipeDoc,
                      ingredient_count=len(doc.lines), servings=doc.servings)
 
 
+def forbidden(draft: MealPlanDraft, keys: list[str]) -> frozenset[str]:
+    """The contains-tags no product chosen for these recipes' lines may have: what the plan's
+    diet leaves out (diets.EXCLUDES) and its avoid list, and what each recipe's own diets
+    leave out (a vegan starter's line never takes dairy, even where the resolve bought
+    nothing). A recipe whose diets are not known adds nothing."""
+    from .diets import EXCLUDES, seed_meta
+
+    out = set(EXCLUDES.get(draft.prefs.diet, ())) | set(draft.prefs.avoid)
+    for key in keys:
+        dr = draft.recipes.get(key)
+        meta = seed_meta(dr.ref) if dr is not None else None
+        if meta is not None:
+            for diet in meta["diets"]:
+                out |= set(EXCLUDES.get(diet, ()))
+    return frozenset(out)
+
+
 def check_pins(draft: MealPlanDraft, docs: dict[str, RecipeDoc],
                products: dict[int, Product]) -> None:
-    """Every pin of every resolved recipe through alternatives.validate_pins; the first that
-    fails is 422 pin_invalid, naming the recipe, the line and the reason. A pin may fill a
-    line the resolve bought nothing for, checked the same way. A recipe not resolved yet (or
-    whose resolve failed) buys nothing, so its pins wait until it is."""
+    """Every pin of every resolved recipe through alternatives.validate_pins, with what the
+    plan and the recipe leave out (forbidden); the first that fails is 422 pin_invalid,
+    naming the recipe, the line and the reason. A pin may fill a line the resolve bought
+    nothing for, checked the same way. A recipe not resolved yet (or whose resolve failed)
+    buys nothing, so its pins wait until it is. A pin seen for the first time is logged as a
+    pick (matching/events.py)."""
     from .. import alternatives
+    from ..matching import events
 
     for key, lines in sorted(draft.pins.items()):
         resolved = draft.resolved.get(key)
@@ -93,7 +113,12 @@ def check_pins(draft: MealPlanDraft, docs: dict[str, RecipeDoc],
         basis = meal_basis(draft, key, docs[key])
         pins = [Pin(line_no=int(raw), product_id=pid) for raw, pid in sorted(lines.items())]
         try:
-            alternatives.validate_pins(basis, pins, catalog=products, open_lines=True)
+            valid = alternatives.validate_pins(basis, pins, catalog=products, open_lines=True,
+                                               forbid=forbidden(draft, [key]))
         except alternatives.PinError as e:
             raise MealPlanError("pin_invalid", f"{docs[key].title}: {e}", recipe_key=key,
                                 line_no=e.line_no) from e
+        names = {ln.line_no: ln.name for ln in basis.lines}
+        planned = {ln.line_no: ln.product_id for ln in basis.lines}
+        for line_no, v in valid.items():
+            events.picked(names[line_no], v.product_id, was=planned.get(line_no), once=True)

@@ -21,6 +21,11 @@ through alternatives.TripEffect:
 A line whose product no store in range sells any more (no_longer_stocked) still has its
 options: the product is left out of the rows and `stocked` says why.
 
+No row ever contains what the plan's diet or avoid list leaves out, or what the covered
+recipes' own diets do (pins.forbidden): a dairy-free plan never sees a dairy product that
+works instead. Such a candidate is listed in ranking.filtered with the reason, as one that
+adds a contains-tag the plan's own product lacks is.
+
 Without a trip date (the wizard's Ingredients stage, before any trip is planned) the purchase
 is every line of the plan that buys the product, for all its recipe's meals, as
 /mealplan/basket lists them, and choosing another product still pins them all. No trip is
@@ -59,7 +64,7 @@ from .models import (
     TripLineOptions,
 )
 from .needs import USABLE, Need, needs_for_meal
-from .pins import meal_basis
+from .pins import forbidden, meal_basis
 from .place import day_label
 
 WHERE = "your plan's trips"
@@ -317,7 +322,8 @@ def trip_line_options(draft: MealPlanDraft, trip_date: dt.date | None, product_i
         basis, asked, limit, open_lines=line is not None, effect=alternatives.TripEffect(
             needs=needs, on_trip=set(trip.stores) if trip else set(), packs=packs,
             effect=effect if base is not None else no_trip, where=WHERE,
-            stores_off=frozenset(draft.settings.stores_off)))
+            stores_off=frozenset(draft.settings.stores_off),
+            forbid=forbidden(draft, sorted(bases))))
 
     # The meal plan's words where the cart's would mislead: the ingredient once per name, the
     # reason an amount is unknown, and a purchase the product would share with other meals.

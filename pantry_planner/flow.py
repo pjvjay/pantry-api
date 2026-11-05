@@ -166,23 +166,39 @@ def load_recipe(state: State, recipe_slug: str,
     return result, state.update(recipe=recipe, location=location, plan_path="library")
 
 
-@action(reads=["recipe"], writes=["recipe", "products", "origins", "origin_dropped", "preference",
+@action(reads=["recipe", "location"],
+        writes=["recipe", "products", "origins", "origin_dropped", "preference",
                                  "origin_requested", "out_of_range", "ingredient_count",
-                                 "exclude"])
+                                 "exclude", "match_levels", "match_order", "line_matching",
+                                 "substitutes"])
 def load_products(state: State, exclude: list | None = None,
                   preference: list | None = None,
                   allow_partial: bool = False) -> tuple[dict, State]:
     """With `allow_partial`, an ingredient the origin exclusion emptied leaves the recipe and
-    goes to out_of_range with what to buy instead; the rest is planned."""
+    goes to out_of_range with what to buy instead; the rest is planned (ingredient_pools says
+    what each ingredient's candidates are).
+
+    Every line matched by meaning (matching/matcher.py) offers the selector its own
+    candidates: the products that are the same item and, when those are few (THIN_POOL), the
+    ones that work instead, flagged as substitutes. A line matched by words (no seed knows its
+    name and the embedder cannot be reached) is planned as it always was, from the whole
+    catalog, and then the selector sees the whole catalog."""
     products = db.load_all_products()
     recipe = state.get("recipe")
-    cfg = settings()
-    pools = _ingredient_pools(recipe, cfg.default_lat, cfg.default_lon) if recipe else {}
+    pools, meanings = ingredient_pools(recipe, products) if recipe else ({}, [])
     names = {i: ing.name for i, ing in enumerate(recipe.ingredients)} if recipe else {}
+    offered = products
+    if meanings and all(m.matching == "meaning" for m in meanings):
+        offered = _offered(pools, len(meanings))
     kept, dropped, origins, _pools, excluded = apply_origin_constraint(
-        products, pools, names, exclude=exclude, preference=preference,
+        offered, pools, names, exclude=exclude, preference=preference,
         allow_partial=allow_partial)
     count = len(recipe.ingredients) if recipe else 0
+    lines = {i: ing.line_no for i, ing in enumerate(recipe.ingredients)} if recipe else {}
+    order, matching, levels, subs = _meaning_order(
+        {lines[g]: m for g, m in enumerate(meanings) if g not in excluded},
+        {lines[g]: pool for g, pool in pools.items()}, kept, preference=preference,
+        origins=origins, prices=_offer_prices(kept, state.get("location")))
     if excluded:
         recipe = recipe.model_copy(update={"ingredients": [
             ing for i, ing in enumerate(recipe.ingredients) if i not in excluded]})
@@ -194,7 +210,100 @@ def load_products(state: State, exclude: list | None = None,
                                 exclude=list(exclude or []),
                                 origin_requested=bool(exclude or preference),
                                 out_of_range=list(excluded.values()),
-                                ingredient_count=count)
+                                ingredient_count=count, match_levels=levels,
+                                match_order=order, line_matching=matching,
+                                substitutes=subs)
+
+
+def _offered(pools: dict, n: int) -> list[Product]:
+    """What the library path's selector is shown when every line is matched by meaning: each
+    line's same item and, when that is thin, what works instead (flagged substitute), every
+    product once (union_of_pools)."""
+    from .nlsearch.planner import union_of_pools
+    from .nlsearch.sql_builder import THIN_POOL
+
+    lists = []
+    for g in range(n):
+        pool = pools.get(g) or {"direct": [], "relaxed": []}
+        direct = list(pool["direct"])
+        subs = ([p.model_copy(update={"substitute": True}) for p in pool["relaxed"]]
+                if len(direct) < THIN_POOL else [])
+        lists.append(direct + subs)
+    return union_of_pools(lists)
+
+
+def _offer_prices(products: list[Product], location: dict | None) -> dict[int, float] | None:
+    """Each product's price at its cheapest store in range, for a library plan with a shopping
+    location (as optimize_trips and the alternatives ranking price it), from one price-matrix
+    query; None without a location (catalog prices). A product no store in range sells is
+    left out."""
+    from sqlalchemy import text as _text
+    from sqlalchemy.orm import Session as _Session
+
+    from .nlsearch.sql_builder import build_price_matrix_sql
+
+    if location is None or not products:
+        return None
+    sql, params = build_price_matrix_sql(sorted({p.id for p in products}), location["lat"],
+                                         location["lon"], location.get("max_km"))
+    with _Session(db.engine()) as s:
+        rows = list(s.execute(_text(sql), params).mappings())
+    return {pid: o["price"] for pid, o in _cheapest_offers(rows, "library").items()}
+
+
+def _meaning_order(meanings: dict, pools: dict, kept: list[Product], *,
+                   preference: list | None, origins: dict,
+                   needs: dict | None = None,
+                   prices: dict[int, float] | None = None) -> tuple[dict, dict, dict, dict]:
+    """For the lines matched by meaning (line_no -> Meaning), from their pools (line_no ->
+    {"direct", "relaxed"} or a list) and the products the plan may buy (`kept`): (line_no ->
+    (product id, group) in the matcher's order, which demo mode's selector picks the first of;
+    line_no -> {"matching", "groups": product id -> group} for every line; line_no -> match
+    level; line_no -> the ids that only work instead). `prices`: what each product costs
+    where the plan would buy it (_offer_prices); a product missing from it, when given, is
+    ranked after every one of its group that can be bought in range, never after another
+    group: a same item sold out of range is still the pick, and reported out of range."""
+    from .matching import matcher
+
+    by_id = {p.id: p for p in kept}
+    # Lines of one recipe that mean the same ingredient ("300 g yellow onion" and "100 g
+    # yellow onions") are ranked for their summed need, so they pick one product: one purchase.
+    alike: dict[tuple, list[int]] = {}
+    for line_no, m in meanings.items():
+        alike.setdefault((m.source, m.exact, m.substitutes, m.form, m.variant), []).append(line_no)
+    summed: dict[int, tuple[float, str] | None] = {}
+    for members in alike.values():
+        got = [(needs or {}).get(n) for n in members]
+        total = (round(sum(g[0] for g in got if g), 4), got[0][1]) \
+            if got and all(got) and len({g[1] for g in got if g}) == 1 else None
+        for n in members:
+            summed[n] = total if total is not None else (needs or {}).get(n)
+    order: dict[int, list[int]] = {}
+    matching: dict[int, dict] = {}
+    levels: dict[int, str] = {}
+    subs: dict[int, list[int]] = {}
+    for line_no, m in meanings.items():
+        if m.matching != "meaning":
+            matching[line_no] = {"matching": "words", "groups": {}}
+            continue
+        pool = pools.get(line_no) or []
+        members = ([*pool.get("direct", []), *pool.get("relaxed", [])]
+                   if isinstance(pool, dict) else list(pool))
+        mine = [by_id[p.id] for p in members if p.id in by_id]
+        ranked = matcher.rank_pool(m, mine, need=summed.get(line_no),
+                                   preference=list(preference or []), origins=origins,
+                                   prices=prices)
+        if prices is not None:
+            # Within its group, a product sold in range before one that is not (stable).
+            ranked.sort(key=lambda r: (matcher.GROUPS.index(r.group), r.product_id not in prices))
+        order[line_no] = [(r.product_id, r.group) for r in ranked]
+        matching[line_no] = {"matching": "meaning",
+                             "groups": {r.product_id: r.group for r in ranked}}
+        levels[line_no] = "exact" if any(r.group == "same_item" for r in ranked) else "generic"
+        instead = sorted(r.product_id for r in ranked if r.group == "works_instead")
+        if instead:
+            subs[line_no] = instead
+    return order, matching, levels, subs
 
 
 @action(reads=[], writes=["recipe", "products", "parsed_input", "location",
@@ -202,7 +311,8 @@ def load_products(state: State, exclude: list | None = None,
                           "origins", "origin_dropped", "preference",
                           "origin_requested", "not_stocked", "out_of_range",
                           "skipped", "pool_hints", "match_levels",
-                          "ingredient_count", "exclude", "plan_path", "substitutes"])
+                          "ingredient_count", "exclude", "plan_path", "substitutes",
+                          "match_order", "line_matching"])
 def parse_and_retrieve(state: State, recipe_text: str,
                        lat: float | None = None,
                        lon: float | None = None,
@@ -240,11 +350,16 @@ def parse_and_retrieve(state: State, recipe_text: str,
     # A partial plan leaves out what the exclusion emptied, as it does what is not stocked.
     recipe = r.recipe if not excluded else r.recipe.model_copy(update={"ingredients": [
         ing for i, ing in enumerate(r.recipe.ingredients) if i not in excluded]})
+    by_meaning = {i for i, ing in enumerate(r.recipe.ingredients)
+                  if r.meanings.get(ing.line_no) is not None
+                  and r.meanings[ing.line_no].matching == "meaning"}
     if exclude and kept_pools:
         def price(p):
             return p.store_price if p.store_price is not None else p.price
+        # A line matched by meaning keeps the matcher's order; one matched by words, price.
         kept = union_of_pools([
-            sorted(direct, key=price)[:PER_INGREDIENT_LIMIT] + alts
+            (direct if key in by_meaning else sorted(direct, key=price))[:PER_INGREDIENT_LIMIT]
+            + alts
             for key, (direct, alts) in kept_pools.items() if key not in excluded])
     result = {
         "ingredient_count": len(r.recipe.ingredients),
@@ -257,6 +372,11 @@ def parse_and_retrieve(state: State, recipe_text: str,
     # Each line's best candidates, named on `skipped` if the selector then
     # returns no product for the line.
     kept_ids = {p.id for p in kept}
+    order, line_matching, _levels, _subs = _meaning_order(
+        {ing.line_no: r.meanings[ing.line_no] for i, ing in enumerate(r.recipe.ingredients)
+         if i not in excluded and ing.line_no in r.meanings},
+        {ing.line_no: r.pools.get(i, []) for i, ing in enumerate(r.recipe.ingredients)},
+        kept, preference=preference, origins=origins, needs=_needs(r.parsed))
     pool_hints = {
         ing.line_no: [f"{p.name} (${p.store_price if p.store_price is not None else p.price:.2f})"
                       for p in r.pools.get(i, []) if p.id in kept_ids and not p.substitute][:3]
@@ -278,7 +398,8 @@ def parse_and_retrieve(state: State, recipe_text: str,
         # `products` list cannot say which line a substitute is for.
         substitutes=substitutes_by_line(r.recipe, {
             i: pool for i, pool in r.pools.items() if i not in excluded}),
-        match_levels=r.match_levels, ingredient_count=r.ingredient_count)
+        match_levels=r.match_levels, ingredient_count=r.ingredient_count,
+        match_order=order, line_matching=line_matching)
 
 
 @action(reads=["recipe", "products"], writes=["preselect_result"])
@@ -320,6 +441,7 @@ def select_products(state: State) -> tuple[dict, State]:
         origins_by_id=state.get("origins") or {},
         preference=state.get("preference") or [],
         substitutes=state.get("substitutes"),
+        order=state.get("match_order"),
     )
 
     span = llm_span(
@@ -371,6 +493,7 @@ def escalate_if_needed(state: State) -> tuple[dict, State]:
         model=decision.escalation_model,
         enable_thinking=settings().enable_thinking_on_escalation,
         substitutes=state.get("substitutes"),
+        order=state.get("match_order"),
     )
 
     merged = merge_selections(initial, escalated, decision.ingredients_to_rerun)
@@ -528,7 +651,7 @@ def _cheapest_offers(rows, path: str) -> dict[int, dict]:
            "origin_requested", "origin_dropped", "match_levels", "not_stocked",
            "out_of_range", "skipped", "pool_hints", "ingredient_count",
            "plan_trace", "location", "store_offers", "nearest_offers", "exclude",
-           "preference", "plan_path"],
+           "preference", "plan_path", "line_matching"],
     writes=["plan"],
 )
 def build_plan(state: State) -> tuple[dict, State]:
@@ -590,7 +713,8 @@ def build_plan(state: State) -> tuple[dict, State]:
                              for d in unreachable],
                     partial_would_plan=0)))
     line_items = _line_items(purchases, origins_map=origins_map, match_levels=match_levels,
-                             needs=needs, model_used=lambda _sel: final.model_used)
+                             needs=needs, model_used=lambda _sel: final.model_used,
+                             line_matching=state.get("line_matching") or {})
     total_cost = sum(li.price for li in line_items)
     # A line the selector left without a valid product is reported, never
     # silently dropped: every ingredient lands somewhere on the plan.
@@ -645,10 +769,14 @@ def build_plan(state: State) -> tuple[dict, State]:
 
 
 def _line_items(purchases: list[Purchase], *, origins_map: dict, match_levels: dict,
-                needs: dict[int, tuple[float, str] | None], model_used) -> list[PlanLineItem]:
+                needs: dict[int, tuple[float, str] | None], model_used,
+                line_matching: dict | None = None) -> list[PlanLineItem]:
     """One PlanLineItem per purchase, priced at its product's (store) price times its packs.
     `model_used(selection)` names who chose a line's product. Shared by build_plan and
-    reprice, so a re-priced plan's lines are built exactly as the plan's were."""
+    reprice, so a re-priced plan's lines are built exactly as the plan's were.
+    `line_matching` (line_no -> {"matching", "groups"}) says how each line was matched and
+    which group its product is in; a re-price does not know, and leaves both None."""
+    line_matching = line_matching or {}
     from . import origins as origins_mod
 
     line_items: list[PlanLineItem] = []
@@ -677,8 +805,19 @@ def _line_items(purchases: list[Purchase], *, origins_map: dict, match_levels: d
             also_lines=[sel.line_no for sel in others],
             packs=pu.packs,
             **_need(needs, sels),
+            **_matched(line_matching, sels, prod.id),
         ))
     return line_items
+
+
+def _matched(line_matching: dict, sels: list[Selection], product_id: int) -> dict:
+    """matching ("words" when any line of the purchase was matched by words) and the
+    product's group for the first line, as PlanLineItem carries them."""
+    known = [line_matching[sel.line_no] for sel in sels if sel.line_no in line_matching]
+    if not known:
+        return {}
+    how = "words" if any(k["matching"] == "words" for k in known) else "meaning"
+    return {"matching": how, "group": known[0]["groups"].get(product_id)}
 
 
 def _need(needs: dict[int, tuple[float, str] | None], sels: list[Selection]) -> dict:
@@ -748,25 +887,57 @@ def _says_substitution(sel: Selection) -> bool:
 # whatever was left — a 200 with the wrong product. A plan line must come
 # from its own ingredient's candidates or not be made at all.
 
-def _ingredient_pools(recipe, lat, lon):
-    """Per-ingredient term-matched candidates, keyed by ingredient index.
+def ingredient_pools(recipe, products: list[Product] | None = None) -> tuple[dict, list]:
+    """(pools, meanings) of a library recipe as its plan reads them: what each of its names
+    means (matching/matcher.py), and per ingredient index its direct candidates (the same
+    item) and relaxed ones (what works instead), or, for a name matched by words, its
+    term-matched and head-noun candidates (_ingredient_pools)."""
+    from .matching import matcher
 
-    The classic path has no retrieval step of its own (the selector sees the
-    whole catalog), so this borrows the week planner's single-pass retrieval
-    purely to know WHICH products are candidates for WHICH ingredient. That
-    is what lets the gate name the ingredient the exclusion emptied.
+    cfg = settings()
+    products = products if products is not None else db.load_all_products()
+    meanings = matcher.meanings([(ing.name, None) for ing in recipe.ingredients])
+    pools = _ingredient_pools(recipe, cfg.default_lat, cfg.default_lon, meanings=meanings,
+                              catalog={p.id: p for p in products})
+    return pools, meanings
+
+
+def _ingredient_pools(recipe, lat, lon, *, meanings: list | None = None,
+                      catalog: dict[int, Product] | None = None):
+    """Per-ingredient candidates, keyed by ingredient index: {"direct", "relaxed"}.
+
+    A line matched by meaning (`meanings[i]`, matching/matcher.py) takes the matcher's
+    candidates from `catalog`: direct the products that are the same item, relaxed the ones
+    that work instead. Any other line is term-matched: the classic path has no retrieval step
+    of its own, so this borrows the week planner's single-pass retrieval purely to know WHICH
+    products are candidates for WHICH ingredient. That is what lets the gate name the
+    ingredient the exclusion emptied.
     """
     from sqlalchemy import text
     from sqlalchemy.orm import Session
 
+    from .matching import matcher
     from .nlsearch.planner import _row_to_product
     from .nlsearch.schemas import Constraints, IngredientSpec
     from .nlsearch.sql_builder import build_options_sql
     from .nlsearch.units import tokens
 
-    specs = [IngredientSpec(name=i.name) for i in recipe.ingredients]
-    if not specs:
-        return {}
+    out: dict[int, dict] = {}
+    words: list[int] = []
+    for g in range(len(recipe.ingredients)):
+        m = meanings[g] if meanings else None
+        if m is None or m.matching == "words" or catalog is None:
+            words.append(g)
+            continue
+        found = matcher.candidates(m, catalog, looser=False)
+        pool = {"direct": [catalog[c.product_id] for c in found if c.group == "same_item"],
+                "relaxed": [catalog[c.product_id] for c in found
+                            if c.group == "works_instead"]}
+        if pool["direct"] or pool["relaxed"]:
+            out[g] = pool
+    if not words:
+        return out
+    specs = [IngredientSpec(name=recipe.ingredients[g].name) for g in words]
 
     def fetch(spec_list):
         # Uncapped: the gate asks "is ANY candidate left?", so a cheapest-8
@@ -775,11 +946,11 @@ def _ingredient_pools(recipe, lat, lon):
         sql, params = build_options_sql(Constraints(), spec_list, relaxed=set(),
                                         lat=lat, lon=lon,
                                         per_ingredient_limit=10_000)
-        out: dict[int, list] = {}
+        found: dict[int, list] = {}
         with Session(db.engine()) as s:
             for row in s.execute(text(sql), params).mappings():
-                out.setdefault(row["ing_no"], []).append(_row_to_product(row))
-        return out
+                found.setdefault(row["ing_no"], []).append(_row_to_product(row))
+        return found
 
     direct = fetch(specs)
     # Head-noun matches are offered as ALTERNATIVES when the gate fires —
@@ -797,8 +968,9 @@ def _ingredient_pools(recipe, lat, lon):
         for i, g in enumerate(gi):
             seen = {p.id for p in direct.get(g, [])}
             relaxed_by_g[g] = [p for p in fetched.get(i, []) if p.id not in seen]
-    return {g: {"direct": direct.get(g, []), "relaxed": relaxed_by_g.get(g, [])}
-            for g in range(len(specs)) if direct.get(g) or relaxed_by_g.get(g)}
+    out.update({words[g]: {"direct": direct.get(g, []), "relaxed": relaxed_by_g.get(g, [])}
+                for g in range(len(specs)) if direct.get(g) or relaxed_by_g.get(g)})
+    return out
 
 
 def candidates_are(n: int) -> str:
@@ -1216,6 +1388,12 @@ def reprice(basis: PlanBasis, pins: list | None = None) -> ShoppingPlan:
             excluded_lines=basis.origin_dropped)
         origin_status = "verified" if coverage.meets_floor else "unverified"
     merged = [Pin(line_no=n, product_id=v.product_id) for n, v in sorted(valid.items())]
+    from .matching import events
+
+    for p in pins or []:
+        if p.line_no in valid and valid[p.line_no].product_id == p.product_id:
+            events.picked(planned[p.line_no].name, p.product_id,
+                          was=planned[p.line_no].product_id)
     return ShoppingPlan(
         recipe_slug=basis.recipe_slug, recipe_name=basis.recipe_name,
         line_items=line_items, total_cost=round(sum(li.price for li in line_items), 2),
