@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<!-- SYNTHETIC test page, written for pantry-api's extractor tests. It imitates
+     an older recipe plugin that publishes schema.org microdata and no JSON-LD:
+     amounts and units in their own spans, a nested rating and author scope, and
+     the yield in running text. No text is copied from any site. -->
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<title>Buttermilk Cornbread | Example Baking Notes</title>
+</head>
+<body>
+<header><a href="https://example.org/">Example Baking Notes</a></header>
+<div class="recipe" itemscope itemtype="http://schema.org/Recipe">
+  <h2 itemprop="name">Buttermilk Cornbread</h2>
+  <img itemprop="image" src="https://example.org/images/cornbread.jpg" alt="A pan of cornbread">
+  <div itemprop="aggregateRating" itemscope itemtype="http://schema.org/AggregateRating">
+    <span itemprop="ratingValue">4.8</span> from <span itemprop="ratingCount">12</span> votes
+  </div>
+  <p class="byline">By <span itemprop="author" itemscope itemtype="http://schema.org/Person"><span itemprop="name">Jo Example</span></span></p>
+  <p>Yield: <span itemprop="recipeYield">Serves 9</span> &middot; Prep: <time itemprop="prepTime" datetime="PT10M">10 min</time></p>
+  <h3>Ingredients</h3>
+  <ul class="ingredients">
+    <li itemprop="recipeIngredient"><span class="amt">1</span> <span class="unit">cup</span> yellow cornmeal</li>
+    <li itemprop="recipeIngredient"><span class="amt">1</span> <span class="unit">cup</span> all-purpose flour</li>
+    <li itemprop="recipeIngredient"><span class="amt">&frac14;</span> <span class="unit">cup</span> sugar</li>
+    <li itemprop="recipeIngredient">1 tablespoon baking powder</li>
+    <li itemprop="recipeIngredient">&frac12; teaspoon salt</li>
+    <li itemprop="recipeIngredient">1 cup buttermilk</li>
+    <li itemprop="recipeIngredient">1 large egg</li>
+    <li itemprop="recipeIngredient">&#8531; cup butter, melted</li>
+  </ul>
+  <h3>Instructions</h3>
+  <ol itemprop="recipeInstructions">
+    <li>Heat the oven and grease a square pan.</li>
+    <li>Stir the dry ingredients, then the wet ones, and bake.</li>
+  </ol>
+</div>
+<section class="comments">
+  <div class="comment"><p>Great with chili.</p></div>
+</section>
+</body>
+</html>

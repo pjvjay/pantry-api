@@ -283,8 +283,9 @@ def test_no_dairy_excludes_dairy_products():
     assert "Oat Milk 1L" in names            # dairy-free alternative retrieved
 
 
-def test_size_fit_ordering():
-    """225g beef need: covering pack closest to need ranks first."""
+def test_size_fit_ordering(by_words):
+    """225g beef need, matched by words: covering pack closest to need ranks first. (By
+    meaning, the matcher orders a pool: test_matching.py.)"""
     from pantry_planner.nlsearch.schemas import IngredientSpec
 
     r = _run(_parsed(ingredients=[
@@ -322,8 +323,9 @@ def test_value_disagreement_stat():
 
 # ─── size cap: the smallest pack on offer stays admissible ────
 
-def test_regression_condiment_quantities_do_not_abort_t2():
-    """Live 2026-10-02 (pantry-api#21): "1 tbsp soy sauce" and "1/3 cup
+def test_regression_condiment_quantities_do_not_abort_t2(by_words):
+    """Matched by words (the fallback keeps the size cap).
+    Live 2026-10-02 (pantry-api#21): "1 tbsp soy sauce" and "1/3 cup
     canola oil" aborted t2 with unavailable_within_constraints although the
     text named no distance, price or diet. No default distance is applied
     (t2 carries no max_km) and both products are stocked at every store: the
@@ -379,8 +381,8 @@ def test_regression_condiment_quantities_do_not_abort_t2():
     assert r.pools[1][0].store_price == pytest.approx(float(cheapest_soy))
 
 
-def test_size_cap_still_drops_catering_packs_when_a_fitting_pack_exists():
-    """50 g ground beef: the 300 g pack is within 6x, so 450 g and 900 g stay
+def test_size_cap_still_drops_catering_packs_when_a_fitting_pack_exists(by_words):
+    """Matched by words. 50 g ground beef: the 300 g pack is within 6x, so 450 g and 900 g stay
     out. 50 ml olive oil: no bottle is within 6x (300 ml), so the cap scales
     to the smallest bottle — 500 ml and 1 L (within 6 x 500 ml) both stay,
     ranked by price because neither fits the need any better."""
@@ -532,7 +534,8 @@ def test_brand_stats_keep_reviewless_products():
 def test_thin_pool_gets_labeled_substitutes():
     from pantry_planner.nlsearch.schemas import IngredientSpec
 
-    r = _run(_parsed(ingredients=[IngredientSpec(name="yellow onion")]))
+    # one red onion in the catalog (yellow onion has four since the onion bags were added)
+    r = _run(_parsed(ingredients=[IngredientSpec(name="red onion")]))
     pool = r.pools[0]
     direct = [p for p in pool if not p.substitute]
     subs = [p for p in pool if p.substitute]
@@ -540,6 +543,32 @@ def test_thin_pool_gets_labeled_substitutes():
     assert pool[0].substitute is False                 # direct match stays first
     assert any(s.step_id.startswith("t4_lookup") for s in r.execution.steps)
     assert all(p.subcategory == direct[0].subcategory for p in subs)
+
+
+def test_substitutes_on_a_price_tie_are_the_lowest_ids():
+    """The substitute LIMIT keeps the same products on SQLite and Postgres: a price tie goes
+    to the lower id, not to whichever row the engine happens to read first."""
+    from sqlalchemy import text
+    from sqlalchemy.orm import Session
+
+    from pantry_planner import db
+    from pantry_planner.nlsearch.schemas import Constraints
+    from pantry_planner.nlsearch.sql_builder import build_substitute_sql
+
+    try:
+        with Session(db.engine()) as s:
+            s.execute(text("UPDATE store_products SET price = 1.00 WHERE product_id IN "
+                           "(SELECT id FROM products WHERE subcategory = 'spice')"))
+            s.commit()
+            spices = sorted(s.execute(text(
+                "SELECT id FROM products WHERE subcategory = 'spice'")).scalars())
+            assert len(spices) > 3
+            sql, params = build_substitute_sql(Constraints(), "spice", [spices[0]],
+                                               49.28, -123.12, 12.0, limit=2)
+            got = [r["id"] for r in s.execute(text(sql), params).mappings()]
+        assert got == spices[1:3]
+    finally:
+        db.seed_from_json()
 
 
 # ─── efficiency layer ────────────────────────────────────────
@@ -597,9 +626,10 @@ def test_tokenizer_golden_cases_shared_with_pantry_db(product, terms):
     assert product_terms({"name": name, "description": description}) == terms
 
 
-def test_single_pass_matches_naive_reference():
+def test_single_pass_matches_naive_reference(by_words):
     """The windowed single-pass query returns the same pools as a plain
-    Python reference implementation over the same data."""
+    Python reference implementation over the same data (matched by words,
+    the token levels it implements)."""
     from sqlalchemy import text
     from sqlalchemy.orm import Session
 

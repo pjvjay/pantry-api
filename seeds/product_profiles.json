@@ -1,0 +1,4172 @@
+{
+ "v": 1,
+ "model": "gemini:gemini-flash-latest",
+ "prompt_version": "1",
+ "about": "What each product is, for matching by meaning: product_type (what a recipe calls it), taxonomy [department, aisle, product_type], form, variant, culinary_role and the diets it suits, from Gemini in batches (scripts/matching_seeds.py profiles); aka, the other names the catalog description gives it in parentheses. profile_text is templated from those fields and is what gets embedded, as a document titled with its product_type. flags are a second, separate Gemini pass's disagreements, for review; fixes are corrections made by hand after review (field, from, to, why). The catalog's dietary_tags (contains-tags) are never changed here. hash: the product row the profile was made from.",
+ "products": [
+  {
+   "id": 1,
+   "name": "Wheat Bread 1",
+   "hash": "77676dbd78bce9e9",
+   "product_type": "wheat bread",
+   "taxonomy": [
+    "bakery",
+    "bread",
+    "wheat bread"
+   ],
+   "form": "sliced",
+   "variant": "whole-grain",
+   "culinary_role": "base for sandwiches or toast",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "wheat bread, whole-grain (sliced): base for sandwiches or toast. Aisle: bakery, bread.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 2,
+   "name": "Wheat Bread 2",
+   "hash": "89d5acc6910e1d9e",
+   "product_type": "wheat bread",
+   "taxonomy": [
+    "bakery",
+    "bread",
+    "wheat bread"
+   ],
+   "form": "sliced",
+   "variant": "",
+   "culinary_role": "base for sandwiches or toast",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "wheat bread (sliced): base for sandwiches or toast. Aisle: bakery, bread.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 3,
+   "name": "Dark Chocolate Cadbury",
+   "hash": "b3c33a02f6f5a30a",
+   "product_type": "dark chocolate",
+   "taxonomy": [
+    "pantry",
+    "candy",
+    "dark chocolate"
+   ],
+   "form": "block",
+   "variant": "70% cocoa",
+   "culinary_role": "sweet snack or baking ingredient",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "dark chocolate, 70% cocoa (block): sweet snack or baking ingredient. Aisle: pantry, candy.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 4,
+   "name": "Milk Chocolate Cadbury",
+   "hash": "91f69915b0651bc6",
+   "product_type": "milk chocolate",
+   "taxonomy": [
+    "pantry",
+    "candy",
+    "milk chocolate"
+   ],
+   "form": "block",
+   "variant": "",
+   "culinary_role": "sweet snack or baking ingredient",
+   "diet": [
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "milk chocolate (block): sweet snack or baking ingredient. Aisle: pantry, candy.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 5,
+   "name": "Nestles PBJ",
+   "hash": "798e931a8ccb19ca",
+   "product_type": "peanut butter and jelly spread",
+   "taxonomy": [
+    "pantry",
+    "nut butters & jam",
+    "peanut butter and jelly spread"
+   ],
+   "form": "jarred",
+   "variant": "grape jelly swirl",
+   "culinary_role": "spread for bread or toast",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "peanut butter and jelly spread, grape jelly swirl (jarred): spread for bread or toast. Aisle: pantry, nut butters & jam.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 6,
+   "name": "Canadian Peanut Butter Cream",
+   "hash": "526eca6aa8d5326b",
+   "product_type": "peanut butter",
+   "taxonomy": [
+    "pantry",
+    "nut butters & jam",
+    "peanut butter"
+   ],
+   "form": "jarred",
+   "variant": "smooth",
+   "culinary_role": "spread for sandwiches and baking",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "peanut butter, smooth (jarred): spread for sandwiches and baking. Aisle: pantry, nut butters & jam.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 7,
+   "name": "Sourdough Loaf",
+   "hash": "717b413c31c6c828",
+   "product_type": "sourdough bread",
+   "taxonomy": [
+    "bakery",
+    "bread",
+    "sourdough bread"
+   ],
+   "form": "baked",
+   "variant": "",
+   "culinary_role": "sliced for sandwiches or table bread",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "sourdough bread (baked): sliced for sandwiches or table bread. Aisle: bakery, bread.",
+   "flags": [
+    {
+     "field": "form",
+     "by": "check",
+     "note": "Form should be whole or loaf, not baked."
+    }
+   ],
+   "fixes": [],
+   "review": "Kept: baked describes a loaf well enough for matching."
+  },
+  {
+   "id": 8,
+   "name": "Basmati Rice 2kg",
+   "hash": "4a093db2c291fab9",
+   "product_type": "basmati rice",
+   "taxonomy": [
+    "pantry",
+    "rice",
+    "basmati rice"
+   ],
+   "form": "dried",
+   "variant": "",
+   "culinary_role": "aromatic grain base for meals",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "basmati rice (dried): aromatic grain base for meals. Aisle: pantry, rice.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 9,
+   "name": "Long Grain White Rice 1kg",
+   "hash": "7df389f716abb178",
+   "product_type": "white rice",
+   "taxonomy": [
+    "pantry",
+    "rice",
+    "white rice"
+   ],
+   "form": "dried",
+   "variant": "long grain",
+   "culinary_role": "staple grain side or base",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "white rice, long grain (dried): staple grain side or base. Aisle: pantry, rice.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 10,
+   "name": "Boneless Skinless Chicken Breast",
+   "hash": "160793257d20688c",
+   "product_type": "chicken breasts",
+   "taxonomy": [
+    "meat",
+    "poultry",
+    "chicken breasts"
+   ],
+   "form": "raw",
+   "variant": "boneless skinless",
+   "culinary_role": "lean protein for cooking",
+   "diet": [],
+   "aka": [],
+   "profile_text": "chicken breasts, boneless skinless (raw): lean protein for cooking. Aisle: meat, poultry.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 11,
+   "name": "Chicken Thighs Bone-In",
+   "hash": "7b41896801fcd50b",
+   "product_type": "chicken thighs",
+   "taxonomy": [
+    "meat",
+    "poultry",
+    "chicken thighs"
+   ],
+   "form": "raw",
+   "variant": "bone-in skin-on",
+   "culinary_role": "protein for roasting or braising",
+   "diet": [],
+   "aka": [],
+   "profile_text": "chicken thighs, bone-in skin-on (raw): protein for roasting or braising. Aisle: meat, poultry.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 12,
+   "name": "Yellow Onion",
+   "hash": "38e1c4fedd04a975",
+   "product_type": "yellow onions",
+   "taxonomy": [
+    "produce",
+    "fresh vegetables",
+    "yellow onions"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "aromatic savory flavor base",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "yellow onions (fresh): aromatic savory flavor base. Aisle: produce, fresh vegetables.",
+   "flags": [],
+   "fixes": [
+    {
+     "field": "product_type",
+     "from": "yellow onion",
+     "to": "yellow onions",
+     "why": "one type for every yellow onion, as products 162-164"
+    },
+    {
+     "field": "taxonomy",
+     "from": [
+      "produce",
+      "produce",
+      "yellow onion"
+     ],
+     "to": [
+      "produce",
+      "fresh vegetables",
+      "yellow onions"
+     ],
+     "why": "the aisle of the other onions"
+    },
+    {
+     "field": "form",
+     "from": "whole",
+     "to": "fresh",
+     "why": "as the other yellow onions"
+    }
+   ]
+  },
+  {
+   "id": 13,
+   "name": "Fresh Garlic",
+   "hash": "2ac08ab202c2cc48",
+   "product_type": "garlic",
+   "taxonomy": [
+    "produce",
+    "produce",
+    "garlic"
+   ],
+   "form": "whole",
+   "variant": "",
+   "culinary_role": "pungent aromatic seasoning",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "garlic (whole): pungent aromatic seasoning. Aisle: produce, produce.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 14,
+   "name": "Roma Tomato",
+   "hash": "19d08cbc1c3a3b75",
+   "product_type": "roma tomatoes",
+   "taxonomy": [
+    "produce",
+    "produce",
+    "roma tomatoes"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "fresh cooking or salad ingredient",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "roma tomatoes (fresh): fresh cooking or salad ingredient. Aisle: produce, produce.",
+   "flags": [
+    {
+     "field": "form",
+     "by": "check",
+     "note": "Form should be whole, not fresh (fresh is a condition/variant, not physical form)."
+    }
+   ],
+   "fixes": [],
+   "review": "Kept: fresh is the form a recipe asks for (fresh vs canned tomatoes); the forms mix state and shape on purpose."
+  },
+  {
+   "id": 15,
+   "name": "Canned Diced Tomatoes",
+   "hash": "a47e4aba0f0056c4",
+   "product_type": "canned tomatoes",
+   "taxonomy": [
+    "pantry",
+    "canned goods",
+    "canned tomatoes"
+   ],
+   "form": "canned",
+   "variant": "diced",
+   "culinary_role": "sauce, soup, or stew base",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "canned tomatoes, diced (canned): sauce, soup, or stew base. Aisle: pantry, canned goods.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 16,
+   "name": "Extra Virgin Olive Oil 500ml",
+   "hash": "56a37417fa40539e",
+   "product_type": "olive oil",
+   "taxonomy": [
+    "pantry",
+    "oils",
+    "olive oil"
+   ],
+   "form": "liquid",
+   "variant": "extra virgin",
+   "culinary_role": "cooking oil and dressing base",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "olive oil, extra virgin (liquid): cooking oil and dressing base. Aisle: pantry, oils.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 17,
+   "name": "Canola Oil 1L",
+   "hash": "5c1471f0022a0943",
+   "product_type": "canola oil",
+   "taxonomy": [
+    "pantry",
+    "oils",
+    "canola oil"
+   ],
+   "form": "liquid",
+   "variant": "",
+   "culinary_role": "neutral oil for frying and baking",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "canola oil (liquid): neutral oil for frying and baking. Aisle: pantry, oils.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 18,
+   "name": "Butter Salted 454g",
+   "hash": "4a33836cf08b19f7",
+   "product_type": "butter",
+   "taxonomy": [
+    "dairy",
+    "dairy",
+    "butter"
+   ],
+   "form": "block",
+   "variant": "salted",
+   "culinary_role": "cooking fat and rich spread",
+   "diet": [
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "butter, salted (block): cooking fat and rich spread. Aisle: dairy, dairy.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 19,
+   "name": "Whole Milk 1L",
+   "hash": "a70ff21b9d0b026d",
+   "product_type": "milk",
+   "taxonomy": [
+    "dairy",
+    "dairy",
+    "milk"
+   ],
+   "form": "liquid",
+   "variant": "whole",
+   "culinary_role": "cooking, baking, and drinking",
+   "diet": [
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "milk, whole (liquid): cooking, baking, and drinking. Aisle: dairy, dairy.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 20,
+   "name": "Plain Greek Yogurt 750g",
+   "hash": "9e0cedf56b191538",
+   "product_type": "greek yogurt",
+   "taxonomy": [
+    "dairy",
+    "dairy",
+    "greek yogurt"
+   ],
+   "form": "fresh",
+   "variant": "plain unsweetened",
+   "culinary_role": "breakfast bowl, dip, or baking base",
+   "diet": [
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "greek yogurt, plain unsweetened (fresh): breakfast bowl, dip, or baking base. Aisle: dairy, dairy.",
+   "flags": [
+    {
+     "field": "form",
+     "by": "check",
+     "note": "Greek yogurt is a tub/semisolid dairy product, not a paste."
+    }
+   ],
+   "fixes": [
+    {
+     "field": "form",
+     "from": "paste",
+     "to": "fresh",
+     "why": "yogurt is not a paste (flagged by the check)"
+    }
+   ]
+  },
+  {
+   "id": 21,
+   "name": "Spaghetti Pasta 500g",
+   "hash": "c784b36043177802",
+   "product_type": "spaghetti",
+   "taxonomy": [
+    "pantry",
+    "pasta",
+    "spaghetti"
+   ],
+   "form": "dried",
+   "variant": "",
+   "culinary_role": "noodle pasta base for sauces",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "spaghetti (dried): noodle pasta base for sauces. Aisle: pantry, pasta.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 22,
+   "name": "Ground Beef Lean",
+   "hash": "da628a8af860dbcd",
+   "product_type": "ground beef",
+   "taxonomy": [
+    "meat",
+    "meat",
+    "ground beef"
+   ],
+   "form": "ground",
+   "variant": "lean",
+   "culinary_role": "browned protein for meat dishes",
+   "diet": [],
+   "aka": [],
+   "profile_text": "ground beef, lean (ground): browned protein for meat dishes. Aisle: meat, meat.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 23,
+   "name": "Cheddar Cheese Block 300g",
+   "hash": "d2231a43fa60590c",
+   "product_type": "cheddar cheese",
+   "taxonomy": [
+    "dairy",
+    "dairy",
+    "cheddar cheese"
+   ],
+   "form": "block",
+   "variant": "sharp aged",
+   "culinary_role": "melting, slicing, and snacking cheese",
+   "diet": [
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "cheddar cheese, sharp aged (block): melting, slicing, and snacking cheese. Aisle: dairy, dairy.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 24,
+   "name": "Mozzarella Shredded 200g",
+   "hash": "9f9f292ebd96177a",
+   "product_type": "mozzarella cheese",
+   "taxonomy": [
+    "dairy",
+    "dairy",
+    "mozzarella cheese"
+   ],
+   "form": "shredded",
+   "variant": "shredded",
+   "culinary_role": "melting cheese for pizza and pasta",
+   "diet": [
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "mozzarella cheese, shredded (shredded): melting cheese for pizza and pasta. Aisle: dairy, dairy.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 25,
+   "name": "Fresh Ginger",
+   "hash": "7bc70744352da5a6",
+   "product_type": "ginger",
+   "taxonomy": [
+    "produce",
+    "produce",
+    "ginger"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "pungent aromatic seasoning",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "ginger (fresh): pungent aromatic seasoning. Aisle: produce, produce.",
+   "flags": [
+    {
+     "field": "form",
+     "by": "check",
+     "note": "Form should be whole/root, not fresh."
+    }
+   ],
+   "fixes": [],
+   "review": "Kept: fresh is the form a recipe asks for (fresh vs ground ginger)."
+  },
+  {
+   "id": 26,
+   "name": "Cumin Ground 100g",
+   "hash": "69446d13a64288c1",
+   "product_type": "cumin",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "cumin"
+   ],
+   "form": "ground",
+   "variant": "",
+   "culinary_role": "warm earthy savory spice",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "cumin (ground): warm earthy savory spice. Aisle: pantry, spices & seasonings.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 27,
+   "name": "Turmeric Ground 100g",
+   "hash": "e192eb12fa859667",
+   "product_type": "turmeric",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "turmeric"
+   ],
+   "form": "ground",
+   "variant": "",
+   "culinary_role": "warm earthy yellow spice",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "turmeric (ground): warm earthy yellow spice. Aisle: pantry, spices & seasonings.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 28,
+   "name": "Coriander Ground 100g",
+   "hash": "e81839a316b3c360",
+   "product_type": "coriander",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "coriander"
+   ],
+   "form": "ground",
+   "variant": "",
+   "culinary_role": "citrusy floral savory spice",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "coriander (ground): citrusy floral savory spice. Aisle: pantry, spices & seasonings.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 29,
+   "name": "Garam Masala 100g",
+   "hash": "540b733c25c06d90",
+   "product_type": "garam masala",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "garam masala"
+   ],
+   "form": "powder",
+   "variant": "",
+   "culinary_role": "warm aromatic finishing spice blend",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "garam masala (powder): warm aromatic finishing spice blend. Aisle: pantry, spices & seasonings.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 30,
+   "name": "Frozen Broccoli 500g",
+   "hash": "c88bf56512ff7242",
+   "product_type": "broccoli",
+   "taxonomy": [
+    "frozen",
+    "frozen vegetables",
+    "broccoli"
+   ],
+   "form": "frozen",
+   "variant": "florets",
+   "culinary_role": "cooked vegetable side or stir-fry component",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "broccoli, florets (frozen): cooked vegetable side or stir-fry component. Aisle: frozen, frozen vegetables.",
+   "flags": [
+    {
+     "field": "form",
+     "by": "check",
+     "note": "Form should be florets, not frozen (frozen is temperature/state)."
+    }
+   ],
+   "fixes": [
+    {
+     "field": "product_type",
+     "from": "broccoli florets",
+     "to": "broccoli",
+     "why": "a recipe buys broccoli; frozen is its form and florets its variant"
+    },
+    {
+     "field": "variant",
+     "from": "",
+     "to": "florets",
+     "why": "moved out of the type"
+    }
+   ],
+   "review": "Kept frozen: it is the form a recipe asks for (frozen vs fresh broccoli)."
+  },
+  {
+   "id": 31,
+   "name": "Tomato Sauce Jar 650ml",
+   "hash": "9a3ece2a7b3069fd",
+   "product_type": "pasta sauce",
+   "taxonomy": [
+    "pantry",
+    "pasta sauce",
+    "pasta sauce"
+   ],
+   "form": "jarred",
+   "variant": "marinara",
+   "culinary_role": "simmer sauce for pasta dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "pasta sauce, marinara (jarred): simmer sauce for pasta dishes. Aisle: pantry, pasta sauce.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 32,
+   "name": "Tomato Paste 156ml",
+   "hash": "7ecd30d3ba2b3a6a",
+   "product_type": "tomato paste",
+   "taxonomy": [
+    "pantry",
+    "canned goods",
+    "tomato paste"
+   ],
+   "form": "paste",
+   "variant": "",
+   "culinary_role": "concentrated tomato flavor enricher",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "tomato paste (paste): concentrated tomato flavor enricher. Aisle: pantry, canned goods.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 33,
+   "name": "Crushed Tomatoes Canned 796ml",
+   "hash": "70a4c673d1cab683",
+   "product_type": "canned tomatoes",
+   "taxonomy": [
+    "pantry",
+    "canned goods",
+    "canned tomatoes"
+   ],
+   "form": "canned",
+   "variant": "crushed",
+   "culinary_role": "base for pasta sauce and stews",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "canned tomatoes, crushed (canned): base for pasta sauce and stews. Aisle: pantry, canned goods.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 34,
+   "name": "Passata Strained Tomatoes 680ml",
+   "hash": "f7adeed9673fadf6",
+   "product_type": "passata",
+   "taxonomy": [
+    "pantry",
+    "canned goods",
+    "passata"
+   ],
+   "form": "bottled",
+   "variant": "",
+   "culinary_role": "smooth tomato sauce base",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "passata"
+   ],
+   "profile_text": "passata (bottled): smooth tomato sauce base. Aisle: pantry, canned goods. Also called passata.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 35,
+   "name": "Ground Beef Medium 900g",
+   "hash": "841c9c516fbab3ac",
+   "product_type": "ground beef",
+   "taxonomy": [
+    "meat",
+    "meat",
+    "ground beef"
+   ],
+   "form": "ground",
+   "variant": "medium",
+   "culinary_role": "cooked ground meat for savory dishes",
+   "diet": [],
+   "aka": [],
+   "profile_text": "ground beef, medium (ground): cooked ground meat for savory dishes. Aisle: meat, meat.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 36,
+   "name": "Ground Beef Extra Lean 300g",
+   "hash": "cf66729597c7b9ed",
+   "product_type": "ground beef",
+   "taxonomy": [
+    "meat",
+    "meat",
+    "ground beef"
+   ],
+   "form": "ground",
+   "variant": "extra lean",
+   "culinary_role": "lean cooked ground meat for dishes",
+   "diet": [],
+   "aka": [],
+   "profile_text": "ground beef, extra lean (ground): lean cooked ground meat for dishes. Aisle: meat, meat.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 37,
+   "name": "Russet Potatoes 5lb Bag",
+   "hash": "1c37ce4aa4c8837a",
+   "product_type": "russet potatoes",
+   "taxonomy": [
+    "produce",
+    "produce",
+    "russet potatoes"
+   ],
+   "form": "whole",
+   "variant": "",
+   "culinary_role": "baking, boiling, and mashing",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "russet potatoes (whole): baking, boiling, and mashing. Aisle: produce, produce.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 38,
+   "name": "Baby Potatoes 680g",
+   "hash": "97a0bba43e4150cd",
+   "product_type": "baby potatoes",
+   "taxonomy": [
+    "produce",
+    "produce",
+    "baby potatoes"
+   ],
+   "form": "whole",
+   "variant": "creamer",
+   "culinary_role": "roasting, boiling, and steaming",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "baby potatoes, creamer (whole): roasting, boiling, and steaming. Aisle: produce, produce.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 39,
+   "name": "Oat Milk 1L",
+   "hash": "d1779ba010dd19ae",
+   "product_type": "oat milk",
+   "taxonomy": [
+    "dairy",
+    "dairy alternatives",
+    "oat milk"
+   ],
+   "form": "liquid",
+   "variant": "unsweetened",
+   "culinary_role": "dairy-free milk substitute",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "oat milk, unsweetened (liquid): dairy-free milk substitute. Aisle: dairy, dairy alternatives.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 40,
+   "name": "Almond Milk 946ml",
+   "hash": "fac71459e3bb884b",
+   "product_type": "almond milk",
+   "taxonomy": [
+    "dairy",
+    "dairy alternatives",
+    "almond milk"
+   ],
+   "form": "liquid",
+   "variant": "unsweetened",
+   "culinary_role": "dairy-free milk substitute",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "almond milk, unsweetened (liquid): dairy-free milk substitute. Aisle: dairy, dairy alternatives.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 41,
+   "name": "Vegan Cheese Shreds 200g",
+   "hash": "7bec24be3e66a6e5",
+   "product_type": "vegan mozzarella cheese",
+   "taxonomy": [
+    "dairy",
+    "dairy alternatives",
+    "vegan mozzarella cheese"
+   ],
+   "form": "shredded",
+   "variant": "shredded",
+   "culinary_role": "plant-based melting cheese substitute",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "vegan mozzarella cheese, shredded (shredded): plant-based melting cheese substitute. Aisle: dairy, dairy alternatives.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 42,
+   "name": "Coconut Yogurt 500g",
+   "hash": "383e43588b38065f",
+   "product_type": "coconut yogurt",
+   "taxonomy": [
+    "dairy",
+    "dairy alternatives",
+    "coconut yogurt"
+   ],
+   "form": "fresh",
+   "variant": "plain",
+   "culinary_role": "dairy-free yogurt substitute",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "coconut yogurt, plain (fresh): dairy-free yogurt substitute. Aisle: dairy, dairy alternatives.",
+   "flags": [
+    {
+     "field": "form",
+     "by": "check",
+     "note": "Coconut yogurt is not a paste."
+    }
+   ],
+   "fixes": [
+    {
+     "field": "form",
+     "from": "paste",
+     "to": "fresh",
+     "why": "yogurt is not a paste (flagged by the check)"
+    }
+   ]
+  },
+  {
+   "id": 43,
+   "name": "Parmesan Wedge 200g",
+   "hash": "846e169814703e46",
+   "product_type": "parmesan cheese",
+   "taxonomy": [
+    "dairy",
+    "dairy",
+    "parmesan cheese"
+   ],
+   "form": "block",
+   "variant": "aged wedge",
+   "culinary_role": "grating cheese for pasta and finishing",
+   "diet": [
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "parmesan cheese, aged wedge (block): grating cheese for pasta and finishing. Aisle: dairy, dairy.",
+   "flags": [
+    {
+     "field": "form",
+     "by": "check",
+     "note": "Parmesan (Parmigiano Reggiano) is traditionally made with animal rennet, so it is not vegetarian; form is wedge/block."
+    },
+    {
+     "field": "diet",
+     "by": "check",
+     "note": "Parmesan (Parmigiano Reggiano) is traditionally made with animal rennet, so it is not vegetarian; form is wedge/block."
+    }
+   ],
+   "fixes": [],
+   "review": "Kept: the catalog says aged parmesan, not Parmigiano Reggiano; many are made with microbial rennet. The diet claim is the profile's, never the contains-tags."
+  },
+  {
+   "id": 44,
+   "name": "Cheddar Shredded 320g",
+   "hash": "772c362dace5ddfe",
+   "product_type": "cheddar cheese",
+   "taxonomy": [
+    "dairy",
+    "packaged cheese",
+    "cheddar cheese"
+   ],
+   "form": "shredded",
+   "variant": "mild",
+   "culinary_role": "melting topping for savory dishes",
+   "diet": [
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "cheddar cheese, mild (shredded): melting topping for savory dishes. Aisle: dairy, packaged cheese.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 45,
+   "name": "Whole Chicken 1.6kg",
+   "hash": "a14ed163b70aa05a",
+   "product_type": "whole chicken",
+   "taxonomy": [
+    "meat",
+    "poultry",
+    "whole chicken"
+   ],
+   "form": "raw",
+   "variant": "",
+   "culinary_role": "roasting whole for a main course",
+   "diet": [],
+   "aka": [],
+   "profile_text": "whole chicken (raw): roasting whole for a main course. Aisle: meat, poultry.",
+   "flags": [
+    {
+     "field": "form",
+     "by": "check",
+     "note": "Form should be whole, not raw."
+    }
+   ],
+   "fixes": [
+    {
+     "field": "product_type",
+     "from": "chicken",
+     "to": "whole chicken",
+     "why": "breasts, thighs and drumsticks are their own types; 'chicken' alone read as all of them"
+    },
+    {
+     "field": "variant",
+     "from": "whole",
+     "to": "",
+     "why": "whole moved into the type"
+    }
+   ],
+   "review": "Kept raw: the state a recipe cares about for meat (raw vs cured)."
+  },
+  {
+   "id": 46,
+   "name": "Chicken Thighs Boneless 450g",
+   "hash": "ebe30bd7e2e331dd",
+   "product_type": "chicken thighs",
+   "taxonomy": [
+    "meat",
+    "poultry",
+    "chicken thighs"
+   ],
+   "form": "raw",
+   "variant": "boneless skinless",
+   "culinary_role": "searing baking or braising as main protein",
+   "diet": [],
+   "aka": [],
+   "profile_text": "chicken thighs, boneless skinless (raw): searing baking or braising as main protein. Aisle: meat, poultry.",
+   "flags": [
+    {
+     "field": "form",
+     "by": "check",
+     "note": "Form should be boneless skinless cuts/thighs or whole, not raw."
+    }
+   ],
+   "fixes": [],
+   "review": "Kept raw, as every fresh meat cut."
+  },
+  {
+   "id": 47,
+   "name": "Atlantic Salmon Fillet 400g",
+   "hash": "b1156fb5a5e5bdc5",
+   "product_type": "salmon fillets",
+   "taxonomy": [
+    "meat",
+    "seafood",
+    "salmon fillets"
+   ],
+   "form": "raw",
+   "variant": "atlantic",
+   "culinary_role": "pan-searing or baking as main course",
+   "diet": [
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "salmon fillets, atlantic (raw): pan-searing or baking as main course. Aisle: meat, seafood.",
+   "flags": [
+    {
+     "field": "form",
+     "by": "check",
+     "note": "Form should be fillet, not raw."
+    }
+   ],
+   "fixes": [],
+   "review": "Kept raw, as every fresh meat cut."
+  },
+  {
+   "id": 48,
+   "name": "Canned Tuna Flaked 170g",
+   "hash": "c676416aa6fb526a",
+   "product_type": "canned tuna",
+   "taxonomy": [
+    "pantry",
+    "canned seafood",
+    "canned tuna"
+   ],
+   "form": "canned",
+   "variant": "flaked in water",
+   "culinary_role": "protein for salads and sandwiches",
+   "diet": [
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "canned tuna, flaked in water (canned): protein for salads and sandwiches. Aisle: pantry, canned seafood.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 49,
+   "name": "Gluten-Free Penne 340g",
+   "hash": "675333958ec75281",
+   "product_type": "penne",
+   "taxonomy": [
+    "pantry",
+    "pasta & pizza",
+    "penne"
+   ],
+   "form": "dried",
+   "variant": "gluten-free",
+   "culinary_role": "boiled base for pasta dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "penne, gluten-free (dried): boiled base for pasta dishes. Aisle: pantry, pasta & pizza.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 50,
+   "name": "Gluten-Free Bread 400g",
+   "hash": "8c6ac5c7363bd5f9",
+   "product_type": "bread",
+   "taxonomy": [
+    "bakery",
+    "bread & bakery",
+    "bread"
+   ],
+   "form": "sliced",
+   "variant": "gluten-free",
+   "culinary_role": "slices for toast and sandwiches",
+   "diet": [
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "bread, gluten-free (sliced): slices for toast and sandwiches. Aisle: bakery, bread & bakery.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 51,
+   "name": "Penne Rigate 500g",
+   "hash": "8b64324447c7fa6a",
+   "product_type": "penne",
+   "taxonomy": [
+    "pantry",
+    "pasta & pizza",
+    "penne"
+   ],
+   "form": "dried",
+   "variant": "rigate",
+   "culinary_role": "boiled base for pasta dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "penne, rigate (dried): boiled base for pasta dishes. Aisle: pantry, pasta & pizza.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 52,
+   "name": "Fusilli Family Pack 900g",
+   "hash": "a4d19aae70550cfd",
+   "product_type": "fusilli",
+   "taxonomy": [
+    "pantry",
+    "pasta & pizza",
+    "fusilli"
+   ],
+   "form": "dried",
+   "variant": "",
+   "culinary_role": "boiled base for pasta dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "fusilli (dried): boiled base for pasta dishes. Aisle: pantry, pasta & pizza.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 53,
+   "name": "Broccoli Crown",
+   "hash": "a4d8d14b48d8bc1f",
+   "product_type": "broccoli",
+   "taxonomy": [
+    "produce",
+    "fresh vegetables",
+    "broccoli"
+   ],
+   "form": "fresh",
+   "variant": "crown",
+   "culinary_role": "steamed or roasted vegetable side",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "broccoli, crown (fresh): steamed or roasted vegetable side. Aisle: produce, fresh vegetables.",
+   "flags": [
+    {
+     "field": "form",
+     "by": "check",
+     "note": "Form should be whole/crown, not fresh."
+    }
+   ],
+   "fixes": [
+    {
+     "field": "product_type",
+     "from": "broccoli crowns",
+     "to": "broccoli",
+     "why": "a recipe buys broccoli; crown is its variant"
+    },
+    {
+     "field": "variant",
+     "from": "",
+     "to": "crown",
+     "why": "moved out of the type"
+    }
+   ],
+   "review": "Kept fresh: the form a recipe asks for (fresh vs frozen broccoli)."
+  },
+  {
+   "id": 54,
+   "name": "Carrots 1kg",
+   "hash": "efe9914b57ee5fff",
+   "product_type": "carrots",
+   "taxonomy": [
+    "produce",
+    "fresh vegetables",
+    "carrots"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "root vegetable for cooking or snacking",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "carrots (fresh): root vegetable for cooking or snacking. Aisle: produce, fresh vegetables.",
+   "flags": [
+    {
+     "field": "form",
+     "by": "check",
+     "note": "Form should be whole, not fresh."
+    }
+   ],
+   "fixes": [],
+   "review": "Kept fresh, as every fresh vegetable."
+  },
+  {
+   "id": 55,
+   "name": "Bell Pepper Trio",
+   "hash": "aab938581fe18de9",
+   "product_type": "bell peppers",
+   "taxonomy": [
+    "produce",
+    "fresh vegetables",
+    "bell peppers"
+   ],
+   "form": "fresh",
+   "variant": "mixed sweet",
+   "culinary_role": "sliced for stir-fries salads and fajitas",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "red/yellow/orange"
+   ],
+   "profile_text": "bell peppers, mixed sweet (fresh): sliced for stir-fries salads and fajitas. Aisle: produce, fresh vegetables. Also called red/yellow/orange.",
+   "flags": [
+    {
+     "field": "form",
+     "by": "check",
+     "note": "Form should be whole, not fresh."
+    }
+   ],
+   "fixes": [],
+   "review": "Kept fresh, as every fresh vegetable."
+  },
+  {
+   "id": 56,
+   "name": "Fresh Basil 30g",
+   "hash": "c56bb8d854ceb4e3",
+   "product_type": "basil",
+   "taxonomy": [
+    "produce",
+    "fresh herbs",
+    "basil"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "fresh seasoning for sauces and salads",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "basil (fresh): fresh seasoning for sauces and salads. Aisle: produce, fresh herbs.",
+   "flags": [
+    {
+     "field": "form",
+     "by": "check",
+     "note": "Form should be fresh leaves/bunch or whole, not fresh."
+    }
+   ],
+   "fixes": [],
+   "review": "Kept fresh: a recipe's fresh basil vs dried herbs."
+  },
+  {
+   "id": 57,
+   "name": "Chicken Stock 900ml",
+   "hash": "32b7aa7cd3d6770d",
+   "product_type": "chicken stock",
+   "taxonomy": [
+    "pantry",
+    "broths & stocks",
+    "chicken stock"
+   ],
+   "form": "liquid",
+   "variant": "low sodium",
+   "culinary_role": "savory liquid base for soups and sauces",
+   "diet": [],
+   "aka": [],
+   "profile_text": "chicken stock, low sodium (liquid): savory liquid base for soups and sauces. Aisle: pantry, broths & stocks.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 58,
+   "name": "Coconut Milk Canned 400ml",
+   "hash": "9e4c978d69721216",
+   "product_type": "coconut milk",
+   "taxonomy": [
+    "pantry",
+    "canned goods",
+    "coconut milk"
+   ],
+   "form": "canned",
+   "variant": "full-fat",
+   "culinary_role": "creamy liquid base for curries and soups",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "coconut milk, full-fat (canned): creamy liquid base for curries and soups. Aisle: pantry, canned goods.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 59,
+   "name": "Soy Sauce 500ml",
+   "hash": "b4b70f8501e314ca",
+   "product_type": "soy sauce",
+   "taxonomy": [
+    "pantry",
+    "condiments & sauces",
+    "soy sauce"
+   ],
+   "form": "bottled",
+   "variant": "",
+   "culinary_role": "all-purpose salty savory seasoning",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "soy sauce (bottled): all-purpose salty savory seasoning. Aisle: pantry, condiments & sauces.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 60,
+   "name": "Eggs Large Dozen",
+   "hash": "78dedac442a5e417",
+   "product_type": "eggs",
+   "taxonomy": [
+    "dairy",
+    "eggs",
+    "eggs"
+   ],
+   "form": "whole",
+   "variant": "large",
+   "culinary_role": "scrambling baking and binding ingredient",
+   "diet": [
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "eggs, large (whole): scrambling baking and binding ingredient. Aisle: dairy, eggs.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 61,
+   "name": "All-Purpose Flour 2.5kg",
+   "hash": "e01798517d17935b",
+   "product_type": "all-purpose flour",
+   "taxonomy": [
+    "pantry",
+    "baking supplies",
+    "all-purpose flour"
+   ],
+   "form": "powder",
+   "variant": "",
+   "culinary_role": "primary flour for baking and dredging",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "all-purpose flour (powder): primary flour for baking and dredging. Aisle: pantry, baking supplies.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 62,
+   "name": "Olive Oil 1L",
+   "hash": "711b9b4872c13842",
+   "product_type": "olive oil",
+   "taxonomy": [
+    "pantry",
+    "oils & vinegars",
+    "olive oil"
+   ],
+   "form": "bottled",
+   "variant": "pure",
+   "culinary_role": "all-purpose cooking and sautéing fat",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "olive oil, pure (bottled): all-purpose cooking and sautéing fat. Aisle: pantry, oils & vinegars.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 63,
+   "name": "Shaoxing Cooking Wine 750ml",
+   "hash": "99a6df961235756b",
+   "product_type": "shaoxing wine",
+   "taxonomy": [
+    "pantry",
+    "international",
+    "shaoxing wine"
+   ],
+   "form": "bottled",
+   "variant": "",
+   "culinary_role": "deglazing and seasoning chinese dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "Shaoxing wine",
+    "huadiao"
+   ],
+   "profile_text": "shaoxing wine (bottled): deglazing and seasoning chinese dishes. Aisle: pantry, international. Also called Shaoxing wine, huadiao.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 64,
+   "name": "Light Soy Sauce 500ml",
+   "hash": "cabd1d25356414d9",
+   "product_type": "light soy sauce",
+   "taxonomy": [
+    "pantry",
+    "international",
+    "light soy sauce"
+   ],
+   "form": "bottled",
+   "variant": "",
+   "culinary_role": "seasoning stir-fries and marinades",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "thin soy sauce"
+   ],
+   "profile_text": "light soy sauce (bottled): seasoning stir-fries and marinades. Aisle: pantry, international. Also called thin soy sauce.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 65,
+   "name": "Dark Soy Sauce 500ml",
+   "hash": "2ec5ec8bbaa07ef7",
+   "product_type": "dark soy sauce",
+   "taxonomy": [
+    "pantry",
+    "international",
+    "dark soy sauce"
+   ],
+   "form": "bottled",
+   "variant": "",
+   "culinary_role": "adding deep color and rich flavor",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "dark soy sauce (bottled): adding deep color and rich flavor. Aisle: pantry, international.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 66,
+   "name": "Sichuan Peppercorns Whole 50g",
+   "hash": "79789a7cc2f2a13d",
+   "product_type": "sichuan peppercorns",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "sichuan peppercorns"
+   ],
+   "form": "whole",
+   "variant": "",
+   "culinary_role": "infusing oil with numbing citrusy spice",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "Szechuan pepper",
+    "huajiao"
+   ],
+   "profile_text": "sichuan peppercorns (whole): infusing oil with numbing citrusy spice. Aisle: pantry, spices & seasonings. Also called Szechuan pepper, huajiao.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 67,
+   "name": "Sichuan Peppercorns Ground 40g",
+   "hash": "32c079a145e062c3",
+   "product_type": "sichuan peppercorns",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "sichuan peppercorns"
+   ],
+   "form": "ground",
+   "variant": "ground",
+   "culinary_role": "finishing dishes with numbing heat",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "Szechuan pepper"
+   ],
+   "profile_text": "sichuan peppercorns, ground (ground): finishing dishes with numbing heat. Aisle: pantry, spices & seasonings. Also called Szechuan pepper.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 68,
+   "name": "Dried Red Chilies 100g",
+   "hash": "baa49e3bda8c6826",
+   "product_type": "dried red chilies",
+   "taxonomy": [
+    "pantry",
+    "international",
+    "dried red chilies"
+   ],
+   "form": "dried",
+   "variant": "whole sichuan",
+   "culinary_role": "infusing hot oil with heat and aroma",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "chili",
+    "chile",
+    "chilli",
+    "chillies",
+    "chiles"
+   ],
+   "profile_text": "dried red chilies, whole sichuan (dried): infusing hot oil with heat and aroma. Aisle: pantry, international. Also called chili, chile, chilli, chillies, chiles.",
+   "flags": [
+    {
+     "field": "form",
+     "by": "check",
+     "note": "Form should be whole, not dried."
+    }
+   ],
+   "fixes": [
+    {
+     "field": "variant",
+     "from": "facing heaven",
+     "to": "whole sichuan",
+     "why": "the profile guessed 'facing heaven'; the description says whole dried Sichuan chilies"
+    }
+   ],
+   "review": "Kept dried: the form a recipe asks for (dried chilies vs fresh green chilies)."
+  },
+  {
+   "id": 69,
+   "name": "Sichuan Chili Flakes 100g",
+   "hash": "4990ca52f0f7f9a5",
+   "product_type": "sichuan chili flakes",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "sichuan chili flakes"
+   ],
+   "form": "flakes",
+   "variant": "",
+   "culinary_role": "making chili oil and adding heat",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "chilli",
+    "chile",
+    "chillies",
+    "chiles"
+   ],
+   "profile_text": "sichuan chili flakes (flakes): making chili oil and adding heat. Aisle: pantry, spices & seasonings. Also called chilli, chile, chillies, chiles.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 70,
+   "name": "Crushed Red Pepper Flakes 60g",
+   "hash": "1cc7389d5691e284",
+   "product_type": "red pepper flakes",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "red pepper flakes"
+   ],
+   "form": "flakes",
+   "variant": "",
+   "culinary_role": "sprinkling heat onto pizza and pasta",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "chilli flakes",
+    "chile flakes",
+    "chillies",
+    "chiles"
+   ],
+   "profile_text": "red pepper flakes (flakes): sprinkling heat onto pizza and pasta. Aisle: pantry, spices & seasonings. Also called chilli flakes, chile flakes, chillies, chiles.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 71,
+   "name": "Doubanjiang Chili Bean Paste 500g",
+   "hash": "5dc3448e73e4ed31",
+   "product_type": "doubanjiang",
+   "taxonomy": [
+    "pantry",
+    "international",
+    "doubanjiang"
+   ],
+   "form": "paste",
+   "variant": "pixian",
+   "culinary_role": "savory spicy fermented base for sichuan dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "doubanjiang",
+    "toban djan",
+    "chili bean sauce"
+   ],
+   "profile_text": "doubanjiang, pixian (paste): savory spicy fermented base for sichuan dishes. Aisle: pantry, international. Also called doubanjiang, toban djan, chili bean sauce.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 72,
+   "name": "Toasted Sesame Oil 250ml",
+   "hash": "d40335cca05471e2",
+   "product_type": "toasted sesame oil",
+   "taxonomy": [
+    "pantry",
+    "oils & vinegars",
+    "toasted sesame oil"
+   ],
+   "form": "bottled",
+   "variant": "",
+   "culinary_role": "aromatic finishing oil for asian dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "Asian sesame oil"
+   ],
+   "profile_text": "toasted sesame oil (bottled): aromatic finishing oil for asian dishes. Aisle: pantry, oils & vinegars. Also called Asian sesame oil.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 73,
+   "name": "Toasted Sesame Seeds 100g",
+   "hash": "98c46507b1670f76",
+   "product_type": "sesame seeds",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "sesame seeds"
+   ],
+   "form": "whole",
+   "variant": "toasted white",
+   "culinary_role": "nutty garnish for finished dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "sesame seeds, toasted white (whole): nutty garnish for finished dishes. Aisle: pantry, spices & seasonings.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 74,
+   "name": "Sesame Seeds 200g",
+   "hash": "435cd94539429a4e",
+   "product_type": "sesame seeds",
+   "taxonomy": [
+    "pantry",
+    "baking supplies",
+    "sesame seeds"
+   ],
+   "form": "whole",
+   "variant": "white",
+   "culinary_role": "toasting or baking into breads and sweets",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "sesame seeds, white (whole): toasting or baking into breads and sweets. Aisle: pantry, baking supplies.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 75,
+   "name": "Rice Vinegar 355ml",
+   "hash": "e83576fd96576dfb",
+   "product_type": "rice vinegar",
+   "taxonomy": [
+    "pantry",
+    "oils & vinegars",
+    "rice vinegar"
+   ],
+   "form": "bottled",
+   "variant": "unseasoned",
+   "culinary_role": "mild acidic seasoning for dressings and sauces",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "rice vinegar, unseasoned (bottled): mild acidic seasoning for dressings and sauces. Aisle: pantry, oils & vinegars.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 76,
+   "name": "Chinkiang Black Vinegar 550ml",
+   "hash": "9b2f8cf8bc815fcb",
+   "product_type": "chinkiang vinegar",
+   "taxonomy": [
+    "pantry",
+    "international",
+    "chinkiang vinegar"
+   ],
+   "form": "bottled",
+   "variant": "",
+   "culinary_role": "complex tangy dipping and braising acid",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "Chinkiang",
+    "Zhenjiang vinegar"
+   ],
+   "profile_text": "chinkiang vinegar (bottled): complex tangy dipping and braising acid. Aisle: pantry, international. Also called Chinkiang, Zhenjiang vinegar.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 77,
+   "name": "Oyster Sauce 510g",
+   "hash": "3ae5651c8291cea3",
+   "product_type": "oyster sauce",
+   "taxonomy": [
+    "pantry",
+    "condiments & sauces",
+    "oyster sauce"
+   ],
+   "form": "bottled",
+   "variant": "",
+   "culinary_role": "savory umami glaze for stir-fries",
+   "diet": [
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "oyster sauce (bottled): savory umami glaze for stir-fries. Aisle: pantry, condiments & sauces.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 78,
+   "name": "Hoisin Sauce 397g",
+   "hash": "7bc049aaf0eab126",
+   "product_type": "hoisin sauce",
+   "taxonomy": [
+    "pantry",
+    "condiments & sauces",
+    "hoisin sauce"
+   ],
+   "form": "jarred",
+   "variant": "",
+   "culinary_role": "sweet savory sauce for glazing and dipping",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "hoisin sauce (jarred): sweet savory sauce for glazing and dipping. Aisle: pantry, condiments & sauces.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 79,
+   "name": "Chinese Five-Spice Powder 50g",
+   "hash": "c88948ceb0590a4a",
+   "product_type": "five-spice powder",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "five-spice powder"
+   ],
+   "form": "powder",
+   "variant": "",
+   "culinary_role": "aromatic warm spice blend for meats",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "five-spice powder (powder): aromatic warm spice blend for meats. Aisle: pantry, spices & seasonings.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 80,
+   "name": "Star Anise Whole 30g",
+   "hash": "66b38e01cbcf0a08",
+   "product_type": "star anise",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "star anise"
+   ],
+   "form": "whole",
+   "variant": "whole",
+   "culinary_role": "simmering in broths and braises",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "star anise, whole (whole): simmering in broths and braises. Aisle: pantry, spices & seasonings.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 81,
+   "name": "Cornstarch 450g",
+   "hash": "ef7d9aa397107a1e",
+   "product_type": "cornstarch",
+   "taxonomy": [
+    "pantry",
+    "baking supplies",
+    "cornstarch"
+   ],
+   "form": "powder",
+   "variant": "",
+   "culinary_role": "thickening sauces and velveting meats",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "cornflour"
+   ],
+   "profile_text": "cornstarch (powder): thickening sauces and velveting meats. Aisle: pantry, baking supplies. Also called cornflour.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 82,
+   "name": "Peanut Oil 1L",
+   "hash": "328a1241713b0184",
+   "product_type": "peanut oil",
+   "taxonomy": [
+    "pantry",
+    "oils & vinegars",
+    "peanut oil"
+   ],
+   "form": "bottled",
+   "variant": "refined",
+   "culinary_role": "high-heat frying and stir-frying oil",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "peanut oil, refined (bottled): high-heat frying and stir-frying oil. Aisle: pantry, oils & vinegars.",
+   "flags": [
+    {
+     "field": "dietary_tags",
+     "by": "check",
+     "note": "Peanuts are legumes, not nuts; contains tag should not include nuts unless botanical nuts or standard allergen guidelines treat it so, but peanut is separate from tree nuts."
+    }
+   ],
+   "fixes": [],
+   "review": "Kept: the contains-tags are the catalog's own and are never changed by a profile; peanut is a common nut allergen even though it is a legume."
+  },
+  {
+   "id": 83,
+   "name": "Chili Crisp 210g",
+   "hash": "870f7571b19befd2",
+   "product_type": "chili crisp",
+   "taxonomy": [
+    "pantry",
+    "condiments & sauces",
+    "chili crisp"
+   ],
+   "form": "jarred",
+   "variant": "",
+   "culinary_role": "spicy crunchy condiment for drizzling",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "chili crisp (jarred): spicy crunchy condiment for drizzling. Aisle: pantry, condiments & sauces.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 84,
+   "name": "Jasmine Rice 2kg",
+   "hash": "939a27adc838c55a",
+   "product_type": "jasmine rice",
+   "taxonomy": [
+    "pantry",
+    "rice & grains",
+    "jasmine rice"
+   ],
+   "form": "dried",
+   "variant": "",
+   "culinary_role": "steamed fragrant side grain",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "jasmine rice (dried): steamed fragrant side grain. Aisle: pantry, rice & grains.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 85,
+   "name": "Rice Vermicelli Noodles 454g",
+   "hash": "a115b0993055100e",
+   "product_type": "rice vermicelli",
+   "taxonomy": [
+    "pantry",
+    "international",
+    "rice vermicelli"
+   ],
+   "form": "dried",
+   "variant": "",
+   "culinary_role": "soaking or boiling for noodle dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "rice vermicelli",
+    "rice sticks"
+   ],
+   "profile_text": "rice vermicelli (dried): soaking or boiling for noodle dishes. Aisle: pantry, international. Also called rice vermicelli, rice sticks.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 86,
+   "name": "Firm Tofu 454g",
+   "hash": "a5a6791a1e591f27",
+   "product_type": "tofu",
+   "taxonomy": [
+    "produce",
+    "tofu & meat alternatives",
+    "tofu"
+   ],
+   "form": "block",
+   "variant": "firm",
+   "culinary_role": "frying baking or cubing in stir-fries",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "tofu, firm (block): frying baking or cubing in stir-fries. Aisle: produce, tofu & meat alternatives.",
+   "flags": [],
+   "fixes": [
+    {
+     "field": "product_type",
+     "from": "firm tofu",
+     "to": "tofu",
+     "why": "firm is a variant of tofu, as extra firm (87) and silken (88) are"
+    },
+    {
+     "field": "variant",
+     "from": "",
+     "to": "firm",
+     "why": "moved out of the type"
+    }
+   ]
+  },
+  {
+   "id": 87,
+   "name": "Extra Firm Tofu 454g",
+   "hash": "e32cd8e7fdc422b3",
+   "product_type": "tofu",
+   "taxonomy": [
+    "produce",
+    "tofu & meat alternatives",
+    "tofu"
+   ],
+   "form": "block",
+   "variant": "extra firm",
+   "culinary_role": "plant-based protein for stir-fries and baking",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "tofu, extra firm (block): plant-based protein for stir-fries and baking. Aisle: produce, tofu & meat alternatives.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 88,
+   "name": "Silken Tofu 300g",
+   "hash": "2c9a8650427ce36a",
+   "product_type": "tofu",
+   "taxonomy": [
+    "produce",
+    "tofu & meat alternatives",
+    "tofu"
+   ],
+   "form": "block",
+   "variant": "silken",
+   "culinary_role": "delicate protein for soups and blending",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "tofu, silken (block): delicate protein for soups and blending. Aisle: produce, tofu & meat alternatives.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 89,
+   "name": "Bok Choy",
+   "hash": "7a90bae4de5b8d5d",
+   "product_type": "bok choy",
+   "taxonomy": [
+    "produce",
+    "fresh vegetables",
+    "bok choy"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "cooking green for stir-fries and soups",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "pak choi"
+   ],
+   "profile_text": "bok choy (fresh): cooking green for stir-fries and soups. Aisle: produce, fresh vegetables. Also called pak choi.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 90,
+   "name": "Baby Bok Choy 454g",
+   "hash": "2252a6a3b996d9c9",
+   "product_type": "baby bok choy",
+   "taxonomy": [
+    "produce",
+    "fresh vegetables",
+    "baby bok choy"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "tender cooking green for quick stir-fries",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "Shanghai bok choy"
+   ],
+   "profile_text": "baby bok choy (fresh): tender cooking green for quick stir-fries. Aisle: produce, fresh vegetables. Also called Shanghai bok choy.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 91,
+   "name": "Napa Cabbage",
+   "hash": "b2234ea8eda13fc9",
+   "product_type": "napa cabbage",
+   "taxonomy": [
+    "produce",
+    "fresh vegetables",
+    "napa cabbage"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "mild leafy cabbage for stir-fries and slaws",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "Chinese cabbage"
+   ],
+   "profile_text": "napa cabbage (fresh): mild leafy cabbage for stir-fries and slaws. Aisle: produce, fresh vegetables. Also called Chinese cabbage.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 92,
+   "name": "Fermented Black Beans 227g",
+   "hash": "a6715bdf8fc38060",
+   "product_type": "fermented black beans",
+   "taxonomy": [
+    "pantry",
+    "international",
+    "fermented black beans"
+   ],
+   "form": "cured",
+   "variant": "",
+   "culinary_role": "pungent savory seasoning for braises and stir-fries",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "douchi"
+   ],
+   "profile_text": "fermented black beans (cured): pungent savory seasoning for braises and stir-fries. Aisle: pantry, international. Also called douchi.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 93,
+   "name": "Dried Shiitake Mushrooms 100g",
+   "hash": "6b1e10c2111addb4",
+   "product_type": "dried shiitake mushrooms",
+   "taxonomy": [
+    "pantry",
+    "dried mushrooms",
+    "dried shiitake mushrooms"
+   ],
+   "form": "dried",
+   "variant": "whole",
+   "culinary_role": "adds rich umami to broths and braises",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "dried shiitake mushrooms, whole (dried): adds rich umami to broths and braises. Aisle: pantry, dried mushrooms.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 94,
+   "name": "Fish Sauce 682ml",
+   "hash": "41ec75748409e59c",
+   "product_type": "fish sauce",
+   "taxonomy": [
+    "pantry",
+    "international",
+    "fish sauce"
+   ],
+   "form": "bottled",
+   "variant": "",
+   "culinary_role": "adds salty savory umami seasoning",
+   "diet": [
+    "pescatarian"
+   ],
+   "aka": [
+    "nam pla"
+   ],
+   "profile_text": "fish sauce (bottled): adds salty savory umami seasoning. Aisle: pantry, international. Also called nam pla.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 95,
+   "name": "Ghee 400g",
+   "hash": "e39fa85c14f798f9",
+   "product_type": "ghee",
+   "taxonomy": [
+    "dairy",
+    "dairy",
+    "ghee"
+   ],
+   "form": "jarred",
+   "variant": "",
+   "culinary_role": "high-heat cooking fat with rich nutty flavor",
+   "diet": [
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "ghee (jarred): high-heat cooking fat with rich nutty flavor. Aisle: dairy, dairy.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 96,
+   "name": "Red Lentils 900g",
+   "hash": "86c4520aea72ed91",
+   "product_type": "red lentils",
+   "taxonomy": [
+    "pantry",
+    "dry beans & legumes",
+    "red lentils"
+   ],
+   "form": "dried",
+   "variant": "split",
+   "culinary_role": "quick-cooking legumes for dals and soups",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "masoor dal"
+   ],
+   "profile_text": "red lentils, split (dried): quick-cooking legumes for dals and soups. Aisle: pantry, dry beans & legumes. Also called masoor dal.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 97,
+   "name": "Chickpeas Canned 540ml",
+   "hash": "6666e15f72c56059",
+   "product_type": "canned chickpeas",
+   "taxonomy": [
+    "pantry",
+    "canned beans",
+    "canned chickpeas"
+   ],
+   "form": "canned",
+   "variant": "",
+   "culinary_role": "ready-to-eat legume for curries and salads",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "garbanzo beans"
+   ],
+   "profile_text": "canned chickpeas (canned): ready-to-eat legume for curries and salads. Aisle: pantry, canned beans. Also called garbanzo beans.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 98,
+   "name": "Chili Powder 100g",
+   "hash": "261c6859bce9dcf2",
+   "product_type": "chili powder",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "chili powder"
+   ],
+   "form": "ground",
+   "variant": "hot",
+   "culinary_role": "adds heat and red color to dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "chilli",
+    "chillies",
+    "chile",
+    "chiles",
+    "lal mirch"
+   ],
+   "profile_text": "chili powder, hot (ground): adds heat and red color to dishes. Aisle: pantry, spices & seasonings. Also called chilli, chillies, chile, chiles, lal mirch.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 99,
+   "name": "Black Mustard Seeds 100g",
+   "hash": "b9d534f163f8c70d",
+   "product_type": "black mustard seeds",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "black mustard seeds"
+   ],
+   "form": "whole",
+   "variant": "",
+   "culinary_role": "whole spice for blooming in hot oil",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "rai"
+   ],
+   "profile_text": "black mustard seeds (whole): whole spice for blooming in hot oil. Aisle: pantry, spices & seasonings. Also called rai.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 100,
+   "name": "Cumin Seeds 100g",
+   "hash": "cf7ca9bdd3a06a3b",
+   "product_type": "cumin seeds",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "cumin seeds"
+   ],
+   "form": "whole",
+   "variant": "",
+   "culinary_role": "earthy spice toasted in oil or ground",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "jeera"
+   ],
+   "profile_text": "cumin seeds (whole): earthy spice toasted in oil or ground. Aisle: pantry, spices & seasonings. Also called jeera.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 101,
+   "name": "Paneer 350g",
+   "hash": "8af4c295eaa4d161",
+   "product_type": "paneer",
+   "taxonomy": [
+    "dairy",
+    "cheese",
+    "paneer"
+   ],
+   "form": "block",
+   "variant": "",
+   "culinary_role": "firm fresh cheese for cooking in curries",
+   "diet": [
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "paneer (block): firm fresh cheese for cooking in curries. Aisle: dairy, cheese.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 102,
+   "name": "Plain Naan 4-Pack",
+   "hash": "e1018a5be11a89f6",
+   "product_type": "naan",
+   "taxonomy": [
+    "bakery",
+    "bakery",
+    "naan"
+   ],
+   "form": "baked",
+   "variant": "plain",
+   "culinary_role": "flatbread served alongside curries and stews",
+   "diet": [
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "naan, plain (baked): flatbread served alongside curries and stews. Aisle: bakery, bakery.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 103,
+   "name": "Green Cardamom Pods 50g",
+   "hash": "78dd5e9194cde386",
+   "product_type": "green cardamom pods",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "green cardamom pods"
+   ],
+   "form": "whole",
+   "variant": "",
+   "culinary_role": "aromatic sweet spice for savory and sweet dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "elaichi"
+   ],
+   "profile_text": "green cardamom pods (whole): aromatic sweet spice for savory and sweet dishes. Aisle: pantry, spices & seasonings. Also called elaichi.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 104,
+   "name": "Curry Powder 100g",
+   "hash": "c5a4c1acb19a7b84",
+   "product_type": "curry powder",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "curry powder"
+   ],
+   "form": "powder",
+   "variant": "mild",
+   "culinary_role": "spice blend seasoning for curries and stews",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "curry powder, mild (powder): spice blend seasoning for curries and stews. Aisle: pantry, spices & seasonings.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 105,
+   "name": "Green Chilies 100g",
+   "hash": "8c430ccc8e697aaf",
+   "product_type": "green chilies",
+   "taxonomy": [
+    "produce",
+    "fresh vegetables",
+    "green chilies"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "adds fresh sharp heat to dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "chili",
+    "chilli",
+    "chillies",
+    "chile",
+    "chiles",
+    "Indian or Thai bird's eye chili"
+   ],
+   "profile_text": "green chilies (fresh): adds fresh sharp heat to dishes. Aisle: produce, fresh vegetables. Also called chili, chilli, chillies, chile, chiles, Indian or Thai bird's eye chili.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 106,
+   "name": "Corn Tortillas 10-Pack",
+   "hash": "6f6d21837a474960",
+   "product_type": "corn tortillas",
+   "taxonomy": [
+    "bakery",
+    "bakery",
+    "corn tortillas"
+   ],
+   "form": "baked",
+   "variant": "white",
+   "culinary_role": "soft wrapper for tacos and enchiladas",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "corn tortillas, white (baked): soft wrapper for tacos and enchiladas. Aisle: bakery, bakery.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 107,
+   "name": "Flour Tortillas 10-Pack",
+   "hash": "8d11e43a1acb52cd",
+   "product_type": "flour tortillas",
+   "taxonomy": [
+    "bakery",
+    "bakery",
+    "flour tortillas"
+   ],
+   "form": "baked",
+   "variant": "",
+   "culinary_role": "soft wrapper for burritos and quesadillas",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "flour tortillas (baked): soft wrapper for burritos and quesadillas. Aisle: bakery, bakery.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 108,
+   "name": "Black Beans Canned 540ml",
+   "hash": "e628647912ed667d",
+   "product_type": "canned black beans",
+   "taxonomy": [
+    "pantry",
+    "canned beans",
+    "canned black beans"
+   ],
+   "form": "canned",
+   "variant": "",
+   "culinary_role": "ready-to-eat beans for burritos and soups",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "canned black beans (canned): ready-to-eat beans for burritos and soups. Aisle: pantry, canned beans.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 109,
+   "name": "Pinto Beans Canned 540ml",
+   "hash": "3c6ead6ff7801122",
+   "product_type": "canned pinto beans",
+   "taxonomy": [
+    "pantry",
+    "canned beans",
+    "canned pinto beans"
+   ],
+   "form": "canned",
+   "variant": "",
+   "culinary_role": "ready-to-eat beans for mashing or stews",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "canned pinto beans (canned): ready-to-eat beans for mashing or stews. Aisle: pantry, canned beans.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 110,
+   "name": "Red Kidney Beans Canned 540ml",
+   "hash": "5f620939fcde141e",
+   "product_type": "canned kidney beans",
+   "taxonomy": [
+    "pantry",
+    "canned beans",
+    "canned kidney beans"
+   ],
+   "form": "canned",
+   "variant": "red",
+   "culinary_role": "ready-to-eat beans for chilis and salads",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "canned kidney beans, red (canned): ready-to-eat beans for chilis and salads. Aisle: pantry, canned beans.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 111,
+   "name": "Jalapeno Peppers",
+   "hash": "664808b4f999710a",
+   "product_type": "jalapeno peppers",
+   "taxonomy": [
+    "produce",
+    "fresh vegetables",
+    "jalapeno peppers"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "adds moderate fresh heat to salsas and dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "jalapeños",
+    "jalapenos"
+   ],
+   "profile_text": "jalapeno peppers (fresh): adds moderate fresh heat to salsas and dishes. Aisle: produce, fresh vegetables. Also called jalapeños, jalapenos.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 112,
+   "name": "Limes 4-Pack",
+   "hash": "dd02ae2257cf9441",
+   "product_type": "limes",
+   "taxonomy": [
+    "produce",
+    "fresh fruit",
+    "limes"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "adds bright acidity and citrus juice",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "limes (fresh): adds bright acidity and citrus juice. Aisle: produce, fresh fruit.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 113,
+   "name": "Hass Avocados 2-Pack",
+   "hash": "fb551b17c53374be",
+   "product_type": "avocados",
+   "taxonomy": [
+    "produce",
+    "fresh fruit",
+    "avocados"
+   ],
+   "form": "fresh",
+   "variant": "hass",
+   "culinary_role": "rich creamy fruit for guacamole and salads",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "avocados, hass (fresh): rich creamy fruit for guacamole and salads. Aisle: produce, fresh fruit.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 114,
+   "name": "Dried Oregano 10g",
+   "hash": "55b8d38b41e216ac",
+   "product_type": "dried oregano",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "dried oregano"
+   ],
+   "form": "dried",
+   "variant": "",
+   "culinary_role": "aromatic herb seasoning for savory dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "dried oregano (dried): aromatic herb seasoning for savory dishes. Aisle: pantry, spices & seasonings.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 115,
+   "name": "Tomato Salsa Medium 650ml",
+   "hash": "cedacab2066c2dfe",
+   "product_type": "salsa",
+   "taxonomy": [
+    "pantry",
+    "condiments & sauces",
+    "salsa"
+   ],
+   "form": "jarred",
+   "variant": "medium",
+   "culinary_role": "condiment or dip for chips and tacos",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "salsa, medium (jarred): condiment or dip for chips and tacos. Aisle: pantry, condiments & sauces.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 116,
+   "name": "Queso Fresco 300g",
+   "hash": "2319fa3d251ce213",
+   "product_type": "queso fresco",
+   "taxonomy": [
+    "dairy",
+    "cheese",
+    "queso fresco"
+   ],
+   "form": "block",
+   "variant": "",
+   "culinary_role": "crumbly fresh cheese topping for mexican dishes",
+   "diet": [
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "queso fresco (block): crumbly fresh cheese topping for mexican dishes. Aisle: dairy, cheese.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 117,
+   "name": "Sour Cream 500ml",
+   "hash": "85d3d2d230255d97",
+   "product_type": "sour cream",
+   "taxonomy": [
+    "dairy",
+    "dairy",
+    "sour cream"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "tangy rich topping for tacos and baked goods",
+   "diet": [
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "sour cream (fresh): tangy rich topping for tacos and baked goods. Aisle: dairy, dairy.",
+   "flags": [],
+   "fixes": [
+    {
+     "field": "form",
+     "from": "paste",
+     "to": "fresh",
+     "why": "sour cream is not a paste, as the check said of the yogurts"
+    }
+   ]
+  },
+  {
+   "id": 118,
+   "name": "Canned Corn Kernels 341ml",
+   "hash": "b5ce43b7a50aa057",
+   "product_type": "canned corn",
+   "taxonomy": [
+    "pantry",
+    "canned vegetables",
+    "canned corn"
+   ],
+   "form": "canned",
+   "variant": "sweet",
+   "culinary_role": "sweet vegetable addition to soups and salads",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "canned corn, sweet (canned): sweet vegetable addition to soups and salads. Aisle: pantry, canned vegetables.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 119,
+   "name": "Granulated Sugar 1kg",
+   "hash": "8d036807ba878939",
+   "product_type": "sugar",
+   "taxonomy": [
+    "pantry",
+    "baking",
+    "sugar"
+   ],
+   "form": "powder",
+   "variant": "granulated",
+   "culinary_role": "primary sweetening agent for baking and cooking",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "sugar, granulated (powder): primary sweetening agent for baking and cooking. Aisle: pantry, baking.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 120,
+   "name": "Brown Sugar 1kg",
+   "hash": "5736125d809a9703",
+   "product_type": "brown sugar",
+   "taxonomy": [
+    "pantry",
+    "baking",
+    "brown sugar"
+   ],
+   "form": "powder",
+   "variant": "golden",
+   "culinary_role": "adds sweetness and molasses moisture to baking",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "brown sugar, golden (powder): adds sweetness and molasses moisture to baking. Aisle: pantry, baking.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 121,
+   "name": "Icing Sugar 1kg",
+   "hash": "7bea195e04bf5e22",
+   "product_type": "powdered sugar",
+   "taxonomy": [
+    "pantry",
+    "baking",
+    "powdered sugar"
+   ],
+   "form": "powder",
+   "variant": "",
+   "culinary_role": "fine sugar for frostings and dusting pastries",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "powdered",
+    "confectioners' sugar"
+   ],
+   "profile_text": "powdered sugar (powder): fine sugar for frostings and dusting pastries. Aisle: pantry, baking. Also called powdered, confectioners' sugar.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 122,
+   "name": "Table Salt 1kg",
+   "hash": "6e7fce3ecbe58f85",
+   "product_type": "salt",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "salt"
+   ],
+   "form": "powder",
+   "variant": "iodized table",
+   "culinary_role": "fundamental mineral seasoning for savory and sweet",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "salt, iodized table (powder): fundamental mineral seasoning for savory and sweet. Aisle: pantry, spices & seasonings.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 123,
+   "name": "Kosher Salt 1.36kg",
+   "hash": "834f032055486489",
+   "product_type": "salt",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "salt"
+   ],
+   "form": "flakes",
+   "variant": "kosher",
+   "culinary_role": "coarse seasoning salt for cooking and brining",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "salt, kosher (flakes): coarse seasoning salt for cooking and brining. Aisle: pantry, spices & seasonings.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 124,
+   "name": "Fine Sea Salt 750g",
+   "hash": "ddacebe83525eafb",
+   "product_type": "salt",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "salt"
+   ],
+   "form": "powder",
+   "variant": "fine sea",
+   "culinary_role": "fine mineral seasoning for cooking and baking",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "salt, fine sea (powder): fine mineral seasoning for cooking and baking. Aisle: pantry, spices & seasonings.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 125,
+   "name": "Black Pepper Ground 100g",
+   "hash": "96eacf17df993ba2",
+   "product_type": "black pepper",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "black pepper"
+   ],
+   "form": "ground",
+   "variant": "ground",
+   "culinary_role": "sharp pungent everyday seasoning spice",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "black pepper, ground (ground): sharp pungent everyday seasoning spice. Aisle: pantry, spices & seasonings.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 126,
+   "name": "Black Peppercorns Whole 100g",
+   "hash": "dc64b842a398ff1e",
+   "product_type": "black peppercorns",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "black peppercorns"
+   ],
+   "form": "whole",
+   "variant": "",
+   "culinary_role": "whole pungent spice for grinding or broths",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "black peppercorns (whole): whole pungent spice for grinding or broths. Aisle: pantry, spices & seasonings.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 127,
+   "name": "Baking Soda 500g",
+   "hash": "369c00dd0013f203",
+   "product_type": "baking soda",
+   "taxonomy": [
+    "pantry",
+    "baking",
+    "baking soda"
+   ],
+   "form": "powder",
+   "variant": "",
+   "culinary_role": "chemical leavening agent for baking recipes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "sodium bicarbonate"
+   ],
+   "profile_text": "baking soda (powder): chemical leavening agent for baking recipes. Aisle: pantry, baking. Also called sodium bicarbonate.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 128,
+   "name": "Baking Powder 225g",
+   "hash": "f7b46a0385447752",
+   "product_type": "baking powder",
+   "taxonomy": [
+    "pantry",
+    "baking",
+    "baking powder"
+   ],
+   "form": "powder",
+   "variant": "double-acting",
+   "culinary_role": "chemical leavener for cakes and quick breads",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "baking powder, double-acting (powder): chemical leavener for cakes and quick breads. Aisle: pantry, baking.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 129,
+   "name": "Pure Vanilla Extract 43ml",
+   "hash": "81da06b562d14ea4",
+   "product_type": "vanilla extract",
+   "taxonomy": [
+    "pantry",
+    "baking",
+    "vanilla extract"
+   ],
+   "form": "liquid",
+   "variant": "pure",
+   "culinary_role": "flavoring extract for baked goods and desserts",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "vanilla extract, pure (liquid): flavoring extract for baked goods and desserts. Aisle: pantry, baking.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 130,
+   "name": "Liquid Honey 500g",
+   "hash": "89a79128efb56d8c",
+   "product_type": "honey",
+   "taxonomy": [
+    "pantry",
+    "honey & syrups",
+    "honey"
+   ],
+   "form": "liquid",
+   "variant": "",
+   "culinary_role": "sweetener for dressings sauces and baking",
+   "diet": [
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "honey (liquid): sweetener for dressings sauces and baking. Aisle: pantry, honey & syrups.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 131,
+   "name": "Vegetable Oil 1.42L",
+   "hash": "9a74341fc2c5c907",
+   "product_type": "vegetable oil",
+   "taxonomy": [
+    "pantry",
+    "oils & vinegars",
+    "vegetable oil"
+   ],
+   "form": "liquid",
+   "variant": "soybean",
+   "culinary_role": "neutral cooking oil for frying and baking",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "soybean"
+   ],
+   "profile_text": "vegetable oil, soybean (liquid): neutral cooking oil for frying and baking. Aisle: pantry, oils & vinegars. Also called soybean.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 132,
+   "name": "White Vinegar 1L",
+   "hash": "c7959139f25341ca",
+   "product_type": "white vinegar",
+   "taxonomy": [
+    "pantry",
+    "oils & vinegars",
+    "white vinegar"
+   ],
+   "form": "liquid",
+   "variant": "distilled",
+   "culinary_role": "adds sharp acidity to sauces and dressings",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "white vinegar, distilled (liquid): adds sharp acidity to sauces and dressings. Aisle: pantry, oils & vinegars.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 133,
+   "name": "Cayenne Pepper Ground 50g",
+   "hash": "549e96fcebf7d053",
+   "product_type": "cayenne pepper",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "cayenne pepper"
+   ],
+   "form": "ground",
+   "variant": "",
+   "culinary_role": "adds spicy heat to dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "cayenne powder"
+   ],
+   "profile_text": "cayenne pepper (ground): adds spicy heat to dishes. Aisle: pantry, spices & seasonings. Also called cayenne powder.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 134,
+   "name": "Paprika Ground 100g",
+   "hash": "b29147cd8c066046",
+   "product_type": "paprika",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "paprika"
+   ],
+   "form": "ground",
+   "variant": "sweet",
+   "culinary_role": "adds mild pepper flavor and reddish color",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "paprika, sweet (ground): adds mild pepper flavor and reddish color. Aisle: pantry, spices & seasonings.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 135,
+   "name": "Ground Cinnamon 100g",
+   "hash": "12783676adbc55aa",
+   "product_type": "cinnamon",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "cinnamon"
+   ],
+   "form": "ground",
+   "variant": "",
+   "culinary_role": "warm sweet spice for baking and savory dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "cinnamon (ground): warm sweet spice for baking and savory dishes. Aisle: pantry, spices & seasonings.",
+   "flags": [],
+   "fixes": [
+    {
+     "field": "product_type",
+     "from": "ground cinnamon",
+     "to": "cinnamon",
+     "why": "ground is its form, as cumin (26) and turmeric (27) are typed"
+    }
+   ]
+  },
+  {
+   "id": 136,
+   "name": "Bay Leaves 10g",
+   "hash": "ad16f54a7507d8f8",
+   "product_type": "bay leaves",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "bay leaves"
+   ],
+   "form": "dried",
+   "variant": "whole",
+   "culinary_role": "infuses herbal aroma into soups and stews",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "bay leaves, whole (dried): infuses herbal aroma into soups and stews. Aisle: pantry, spices & seasonings.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 137,
+   "name": "Dried Thyme 10g",
+   "hash": "0e54d9203346579f",
+   "product_type": "dried thyme",
+   "taxonomy": [
+    "pantry",
+    "spices & seasonings",
+    "dried thyme"
+   ],
+   "form": "dried",
+   "variant": "",
+   "culinary_role": "adds earthy herbal flavor to dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "dried thyme (dried): adds earthy herbal flavor to dishes. Aisle: pantry, spices & seasonings.",
+   "flags": [],
+   "fixes": [
+    {
+     "field": "product_type",
+     "from": "thyme",
+     "to": "dried thyme",
+     "why": "a dried herb is its own item, as dried oregano (114) is"
+    }
+   ]
+  },
+  {
+   "id": 138,
+   "name": "Pure Maple Syrup 540ml",
+   "hash": "8f42ded8ac62bf35",
+   "product_type": "maple syrup",
+   "taxonomy": [
+    "pantry",
+    "honey & syrups",
+    "maple syrup"
+   ],
+   "form": "liquid",
+   "variant": "amber",
+   "culinary_role": "natural sweetener for breakfasts glazes and baking",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "maple syrup, amber (liquid): natural sweetener for breakfasts glazes and baking. Aisle: pantry, honey & syrups.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 139,
+   "name": "Whipping Cream 35% 473ml",
+   "hash": "1da02c2455e540b4",
+   "product_type": "heavy cream",
+   "taxonomy": [
+    "dairy",
+    "cream & creamers",
+    "heavy cream"
+   ],
+   "form": "liquid",
+   "variant": "35%",
+   "culinary_role": "enriches sauces soups or whips for desserts",
+   "diet": [
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "heavy cream"
+   ],
+   "profile_text": "heavy cream, 35% (liquid): enriches sauces soups or whips for desserts. Aisle: dairy, cream & creamers. Also called heavy cream.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 140,
+   "name": "Vegetable Broth 900ml",
+   "hash": "31f5810946190904",
+   "product_type": "vegetable broth",
+   "taxonomy": [
+    "pantry",
+    "soups & broths",
+    "vegetable broth"
+   ],
+   "form": "liquid",
+   "variant": "low sodium",
+   "culinary_role": "savory liquid base for soups and grains",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "stock"
+   ],
+   "profile_text": "vegetable broth, low sodium (liquid): savory liquid base for soups and grains. Aisle: pantry, soups & broths. Also called stock.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 141,
+   "name": "Dijon Mustard 250ml",
+   "hash": "b9234c102697b37d",
+   "product_type": "dijon mustard",
+   "taxonomy": [
+    "pantry",
+    "condiments & salad dressings",
+    "dijon mustard"
+   ],
+   "form": "paste",
+   "variant": "smooth",
+   "culinary_role": "adds tangy pungency to dressings and sauces",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "dijon mustard, smooth (paste): adds tangy pungency to dressings and sauces. Aisle: pantry, condiments & salad dressings.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 142,
+   "name": "Green Onions",
+   "hash": "d9c944f84557ca8a",
+   "product_type": "green onions",
+   "taxonomy": [
+    "produce",
+    "fresh herbs",
+    "green onions"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "mild onion garnish or aromatic base",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "scallions",
+    "spring onions"
+   ],
+   "profile_text": "green onions (fresh): mild onion garnish or aromatic base. Aisle: produce, fresh herbs. Also called scallions, spring onions.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 143,
+   "name": "Cilantro",
+   "hash": "61ec23f0d26654c3",
+   "product_type": "cilantro",
+   "taxonomy": [
+    "produce",
+    "fresh herbs",
+    "cilantro"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "bright herbal garnish for savory dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "coriander leaves"
+   ],
+   "profile_text": "cilantro (fresh): bright herbal garnish for savory dishes. Aisle: produce, fresh herbs. Also called coriander leaves.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 144,
+   "name": "Flat-Leaf Parsley",
+   "hash": "2ecedc45d1340d8b",
+   "product_type": "parsley",
+   "taxonomy": [
+    "produce",
+    "fresh herbs",
+    "parsley"
+   ],
+   "form": "fresh",
+   "variant": "flat-leaf",
+   "culinary_role": "fresh herb garnish and flavor enhancer",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "parsley, flat-leaf (fresh): fresh herb garnish and flavor enhancer. Aisle: produce, fresh herbs.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 145,
+   "name": "Fresh Mint 30g",
+   "hash": "61363b41026d0b75",
+   "product_type": "mint",
+   "taxonomy": [
+    "produce",
+    "fresh herbs",
+    "mint"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "adds refreshing flavor to drinks and dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "mint (fresh): adds refreshing flavor to drinks and dishes. Aisle: produce, fresh herbs.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 146,
+   "name": "Lemons 3-Pack",
+   "hash": "b8d54ff787f31f8c",
+   "product_type": "lemons",
+   "taxonomy": [
+    "produce",
+    "fresh fruit",
+    "lemons"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "provides acidic juice and citrus zest",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "lemons (fresh): provides acidic juice and citrus zest. Aisle: produce, fresh fruit.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 147,
+   "name": "Red Onion",
+   "hash": "e84cb2fcb9386cc9",
+   "product_type": "red onion",
+   "taxonomy": [
+    "produce",
+    "fresh vegetables",
+    "red onion"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "sliced raw in salads or cooked in dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "red onion (fresh): sliced raw in salads or cooked in dishes. Aisle: produce, fresh vegetables.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 148,
+   "name": "Shallots 227g",
+   "hash": "b14033290cd7c114",
+   "product_type": "shallots",
+   "taxonomy": [
+    "produce",
+    "fresh vegetables",
+    "shallots"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "delicate aromatic base for sauces and dressings",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "shallots (fresh): delicate aromatic base for sauces and dressings. Aisle: produce, fresh vegetables.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 149,
+   "name": "Baby Spinach 142g",
+   "hash": "232b5006142a1f64",
+   "product_type": "baby spinach",
+   "taxonomy": [
+    "produce",
+    "packaged salads & greens",
+    "baby spinach"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "tender greens for salads or quick cooking",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "baby spinach (fresh): tender greens for salads or quick cooking. Aisle: produce, packaged salads & greens.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 150,
+   "name": "English Cucumber",
+   "hash": "1d6d4d01e7a058e0",
+   "product_type": "english cucumber",
+   "taxonomy": [
+    "produce",
+    "fresh vegetables",
+    "english cucumber"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "crisp vegetable for salads and snacks",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "english cucumber (fresh): crisp vegetable for salads and snacks. Aisle: produce, fresh vegetables.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 151,
+   "name": "White Mushrooms 227g",
+   "hash": "7f3babecabcb0f82",
+   "product_type": "white mushrooms",
+   "taxonomy": [
+    "produce",
+    "fresh vegetables",
+    "white mushrooms"
+   ],
+   "form": "fresh",
+   "variant": "button",
+   "culinary_role": "earthy vegetable for sautés soups and sauces",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "white mushrooms, button (fresh): earthy vegetable for sautés soups and sauces. Aisle: produce, fresh vegetables.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 152,
+   "name": "Zucchini",
+   "hash": "ad91b87e06905698",
+   "product_type": "zucchini",
+   "taxonomy": [
+    "produce",
+    "fresh vegetables",
+    "zucchini"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "tender summer squash for roasting or sautéing",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "courgette"
+   ],
+   "profile_text": "zucchini (fresh): tender summer squash for roasting or sautéing. Aisle: produce, fresh vegetables. Also called courgette.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 153,
+   "name": "Celery",
+   "hash": "cccca735e36306d1",
+   "product_type": "celery",
+   "taxonomy": [
+    "produce",
+    "fresh vegetables",
+    "celery"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "crisp aromatic base for soups and mirepoix",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "celery (fresh): crisp aromatic base for soups and mirepoix. Aisle: produce, fresh vegetables.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 154,
+   "name": "Red Bell Pepper",
+   "hash": "c0b3122346f890fd",
+   "product_type": "red bell pepper",
+   "taxonomy": [
+    "produce",
+    "fresh vegetables",
+    "red bell pepper"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "sweet crisp pepper for roasting or salads",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "red bell pepper (fresh): sweet crisp pepper for roasting or salads. Aisle: produce, fresh vegetables.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 155,
+   "name": "Green Bell Pepper",
+   "hash": "e34e3dac996b456e",
+   "product_type": "green bell pepper",
+   "taxonomy": [
+    "produce",
+    "fresh vegetables",
+    "green bell pepper"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "grassy pepper for cooking or eating raw",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "green bell pepper (fresh): grassy pepper for cooking or eating raw. Aisle: produce, fresh vegetables.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 156,
+   "name": "Ground Pork 450g",
+   "hash": "2ac271200b8e9230",
+   "product_type": "ground pork",
+   "taxonomy": [
+    "meat",
+    "pork",
+    "ground pork"
+   ],
+   "form": "ground",
+   "variant": "",
+   "culinary_role": "savory meat for meatballs dumplings and sauces",
+   "diet": [],
+   "aka": [],
+   "profile_text": "ground pork (ground): savory meat for meatballs dumplings and sauces. Aisle: meat, pork.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 157,
+   "name": "Pork Shoulder Roast 1.2kg",
+   "hash": "dae6bcdfcdaa6afb",
+   "product_type": "pork shoulder roast",
+   "taxonomy": [
+    "meat",
+    "pork",
+    "pork shoulder roast"
+   ],
+   "form": "raw",
+   "variant": "boneless blade",
+   "culinary_role": "rich cut for slow braising or roasting",
+   "diet": [],
+   "aka": [],
+   "profile_text": "pork shoulder roast, boneless blade (raw): rich cut for slow braising or roasting. Aisle: meat, pork.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 158,
+   "name": "Raw Shrimp 340g",
+   "hash": "3fa7da48e42a2ae2",
+   "product_type": "shrimp",
+   "taxonomy": [
+    "frozen",
+    "frozen seafood",
+    "shrimp"
+   ],
+   "form": "frozen",
+   "variant": "peeled and deveined",
+   "culinary_role": "quick-cooking shellfish for sautés and pasta",
+   "diet": [
+    "pescatarian"
+   ],
+   "aka": [
+    "prawns"
+   ],
+   "profile_text": "shrimp, peeled and deveined (frozen): quick-cooking shellfish for sautés and pasta. Aisle: frozen, frozen seafood. Also called prawns.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 159,
+   "name": "Beef Sirloin Steak 450g",
+   "hash": "d1c12d9d4b1721f1",
+   "product_type": "top sirloin steak",
+   "taxonomy": [
+    "meat",
+    "beef",
+    "top sirloin steak"
+   ],
+   "form": "raw",
+   "variant": "",
+   "culinary_role": "lean steak for grilling or pan-searing",
+   "diet": [],
+   "aka": [],
+   "profile_text": "top sirloin steak (raw): lean steak for grilling or pan-searing. Aisle: meat, beef.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 160,
+   "name": "Chicken Drumsticks 1kg",
+   "hash": "e227a2a1dff33afb",
+   "product_type": "chicken drumsticks",
+   "taxonomy": [
+    "meat",
+    "poultry",
+    "chicken drumsticks"
+   ],
+   "form": "raw",
+   "variant": "bone-in skin-on",
+   "culinary_role": "bone-in chicken for baking roasting or grilling",
+   "diet": [],
+   "aka": [
+    "legs"
+   ],
+   "profile_text": "chicken drumsticks, bone-in skin-on (raw): bone-in chicken for baking roasting or grilling. Aisle: meat, poultry. Also called legs.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 161,
+   "name": "Frozen White Fish 400g",
+   "hash": "af46b563f3c5dc5f",
+   "product_type": "white fish fillets",
+   "taxonomy": [
+    "frozen",
+    "frozen seafood",
+    "white fish fillets"
+   ],
+   "form": "frozen",
+   "variant": "boneless skinless",
+   "culinary_role": "mild fish fillets for baking or pan-frying",
+   "diet": [
+    "pescatarian"
+   ],
+   "aka": [
+    "basa",
+    "cod"
+   ],
+   "profile_text": "white fish fillets, boneless skinless (frozen): mild fish fillets for baking or pan-frying. Aisle: frozen, frozen seafood. Also called basa, cod.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 162,
+   "name": "Yellow Onions 3lb Bag",
+   "hash": "099c4b87174a2184",
+   "product_type": "yellow onions",
+   "taxonomy": [
+    "produce",
+    "fresh vegetables",
+    "yellow onions"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "savory aromatic foundation for cooked dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "yellow onions (fresh): savory aromatic foundation for cooked dishes. Aisle: produce, fresh vegetables.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 163,
+   "name": "Yellow Onions 10lb Bag",
+   "hash": "afd73a12ca9ae1ad",
+   "product_type": "yellow onions",
+   "taxonomy": [
+    "produce",
+    "fresh vegetables",
+    "yellow onions"
+   ],
+   "form": "fresh",
+   "variant": "",
+   "culinary_role": "savory aromatic foundation for cooked dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "yellow onions (fresh): savory aromatic foundation for cooked dishes. Aisle: produce, fresh vegetables.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 164,
+   "name": "Organic Yellow Onions 2lb Bag",
+   "hash": "808e446627d5b9aa",
+   "product_type": "yellow onions",
+   "taxonomy": [
+    "produce",
+    "fresh vegetables",
+    "yellow onions"
+   ],
+   "form": "fresh",
+   "variant": "organic",
+   "culinary_role": "savory aromatic foundation for cooked dishes",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "yellow onions, organic (fresh): savory aromatic foundation for cooked dishes. Aisle: produce, fresh vegetables.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 165,
+   "name": "Petite Diced Tomatoes 796ml",
+   "hash": "a2cb29f2416401a5",
+   "product_type": "canned tomatoes",
+   "taxonomy": [
+    "pantry",
+    "canned vegetables",
+    "canned tomatoes"
+   ],
+   "form": "canned",
+   "variant": "petite diced",
+   "culinary_role": "rich tomato base for sauces and stews",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "canned tomatoes, petite diced (canned): rich tomato base for sauces and stews. Aisle: pantry, canned vegetables.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 166,
+   "name": "Frozen Mango Chunks 600g",
+   "hash": "29bdd4bd1270d2fe",
+   "product_type": "mango",
+   "taxonomy": [
+    "frozen",
+    "frozen fruit",
+    "mango"
+   ],
+   "form": "frozen",
+   "variant": "chunks",
+   "culinary_role": "sweet frozen fruit for smoothies and baking",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "mango, chunks (frozen): sweet frozen fruit for smoothies and baking. Aisle: frozen, frozen fruit.",
+   "flags": [],
+   "fixes": [
+    {
+     "field": "product_type",
+     "from": "mango chunks",
+     "to": "mango",
+     "why": "a recipe buys mango; frozen is its form and chunks its variant"
+    },
+    {
+     "field": "variant",
+     "from": "",
+     "to": "chunks",
+     "why": "moved out of the type"
+    }
+   ]
+  },
+  {
+   "id": 167,
+   "name": "Sliced Pepperoni 175g",
+   "hash": "f6cdef263dac6582",
+   "product_type": "pepperoni",
+   "taxonomy": [
+    "deli",
+    "deli meat",
+    "pepperoni"
+   ],
+   "form": "sliced",
+   "variant": "",
+   "culinary_role": "cured meat topping for pizzas and sandwiches",
+   "diet": [],
+   "aka": [],
+   "profile_text": "pepperoni (sliced): cured meat topping for pizzas and sandwiches. Aisle: deli, deli meat.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 168,
+   "name": "Pizza Dough 500g",
+   "hash": "3aff6dd5f177b09f",
+   "product_type": "pizza dough",
+   "taxonomy": [
+    "bakery",
+    "bakery bread",
+    "pizza dough"
+   ],
+   "form": "raw",
+   "variant": "",
+   "culinary_role": "raw dough ready to bake into pizza",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [],
+   "profile_text": "pizza dough (raw): raw dough ready to bake into pizza. Aisle: bakery, bakery bread.",
+   "flags": [],
+   "fixes": []
+  },
+  {
+   "id": 169,
+   "name": "Instant Yeast 3-Pack",
+   "hash": "e74dc4c22189415a",
+   "product_type": "instant yeast",
+   "taxonomy": [
+    "pantry",
+    "baking ingredients",
+    "instant yeast"
+   ],
+   "form": "powder",
+   "variant": "",
+   "culinary_role": "leavening agent for bread and doughs",
+   "diet": [
+    "vegan",
+    "vegetarian",
+    "pescatarian"
+   ],
+   "aka": [
+    "quick-rise"
+   ],
+   "profile_text": "instant yeast (powder): leavening agent for bread and doughs. Aisle: pantry, baking ingredients. Also called quick-rise.",
+   "flags": [],
+   "fixes": []
+  }
+ ]
+}

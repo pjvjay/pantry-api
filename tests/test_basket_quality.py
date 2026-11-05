@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 # seeds/products.json
 SPAGHETTI, EVOO, CANOLA, CRUSHED_TOMATOES, PB_CREAM = 21, 16, 17, 33, 6
+OLIVE_OIL_1L = 62
 CUMIN_GROUND, CORIANDER_GROUND, CUMIN_SEEDS, CHILI_POWDER = 26, 28, 100, 98
 THIGHS_BONE_IN, THIGHS_BONELESS, DRUMSTICKS = 11, 46, 160
 SICHUAN_WHOLE, SICHUAN_GROUND = 66, 67
@@ -170,16 +171,19 @@ def test_a_shared_purchase_buys_a_second_pack_only_when_the_summed_need_requires
 
 @pytest.mark.asyncio
 async def test_plan_prices_a_shared_product_once_in_total_cost_and_the_trip(server):
+    # Matched by meaning, both olive oils are the same item and the matcher's score buys the
+    # better value (Olive Oil 1L) for the lines' summed 45 ml, where the cheapest-first word
+    # ranking bought Extra Virgin Olive Oil 500ml.
     s = await _plan(server, "Dupes (serves 2)\n- 500g spaghetti\n- 15ml olive oil\n"
                             "- 30ml olive oil\n", allow_partial=True)
     assert [(ln.line_no, ln.also_lines, ln.product_id, ln.packs) for ln in s.lines] == [
-        (1, [], SPAGHETTI, 1), (2, [3], EVOO, 1)]
+        (1, [], SPAGHETTI, 1), (2, [3], OLIVE_OIL_1L, 1)]
     assert s.lines[1].ingredient == "olive oil + olive oil"
-    assert s.total_cost == round(_cheapest(SPAGHETTI) + _cheapest(EVOO), 2)
-    assert sorted(i.product_id for i in s.trip.items) == [EVOO, SPAGHETTI]   # each once
+    assert s.total_cost == round(_cheapest(SPAGHETTI) + _cheapest(OLIVE_OIL_1L), 2)
+    assert sorted(i.product_id for i in s.trip.items) == [SPAGHETTI, OLIVE_OIL_1L]  # each once
     assert s.trip.basket_cost == round(sum(i.price for i in s.trip.items), 2)
-    assert ("lines 2, 3 (olive oil + olive oil) share one purchase: Extra Virgin Olive "
-            "Oil 500ml, bought once") in s.notes
+    assert ("lines 2, 3 (olive oil + olive oil) share one purchase: Olive Oil 1L, "
+            "bought once") in s.notes
     assert _accounted(s) == 3 and not any(n.startswith("planned ") for n in s.notes)
 
 
@@ -421,12 +425,15 @@ def test_jelly_does_not_match_the_no_jelly_peanut_butter():
 
 # The demo pick for every seeded recipe line on the 62-product catalog
 # (recorded before pantry-db#11 grew it), by recipe slug and line name.
-# One pick moves, and is right now: grilled cheese's "Butter" used to buy
+# One pick moved, and was right: grilled cheese's "Butter" used to buy
 # Canadian Peanut Butter Cream; the head-noun tie-break buys Butter Salted.
-# None: the line was not stocked on the NL path then either.
+# Matching by meaning moved two more, both lines the words left unstocked
+# on the NL path: "Peanut Butter and Jelly Jam" is Nestles PBJ (the same
+# item), and "White Chocolate", which the catalog does not sell, buys a
+# chocolate that works instead.
 PICKS_ON_THE_62_PRODUCT_CATALOG = {
-    "pbj_sandwich": {"Peanut Butter and Jelly Jam": None, "Wheat Bread": 2,
-                     "White Chocolate": None},
+    "pbj_sandwich": {"Peanut Butter and Jelly Jam": 5, "Wheat Bread": 2,
+                     "White Chocolate": 3},
     "spaghetti_bolognese": {"Spaghetti": 21, "Ground Beef": 36, "Yellow Onion": 12,
                             "Garlic": 13, "Canned Tomatoes": 15, "Olive Oil": 16,
                             "Mozzarella": 24},
@@ -444,9 +451,10 @@ PICKS_ON_THE_62_PRODUCT_CATALOG = {
 
 
 def test_existing_recipe_lines_buy_what_they_bought_before():
-    """The tokenizer change (negations, irregular plurals), the size cap and
-    the 99 new catalog rows move no seeded recipe line, except the butter
-    line, which they fix."""
+    """The tokenizer change (negations, irregular plurals), the size cap,
+    the 99 new catalog rows and matching by meaning move no seeded recipe
+    line, except the butter line, which they fix, and the two lines the
+    words never found (see PICKS_ON_THE_62_PRODUCT_CATALOG)."""
     from pantry_planner import db
 
     got: dict[str, dict] = {}
@@ -599,7 +607,7 @@ async def test_a_line_the_selector_skips_is_reported_not_lost(server, monkeypatc
     (d,) = s.skipped
     assert (d.ingredient, d.reason) == ("olive oil",
                                         "the selector returned no product for this line")
-    assert d.suggestions[0].startswith("Extra Virgin Olive Oil 500ml")
+    assert d.suggestions[0].startswith("Olive Oil 1L")        # the matcher's first
     assert [x.ingredient for x in s.not_stocked] == ["saffron"]
     assert _accounted(s) == 3
     assert ("planned 1 of 3 ingredients: 1 not stocked, 0 out of range, 1 skipped (see "

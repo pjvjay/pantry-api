@@ -47,7 +47,9 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:15-alpine   # production's major; a parity gate must match it
+        # Production's major (CNPG ghcr.io/cloudnative-pg/postgresql:17.5, pantry-gitops
+        # infra/postgres-cluster.yaml); a parity gate must match it.
+        image: postgres:17-alpine
         env:
           POSTGRES_USER: pantry
           POSTGRES_PASSWORD: pantry
@@ -91,3 +93,4 @@ jobs:
             || { echo "::error::suite did not fully exercise Postgres"; exit 1; }
           q "select to_regclass('product_origin_evidence') is not null" | grep -q t
           q "select to_regclass('origin_submissions') is not null" | grep -q t
+          q "select to_regclass('recipe_line_amounts') is not null" | grep -q t

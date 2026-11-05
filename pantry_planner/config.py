@@ -184,6 +184,10 @@ class Settings:
     # one nobody measured.
     origin_min_coverage: float
 
+    # Nutrition: a meal counted for fewer than this share of its ingredients, by count or by
+    # weight, is labelled below the floor ("totals are minimums"), never shown as clean.
+    nutrition_min_coverage: float
+
     # Split-trip optimizer: how a km of driving trades against basket
     # savings ("save $4 by adding a 6 km detour?"). CAD per km.
     travel_cost_per_km: float
@@ -209,6 +213,34 @@ class Settings:
     # mode and the model specs without a restart (demo UI). Off by default:
     # on a public deployment it would let anyone turn real LLM spend on.
     runtime_settings_enabled: bool = False
+
+    # Public endpoint limits (limits.py). TRUSTED_PROXY_HOPS: how many proxies
+    # in front of the API append to X-Forwarded-For (gitops sets the ingress
+    # depth); 0 means the header is client input and is ignored.
+    trusted_proxy_hops: int = 0
+    # LLM_DAILY_COST_CAP_USD: estimated LLM spend per replica per UTC day above
+    # which LLM-calling endpoints answer 503. None (unset) means no ceiling.
+    llm_daily_cost_cap_usd: float | None = None
+
+    # OFFERS_SYNTHETIC (default true): store prices, stock (every product at
+    # every store) and reviews are storeseed's synthetic data, so anything
+    # that shows them to a shopper (the alternatives ranking's data_note,
+    # "(demo)" on ratings) says so. A deployment with real offers sets it
+    # false; the data stays labelled until someone decides it is real.
+    offers_synthetic: bool = True
+    # STORES_SYNTHETIC (default on): the catalog's stores are fictional, so a calendar export
+    # names each as "<store> (demo store)" and never gives its seeded street address. Off only
+    # for a deployment whose stores are real.
+    stores_synthetic: bool = True
+
+    # Product matching by meaning (matching/): OLLAMA_URL is the local Ollama that embeds
+    # ingredient names no seed knows, with EMBEDDING_MODEL; "" turns it off, and those names
+    # are then matched by words. PANTRY_DATA_DIR holds the embedding cache and the matching
+    # event log (matching/events.py); MATCHING_EVENTS=0 stops the log.
+    ollama_url: str = "http://127.0.0.1:11434"
+    embedding_model: str = "embeddinggemma"
+    data_dir: str = "~/.pantry-data"
+    matching_events: bool = True
 
     @staticmethod
     def from_env() -> Settings:
@@ -238,6 +270,8 @@ class Settings:
             ),
             origin_min_coverage=float(
                 os.environ.get("ORIGIN_MIN_COVERAGE", "0.6")),
+            nutrition_min_coverage=float(
+                os.environ.get("NUTRITION_MIN_COVERAGE", "0.8")),
             default_lat=float(os.environ.get("DEFAULT_LAT", "49.28")),
             default_lon=float(os.environ.get("DEFAULT_LON", "-123.12")),
             travel_cost_per_km=float(os.environ.get("TRAVEL_COST_PER_KM", "0.50")),
@@ -250,7 +284,43 @@ class Settings:
             runtime_settings_enabled=(
                 os.environ.get("RUNTIME_SETTINGS_ENABLED", "").lower()
                 in {"1", "true", "yes"}),
+            trusted_proxy_hops=_proxy_hops(os.environ.get("TRUSTED_PROXY_HOPS", "")),
+            llm_daily_cost_cap_usd=_cost_cap(os.environ.get("LLM_DAILY_COST_CAP_USD", "")),
+            offers_synthetic=os.environ.get("OFFERS_SYNTHETIC", "true").strip().lower()
+            not in {"0", "false", "no"},
+            stores_synthetic=os.environ.get("STORES_SYNTHETIC", "true").strip().lower()
+            not in {"0", "false", "no", "off"},
+            ollama_url=os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").strip(),
+            embedding_model=os.environ.get("EMBEDDING_MODEL", "").strip() or "embeddinggemma",
+            data_dir=os.environ.get("PANTRY_DATA_DIR", "").strip() or "~/.pantry-data",
+            matching_events=os.environ.get("MATCHING_EVENTS", "1").strip().lower()
+            not in {"0", "false", "no", "off"},
         )
+
+
+def _proxy_hops(raw: str) -> int:
+    """TRUSTED_PROXY_HOPS as a count of proxies, 0 when unset. A bad value stops the process
+    at startup: guessing would either trust a forged header or rate-limit the ingress."""
+    raw = raw.strip()
+    if not raw:
+        return 0
+    if not raw.isdigit():
+        raise ValueError(f"TRUSTED_PROXY_HOPS must be a whole number of proxies, got {raw!r}")
+    return int(raw)
+
+
+def _cost_cap(raw: str) -> float | None:
+    """LLM_DAILY_COST_CAP_USD in dollars, None when unset (no ceiling)."""
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        cap = float(raw)
+    except ValueError:
+        raise ValueError(f"LLM_DAILY_COST_CAP_USD must be a dollar amount, got {raw!r}") from None
+    if not cap >= 0:
+        raise ValueError(f"LLM_DAILY_COST_CAP_USD must be 0 or more, got {raw!r}")
+    return cap
 
 
 # ─── Effective settings = env (cached) + runtime overrides ───
@@ -353,6 +423,13 @@ COST_PER_MTOK: dict[str, tuple[float, float]] = {
     HAIKU: (1.00, 5.00),
     SONNET: (3.00, 15.00),
 }
+
+
+def is_priced(model: str) -> bool:
+    """Whether estimate_cost_usd knows what a call to `model` costs. Gemini's price is known:
+    $0, the free tier this deployment uses."""
+    provider, name = split_model_spec(model)
+    return provider == GEMINI or name in COST_PER_MTOK
 
 
 def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:

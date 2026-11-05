@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from functools import lru_cache
 from itertools import combinations, permutations
 
 from .models import TripItem, TripOption
@@ -39,9 +40,16 @@ def _km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return math.hypot((lat1 - lat2) * 111.0, (lon1 - lon2) * 111.0 * coslat)
 
 
-def _trip_km(home: tuple[float, float], stores: list[StoreInfo]) -> float:
+# The alternatives ranking re-optimises one basket per candidate product, and
+# every candidate visits the same few store subsets: remembering each loop
+# turns the permutation search into a lookup after the first candidate.
+# StoreInfo is frozen, so a tuple of them is a key; a store whose location
+# changed is a different StoreInfo and misses the cache.
+@lru_cache(maxsize=4096)
+def _trip_km(home: tuple[float, float], stores: tuple[StoreInfo, ...]) -> float:
     """Shortest loop home -> every store -> home. Exact: brute force over
-    permutations (fine for the store counts we enumerate)."""
+    permutations (fine for the store counts we enumerate). `stores` is a
+    tuple so the result can be cached."""
     if not stores:
         return 0.0
     best = math.inf
@@ -101,7 +109,7 @@ def optimize_trips(matrix_rows: list[dict], basket: list[tuple[int, str]],
             if not feasible:
                 continue
             used = sorted({assignment[pid] for pid, _ in basket}, key=lambda s: s.id)
-            travel_km = _trip_km(home, used)
+            travel_km = _trip_km(home, tuple(used))
             total = basket_cost + travel_km * cost_per_km
             option = TripOption(
                 stores=[s.name for s in used],

@@ -187,6 +187,21 @@ async def test_each_line_says_where_the_recommended_trip_buys_it():
     assert all(line["trip_store"] == "" and line["trip_price"] is None for line in lines)
 
 
+def test_a_plan_times_its_pipeline_steps_and_the_store_list_is_served():
+    from fastapi.testclient import TestClient
+
+    from pantry_planner import flow
+    from pantry_planner.api import app
+
+    plan = flow.run("tomato_penne", **DOWNTOWN, max_km=5)
+    steps = [s["step"] for s in plan.pipeline]
+    assert steps[0] == "load_recipe" and steps[-1] == "build_plan" and "optimize_trips" in steps
+    assert all(s["ms"] is not None and s["ms"] >= 0 and s["error"] is None for s in plan.pipeline)
+    stores = TestClient(app).get("/stores").json()
+    assert {"Pantry Mart Downtown", "GreenLeaf Grocers Kitsilano"} <= {s["name"] for s in stores}
+    assert all(-90 <= s["lat"] <= 90 for s in stores)
+
+
 def test_every_plan_call_is_its_own_burr_run():
     from pantry_planner import flow, tracing
 

@@ -165,10 +165,18 @@ def test_the_span_counts_http_retries_and_the_step_shows_the_phases():
 
 
 def test_a_plan_carries_its_llm_calls_into_the_trace_and_the_mcp_summary(monkeypatch):
-    from pantry_planner import flow
+    from pantry_planner import flow, llm
     from pantry_planner.mcp_server import _summarize_plan
 
-    FakeProviders().install(monkeypatch)
+    fakes = FakeProviders().install(monkeypatch)
+
+    def slow_handler(request):
+        # A fake reply can come back in well under 0.5 ms, and phases are whole ms, so the
+        # one phase a mock transport has ("other") would round to 0 and be left out
+        time.sleep(0.002)
+        return fakes.gemini_handler(request)
+
+    monkeypatch.setattr(llm, "_transport", httpx.MockTransport(slow_handler))
     plan = flow.run("tomato_penne")
 
     [call] = plan.llm_calls

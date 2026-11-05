@@ -14,68 +14,21 @@ code that runs identically in both modes. Responses are labeled
 model_used="demo-deterministic" and the /health endpoint reports
 demo_mode so the UI can say so honestly.
 
-The stand-ins are deliberately simple (regex recipe parse; token-overlap
-+ price product ranking): good enough to drive the demo, visibly not
-the point of the project.
+The stand-ins are deliberately simple (regex recipe parse; the product
+choice takes the matcher's first candidate, or, for a line matched by words,
+the token-overlap + price ranking): good enough to drive the demo, visibly
+not the point of the project.
 """
 from __future__ import annotations
 
 import re
 
 from .models import Product, RecipeIngredient, Selection, SelectorResult
+from .nlsearch import lineparse
 from .nlsearch.schemas import Constraints, IngredientSpec, ParsedInput, RecipeSpec
-from .nlsearch.units import head_noun, index_text, tokens
+from .nlsearch.units import semantic_key
 
-# A leading amount: "2", "1.5", "1/4", "1 1/2", "1½", "¾", and a range's
-# lower end ("1 to 3", "1-3") — then an optional unit. Units normalize_quantity
-# knows become a size need; the rest (inch, pinch, bunch, ...) only count.
-_NUM = r"(?:\d+(?:\.\d+)?(?:\s+\d+/\d+|\s*[½¼¾⅓⅔⅛])?|\d+/\d+|[½¼¾⅓⅔⅛])"
-_QTY = re.compile(
-    rf"^({_NUM})(?:\s*(?:-|–|to)\s*{_NUM})?\s*"
-    r"(g|grams?|kg|kilograms?|ml|millilit(?:er|re)s?|l|lit(?:er|re)s?|lbs?|pounds?"
-    r"|oz|ounces?|cups?|cans?|cloves?|dozen|tbsps?|tablespoons?|tsps?|teaspoons?"
-    r"|inch(?:es)?|thumbs?|pinch(?:es)?|bunch(?:es)?|sprigs?|slices?|pieces?|heads?"
-    r"|stalks?|handfuls?)?\.?(?=\s|$)\s*",
-    re.IGNORECASE)
-_FRACTIONS = {"½": 0.5, "¼": 0.25, "¾": 0.75, "⅓": 1 / 3, "⅔": 2 / 3, "⅛": 0.125}
-_FORMS = {"canned", "frozen", "dried", "ground", "smoked", "pickled", "powdered"}
-# What the COOK does, kept out of the name as the live parser keeps it out
-# ("1 cup chopped cilantro" buys cilantro). Purchase descriptors — boneless,
-# skinless, whole, unsalted, smoked, low-sodium — stay in the name, as the
-# live parser keeps them: they decide which product to buy. "crushed" is not
-# here: Crushed Tomatoes and Crushed Red Pepper Flakes are products.
-_PREP = {"chopped", "sliced", "minced", "diced", "shredded", "grated", "mashed",
-         "peeled", "cubed", "julienned", "finely", "thinly", "roughly", "freshly",
-         "fine"}
-# "5 garlic cloves", "2 thyme sprigs": the count word comes after the name
-_TRAILING_COUNT = {"clove", "cloves", "sprig", "sprigs", "stalk", "stalks"}
 _TAGS = ("dairy", "gluten", "meat", "nuts", "egg", "soy")
-
-
-def _amount(text: str) -> float:
-    """"1 1/2" -> 1.5, "1½" -> 1.5, "3/4" -> 0.75, "2" -> 2.0."""
-    total = 0.0
-    for part in re.findall(r"\d+/\d+|\d+(?:\.\d+)?|[½¼¾⅓⅔⅛]", text):
-        if part in _FRACTIONS:
-            total += _FRACTIONS[part]
-        elif "/" in part:
-            num, den = part.split("/")
-            total += int(num) / int(den) if int(den) else 0.0
-        else:
-            total += float(part)
-    return round(total, 4)
-
-
-def _strip_notes(item: str) -> tuple[str, str]:
-    """(item without parenthetical notes, the text after its first comma):
-    "garlic cloves (, thinly sliced)" -> ("garlic cloves", "");
-    "onion, finely chopped" -> ("onion", "finely chopped")."""
-    prev = None
-    while prev != item:                          # innermost groups first
-        prev, item = item, re.sub(r"\([^()]*\)", " ", item)
-    item = item.replace("(", " ").replace(")", " ")
-    head, _, rest = item.partition(",")
-    return " ".join(head.split()), " ".join(rest.split())
 
 
 def parse_recipe(text_input: str, *, model: str | None = None) -> ParsedInput:
@@ -83,13 +36,13 @@ def parse_recipe(text_input: str, *, model: str | None = None) -> ParsedInput:
     lines, and budget / distance / dietary constraints from a Notes line.
     Same failure contract as the real parser: empty parse, never raises.
 
-    Consistent with the live parser on what to buy: parenthetical notes and
-    the text after a comma are dropped, prep words go to `prep`, a leading
-    purchase form goes to `form`, and purchase descriptors stay in the name."""
+    Each line is read by nlsearch.lineparse.parse_line, which is consistent
+    with the live parser on what to buy (see there); this function decides
+    which lines are ingredient lines and reads the rest of the recipe."""
     lines = [ln.strip() for ln in text_input.splitlines() if ln.strip()]
     title = lines[0].split("(")[0].strip() if lines else "Pasted recipe"
-    m = re.search(r"serves\s+(\d+)", text_input, re.IGNORECASE)
-    servings = int(m.group(1)) if m else 1
+    stated = lineparse.parse_servings(text_input)
+    servings = stated if stated is not None else 1
 
     ingredients: list[IngredientSpec] = []
     notes = ""
@@ -99,28 +52,9 @@ def parse_recipe(text_input: str, *, model: str | None = None) -> ParsedInput:
             continue
         if not ln.startswith(("-", "*", "•")):
             continue
-        raw = ln.lstrip("-*• ").strip()
-        item, after_comma = _strip_notes(raw)
-        qty = unit = None
-        if qm := _QTY.match(item):
-            qty = _amount(qm.group(1))
-            unit = (qm.group(2) or "each").lower().rstrip(".")
-            item = item[qm.end():]
-            if not item.strip() and qm.group(2):     # "2 cloves": the unit IS the item
-                item, unit = qm.group(2), "each"
-        words = [w for w in item.lower().split() if w != "of"]
-        prep = [w for w in words if w in _PREP] + ([after_comma] if after_comma else [])
-        words = [w for w in words if w not in _PREP]
-        if unit == "each" and len(words) > 1 and words[-1] in _TRAILING_COUNT:
-            unit = words.pop()
-        form = None
-        if words and words[0] in _FORMS:
-            form = words.pop(0)
-        if unit and unit.startswith("can"):
-            form, unit = "canned", "can"
-        name = " ".join(words).strip() or item.strip() or raw
-        ingredients.append(IngredientSpec(name=name, form=form, quantity=qty, unit=unit,
-                                          prep=" ".join(prep) or None))
+        p = lineparse.parse_line(ln)
+        ingredients.append(IngredientSpec(name=p.name, form=p.form, quantity=p.quantity,
+                                          unit=p.unit, prep=p.prep))
 
     cons = Constraints()
     scope = notes or text_input
@@ -132,6 +66,7 @@ def parse_recipe(text_input: str, *, model: str | None = None) -> ParsedInput:
         if re.search(rf"no {tag}|{tag}[- ]free", scope, re.IGNORECASE):
             cons.exclude_tags.append(tag)
     return ParsedInput(recipe=RecipeSpec(title=title, servings=servings,
+                                         servings_stated=stated is not None,
                                          ingredients=ingredients),
                        constraints=cons, cost_usd=0.0, latency_ms=0)
 
@@ -146,12 +81,29 @@ def select_products(ingredients: list[RecipeIngredient],
                     enable_thinking: bool = False,
                     constraints: dict | None = None,
                     origins_by_id: dict | None = None,
-                    preference: list[str] | None = None) -> SelectorResult:
-    """Token-overlap, then "fresh" when the ingredient says it, then head
-    noun, then origin preference, then offer price; direct matches before
-    t4 substitutes. Confidence is fixed at 0.9
+                    preference: list[str] | None = None,
+                    substitutes: dict[int, list[int]] | None = None,
+                    order: dict[int, list[tuple[int, str]]] | None = None) -> SelectorResult:
+    """A line matched by meaning (`order`: line_no -> (product id, group) in the
+    matcher's order, matching/matcher.rank_pool) takes the first product of its
+    order that it is offered: the same item before what works instead, then
+    the matcher's score (relevance, form and variant, pack fit, value, origin
+    preference). A pick that only works instead says "substitution".
+
+    Any other line (matched by words): token-overlap, then "fresh" when the
+    ingredient says it, then head noun, then origin preference, then offer
+    price; direct matches before t4 substitutes.
+
+    Confidence is fixed at 0.9
     — above the cascade threshold, so demo mode never triggers a (would-be)
     escalation.
+
+    A t4 substitute is a substitute for the line whose thin pool fetched it,
+    not for every line: `substitutes` (line_no -> product ids, the NL and
+    spec paths) keeps each line's own substitutes out of that line's choice
+    only, so Fresh Ginger, fetched as a same-aisle substitute for garlic, is
+    still the pick for ginger. Without it (the library path, where nothing
+    is a substitute) the products' own flags are read.
 
     The head-noun key breaks overlap ties the way a shopper would: for
     "flour", All-Purpose Flour (about flour) beats Flour Tortillas (about
@@ -162,19 +114,32 @@ def select_products(ingredients: list[RecipeIngredient],
     origins_by_id = origins_by_id or {}
     preference = [c for c in (preference or []) if c.strip()]
     selections: list[Selection] = []
+    offered = {p.id for p in products}
     for ing in ingredients:
-        toks = set(tokens(ing.name))
-        want = tokens(ing.name)[-1] if tokens(ing.name) else None
-        # "fresh" is a tokenizer stopword (half the catalog says it), yet
-        # "fresh coriander" is cilantro, not ground coriander: read it raw.
-        fresh = "fresh" in ing.name.lower().split()
-        pool = [p for p in products if not p.substitute] or products
+        ranked = (order or {}).get(ing.line_no)
+        if ranked is not None:
+            pick_group = next(((pid, g) for pid, g in ranked if pid in offered), None)
+            if pick_group is None:
+                continue
+            pid, group = pick_group
+            why = ("demo mode: matched by meaning, the same item the matcher ranks first"
+                   if group == "same_item" else
+                   "demo mode: matched by meaning; no same item is offered, so a "
+                   "substitution: the product that works instead the matcher ranks first")
+            selections.append(Selection(line_no=ing.line_no, product_id=pid, confidence=0.9,
+                                        reasoning=why))
+            continue
+        if substitutes is None:
+            pool = [p for p in products if not p.substitute] or products
+        else:
+            subs = set(substitutes.get(ing.line_no, ()))
+            pool = [p for p in products if p.id not in subs] or products
         if not pool:
             continue
+        # semantic_key is the ranking the alternatives share: overlap, then
+        # "fresh", then head noun.
         pick = min(pool, key=lambda p: (
-            -len(toks & set(tokens(index_text(p.name, p.description)))),
-            0 if not fresh or "fresh" in f"{p.name} {p.description}".lower() else 1,
-            0 if want is not None and head_noun(p.name) == want else 1,
+            *semantic_key(ing.name, p),
             _preference_rank(origins_by_id.get(p.id), preference),
             p.store_price if p.store_price is not None else p.price,
             p.id))

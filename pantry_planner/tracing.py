@@ -13,8 +13,11 @@ section for each traced run.
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
+from typing import Any
 
+from burr.lifecycle import PostRunStepHook, PreRunStepHook
 from burr.tracking import LocalTrackingClient
 
 APP_NAME = "pantry-planner"
@@ -25,6 +28,26 @@ PROJECT_NAME = "pantry-planner"
 # point sets a home-dir path because MCP clients launch servers with an
 # arbitrary (possibly read-only) cwd.
 TRACKING_DB_DIR = Path(os.environ.get("BURR_TRACKING_DIR", ".burr"))
+
+
+class StepTimer(PreRunStepHook, PostRunStepHook):
+    """Times every action of one plan call, in order: the plan's `pipeline`, so a client sees
+    where pantry spent the call (selection, trip optimizer ...) without opening the Burr UI."""
+
+    def __init__(self) -> None:
+        self.steps: list[dict[str, Any]] = []
+        self._started: dict[int, float] = {}
+
+    def pre_run_step(self, *, sequence_id: int, **_: Any) -> None:
+        self._started[sequence_id] = time.perf_counter()
+
+    def post_run_step(self, *, action: Any, sequence_id: int, exception: Exception | None,
+                      **_: Any) -> None:
+        started = self._started.pop(sequence_id, None)
+        self.steps.append({
+            "step": action.name,
+            "ms": None if started is None else round((time.perf_counter() - started) * 1000, 1),
+            "error": type(exception).__name__ if exception else None})
 
 
 def make_tracker() -> LocalTrackingClient:
