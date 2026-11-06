@@ -460,15 +460,36 @@ def select_products(state: State) -> tuple[dict, State]:
                      plan_trace=_with_llm_step(state, span))
 
 
-@action(reads=["initial_result"], writes=["escalation_decision"])
+@action(reads=["initial_result", "match_order"], writes=["escalation_decision"])
 def check_escalation(state: State) -> tuple[dict, State]:
     router = get_router()
     decision: EscalationDecision = router.should_escalate(state["initial_result"])
+    if router.name == "cascade":
+        decision = _with_matcher_flags(decision, state["initial_result"],
+                                       state.get("match_order"))
     return {
         "escalate": decision.escalate,
         "n_ingredients_to_rerun": len(decision.ingredients_to_rerun),
         "reason": decision.reason,
     }, state.update(escalation_decision=decision)
+
+
+def _with_matcher_flags(decision: EscalationDecision, result: SelectorResult,
+                        order: dict | None) -> EscalationDecision:
+    """The cascade's decision, with every line the matcher's order flags (router/signals.py)
+    re-run too, whatever confidence the selector gave it."""
+    from .router.signals import matcher_flags
+
+    flags = matcher_flags(result, order)
+    extra = sorted(n for n in flags if n not in decision.ingredients_to_rerun)
+    if not extra:
+        return decision
+    words = ", ".join(f"line {n} {flags[n].replace('_', ' ')}" for n in extra)
+    return EscalationDecision(
+        escalate=True,
+        ingredients_to_rerun=sorted({*decision.ingredients_to_rerun, *extra}),
+        escalation_model=decision.escalation_model or settings().selector_model_escalation,
+        reason=f"{decision.reason}; matcher: {words}")
 
 
 @action(
