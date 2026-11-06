@@ -64,3 +64,50 @@ def test_ndcg_weighs_labels_as_the_esci_paper_does():
     assert ndcg([3, 2, 1], labels) < ndcg([2, 1, 3], labels) < ndcg([1, 2, 4], labels)
     assert ndcg([], labels) == 0.0
     assert ndcg([9], {9: "I"}) == 0.0            # nothing to gain: no ideal
+
+
+def test_the_paired_bootstrap_is_reproducible_and_centred_on_the_difference():
+    from evals.substitutes_eval import paired_bootstrap
+
+    a = [0.5, 0.9, 1.0, 0.7, 0.8]
+    same = paired_bootstrap(a, a, reps=500)
+    assert same["diff"] == (0.0, 0.0) and same["p_not_better"] == 1.0
+    up = paired_bootstrap(a, [x + 0.1 for x in a], reps=500)
+    assert abs(up["diff_mean"] - 0.1) < 1e-9
+    assert up["diff"][0] > 0 and up["p_not_better"] == 0.0
+    assert paired_bootstrap(a, a[::-1], reps=500) == paired_bootstrap(a, a[::-1], reps=500)
+
+
+def test_with_the_exact_item_missing_the_first_safe_offer_is_scored():
+    from evals.substitutes_eval import missing_exact
+    from pantry_planner.models import Product
+
+    def p(pid, name, tags=""):
+        return Product(id=pid, name=name, description="", price=1.0, category="pantry",
+                       dietary_tags=tags)
+
+    # ids no catalog product has: seeds/allergens.json is read by product id
+    a, b, c, d, e = 9001, 9002, 9003, 9004, 9005
+    catalog = {a: p(a, "Penne", "gluten"), b: p(b, "Gluten-Free Penne"),
+               c: p(c, "Spaghetti", "gluten"), d: p(d, "Rice Noodles"), e: p(e, "Pesto", "nuts")}
+    labels = {a: "E", b: "E", c: "S", d: "S", e: "C"}
+    # the plan bought Penne (this method's first E): spaghetti adds nothing, so it is offered
+    got = missing_exact([a, b, c, d, e], labels, catalog)
+    assert got["sub"] and got["first"] == (c, "S") and not got["unsafe_before_rule"]
+    # the plan bought the gluten-free penne: spaghetti adds gluten, so rice noodles come first
+    got = missing_exact([b, a, c, d], labels, catalog)
+    assert got["first"] == (d, "S") and got["unsafe_before_rule"]
+    # nothing safe is left
+    got = missing_exact([b, c, e], {b: "E", c: "S", e: "C"}, catalog)
+    assert not got["offered"] and not got["sub"]
+    assert missing_exact([c], {c: "S"}, catalog) == {"applies": False}
+
+
+def test_with_the_exact_item_missing_meaning_offers_a_substitute_more_often_than_words():
+    """Measured 2026-11-05, with the reviewed allergens: words Sub@1 54%, meaning 74%
+    (evals/reports/substitutes.md)."""
+    from evals import substitutes_eval
+
+    share = substitutes_eval.score_missing()["share"]
+    assert share["meaning"]["sub"] >= share["words"]["sub"]
+    assert share["meaning"]["sub"] >= 0.70, share
