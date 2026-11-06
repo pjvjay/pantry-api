@@ -169,7 +169,9 @@ def meanings(items: list[tuple[str, str | None]]) -> list[Meaning]:
         else:
             texts = list(todo)
             try:
-                vectors = dict(zip(texts, embedder.embed(texts, "query"), strict=True))
+                agrees, why = _agrees(embedder)
+                if agrees:
+                    vectors = dict(zip(texts, embedder.embed(texts, "query"), strict=True))
             except embed.EmbedderUnavailableError as e:
                 why = str(e)
         for text, idxs in todo.items():
@@ -179,6 +181,13 @@ def meanings(items: list[tuple[str, str | None]]) -> list[Meaning]:
                           else Meaning(name=name, source="words", form=(form or "").lower(),
                                        why_words=why))
     return [m for m in out if m is not None]
+
+
+def _agrees(embedder) -> tuple[bool, str]:
+    """Whether `embedder` reproduces the seeds' vectors (OllamaEmbedder.agrees_with_seeds); an
+    embedder with no such check (a test's) is taken at its word."""
+    check = getattr(embedder, "agrees_with_seeds", None)
+    return check() if check is not None else (True, "")
 
 
 def meaning_of(name: str, form: str | None = None) -> Meaning:
@@ -452,10 +461,19 @@ def state() -> dict:
         up, detail = e.ping()
     else:
         up, detail = True, ""
+    agrees = None
+    if up and e is not None:
+        try:
+            agrees, why = _agrees(e)
+        except embed.EmbedderUnavailableError as err:
+            up, why = False, str(err)
+        if not up or not agrees:
+            up, detail = False, why
     return {"mode": "meaning" if s.profiles else "words", "profiles": len(s.profiles),
             "product_types": len(s.centroids), "seed_ingredients": len(s.ingredients),
             "embedding_model": s.model, "dims": s.dims,
             "embedder": getattr(e, "name", None), "embedder_up": up,
+            "embedder_matches_seeds": agrees,
             "unknown_names": "meaning" if up and s.centroids else "words",
             "detail": detail,
             "floors": {"exact": EXACT_FLOOR, "type": TYPE_FLOOR, "looser": LOOSER_FLOOR}}
