@@ -1,0 +1,12 @@
+{
+  "component": "pantry-api",
+  "image": "ghcr.io/pjvjay/pantry-api",
+  "baseline": "0.1.0",
+  "shipped_paths": [
+    "Dockerfile",
+    "pyproject.toml",
+    "pantry_planner/**",
+    "seeds/**"
+  ],
+  "build_workflow": ".github/workflows/build.yml"
+}
