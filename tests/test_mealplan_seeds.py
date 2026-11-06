@@ -157,6 +157,8 @@ def _all_meta() -> dict[str, dict]:
 
 
 def test_every_starter_and_library_recipe_has_a_slot_diets_and_contains():
+    from pantry_planner.mealplan import diets
+
     meta = _all_meta()
     assert set(STARTERS["library_meta"]) == set(LIBRARY)
     for key, m in meta.items():
@@ -164,8 +166,7 @@ def test_every_starter_and_library_recipe_has_a_slot_diets_and_contains():
         assert m["diets"] == [d for d in ("vegan", "vegetarian", "pescatarian")
                               if d in m["diets"]], key
         assert m["contains"] == sorted(set(m["contains"])), key
-        assert set(m["contains"]) <= {"dairy", "egg", "fish", "gluten", "honey", "meat", "nuts",
-                                      "soy"}
+        assert set(m["contains"]) <= set(diets.CONTAINS), key
 
 
 def test_every_starter_and_library_recipe_names_a_wikipedia_article_for_its_picture():
@@ -272,19 +273,24 @@ def test_a_lines_name_says_what_its_product_tags_leave_out():
 
     cases = {"White Chocolate": {"dairy"}, "Milk Chocolate": {"dairy"}, "Dark Chocolate": set(),
              "Whole Milk": {"dairy"}, "Coconut Milk": set(), "Oat Milk": set(),
-             "Peanut Butter and Jelly Jam": set(), "Butter": {"dairy"}, "Ghee": {"dairy"},
+             "Peanut Butter and Jelly Jam": {"peanuts", "nuts"}, "Butter": {"dairy"},
+             "Ghee": {"dairy"},
              "Paneer": {"dairy"}, "Plain Yogurt": {"dairy"}, "Cheddar Cheese": {"dairy"},
              "Eggs": {"egg"}, "Eggplant": set(), "Canned Tuna": {"fish"},
-             "Anchovies": {"fish"}, "Fish Sauce": {"fish"}, "Raw Shrimp": {"fish"},
+             "Anchovies": {"fish"}, "Fish Sauce": {"fish"}, "Raw Shrimp": {"fish", "shellfish"},
              "Chicken Stock": {"meat"}, "Pepperoni": {"meat"}, "Vegan Sausage": set(),
-             "Beefsteak Tomatoes": set(), "Liquid Honey": {"honey"}}
+             "Beefsteak Tomatoes": set(), "Liquid Honey": {"honey"},
+             # allergens a name says whatever word comes before it
+             "Toasted Sesame Oil": {"sesame"}, "Dijon Mustard": {"mustard"},
+             "Almond Milk": {"tree_nuts", "nuts"}, "Oyster Sauce": {"fish", "shellfish"}}
     for name, want in cases.items():
         assert diets.name_contains(name) == want, name
     assert diets.classify([("Liquid Honey", None)]) == (
         ["vegetarian", "pescatarian"], ["honey"])
     assert STARTERS["library_meta"]["pbj_sandwich"] == {
         "slot": "lunch", "diets": ["vegetarian", "pescatarian"],
-        "contains": ["dairy", "gluten", "nuts"], "image_wiki": "Peanut butter and jelly sandwich"}
+        "contains": ["dairy", "gluten", "nuts", "peanuts"],
+        "image_wiki": "Peanut butter and jelly sandwich"}
 
 
 def test_the_default_allies_are_countries_the_origin_rules_know():

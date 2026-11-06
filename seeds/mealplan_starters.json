@@ -134,6 +134,7 @@
         "egg",
         "gluten",
         "meat",
+        "sesame",
         "soy"
       ],
       "image_wiki": "Fried rice",
@@ -596,6 +597,7 @@
       ],
       "contains": [
         "gluten",
+        "sesame",
         "soy"
       ],
       "image_wiki": "Congee",
@@ -1089,6 +1091,7 @@
       "contains": [
         "fish",
         "gluten",
+        "sesame",
         "soy"
       ],
       "image_wiki": "Fish steak",
@@ -1178,7 +1181,8 @@
       "contains": [
         "dairy",
         "gluten",
-        "nuts"
+        "nuts",
+        "peanuts"
       ],
       "image_wiki": "Peanut butter and jelly sandwich"
     },

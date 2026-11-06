@@ -478,7 +478,7 @@ def test_a_draft_saved_before_the_budget_loads_with_no_budget_diet_or_avoid(exam
 
 @pytest.mark.parametrize("prefs", [{"budget": 0}, {"budget": -5}, {"budget": 10_000.01},
                                    {"diet": "keto"}, {"avoid": ["meat"]},
-                                   {"avoid": ["dairy"] * 6}])
+                                   {"avoid": ["dairy"] * 13}])
 def test_budget_diet_and_avoid_are_bounded(example, prefs):
     r = client().post("/mealplan/schedule", json={**example, "prefs": prefs})
     assert r.status_code == 422, prefs

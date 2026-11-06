@@ -143,8 +143,13 @@ GROUP_LABELS = {"same_item": "Same item", "works_instead": "Works instead",
 WORDS_NOTE = ("Matched by words: {why}. Products are found by the recipe's words until it can "
               "be matched by meaning again.")
 MEANING_NOTE = "Matched by meaning."
-# Contains-tags a hard rule reads (diets.product_contains, plus honey from the name).
-_TAGS = ("dairy", "egg", "fish", "gluten", "honey", "meat", "nuts", "soy")
+# Contains-tags a row's summary names (diets.product_contains, plus honey from the name): the
+# priority allergens (diets.ALLERGENS) and the diet tags. "nuts" is left out: peanuts and tree
+# nuts name it more exactly.
+_TAGS = ("dairy", "egg", "fish", "gluten", "honey", "meat", "mustard", "peanuts", "sesame",
+         "shellfish", "soy", "sulphites", "tree_nuts")
+# What "no new allergens" was checked against, said on the row so the claim is never wider than it.
+_CHECKED = "no new allergens (11 checked)"
 
 
 class BasisError(ValueError):
@@ -602,6 +607,17 @@ def contains(p: Product) -> set[str]:
     return raw | product_contains(p) | ({"honey"} if "honey" in tokens(p.name) else set())
 
 
+def _word(tag: str) -> str:
+    """A contains-tag as a shopper reads it: tree_nuts is "tree nuts"."""
+    return tag.replace("_", " ")
+
+
+def _words(tags: list[str]) -> list[str]:
+    """Tags as words, without "nuts" when peanuts or tree nuts say it more exactly."""
+    exact = {"peanuts", "tree_nuts"} & set(tags)
+    return [_word(t) for t in tags if not (t == "nuts" and exact)]
+
+
 def _and(words: list[str]) -> str:
     return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1]
 
@@ -615,7 +631,7 @@ def rule(p: Product, original: Product | None, forbid: set[str],
     tags = contains(p)
     bad = sorted(tags & forbid)
     if bad:
-        return "diet", bad, f"contains {_and(bad)}, which this plan leaves out"
+        return "diet", bad, f"contains {_and(_words(bad))}, which this plan leaves out"
     if c is not None:
         own = {t.strip() for t in (p.dietary_tags or "").split(",") if t.strip()}
         lacking = [t for t in c.require_tags if t not in own]
@@ -631,7 +647,7 @@ def rule(p: Product, original: Product | None, forbid: set[str],
         added = sorted(tags - contains(original))
         if added:
             return ("adds_tags", added,
-                    f"contains {_and(added)}, which {original.name} does not")
+                    f"contains {_and(_words(added))}, which {original.name} does not")
     return None
 
 
@@ -1263,7 +1279,8 @@ def _type_of(p: Product) -> str:
 
 def _summary(r: _Row, original: Product | None) -> str:
     """The row on one line: what it is, how its pack meets the need, and its allergens
-    against the plan's own product ("butter · 454 g covers 80 g · no new allergens")."""
+    against the plan's own product: "butter · 454 g covers 80 g · no new allergens (11
+    checked)"."""
     p = r.product
     size = p.unit_size or (_fmt_qty(p.unit_qty, p.unit_uom) if p.unit_qty else "")
     pack = r.pack_reason.text
@@ -1275,10 +1292,11 @@ def _summary(r: _Row, original: Product | None) -> str:
     tags = sorted(contains(p) & set(_TAGS))
     if original is not None:
         added = sorted(set(tags) - contains(original))
-        allergens = ("no new allergens" if not added
-                     else f"adds {_and(added)}")
+        allergens = (_CHECKED if not added
+                     else f"adds {_and(_words(added))}")
     else:
-        allergens = f"contains {_and(tags)}" if tags else "no listed allergens"
+        allergens = (f"contains {_and(_words(tags))}" if tags
+                     else "none of 11 allergens checked")
     return " · ".join(x for x in (_type_of(p), pack[:1].lower() + pack[1:], allergens) if x)
 
 
