@@ -39,6 +39,12 @@ QUERY_PROMPT = "task: search result | query: "
 DOCUMENT_PROMPT = "title: {title} | text: "
 TIMEOUT = httpx.Timeout(20.0, connect=1.5)
 RETRY_AFTER_S = 60.0
+# The seeds' vectors were made by one build of the model, with these prompts. A live embedder
+# must reproduce them before its vectors are compared with them: a seed ingredient name is
+# embedded (never from the disk cache) and must come back this close to its committed vector.
+# The same model and prompt give ~1.0 (the seeds are rounded to 5 decimals); another model, a
+# different quantization or a changed prompt moves it well below.
+PROBE_MIN = 0.99
 PING_EVERY_S = 30.0
 
 Kind = Literal["query", "document"]
@@ -94,6 +100,7 @@ class OllamaEmbedder:
         self.down_since: float | None = None
         self.last_error = ""
         self._ping: tuple[float, tuple[bool, str]] | None = None
+        self._agrees: tuple[bool, str] | None = None
 
     # ── disk cache: one JSON line per text, read once ──
     def _cache_file(self) -> Path | None:
@@ -170,6 +177,32 @@ class OllamaEmbedder:
             raise EmbedderUnavailableError(f"{self.name} is unreachable ({self.last_error})") from e
         self.down_since, self.last_error = None, ""
         return out
+
+    def agrees_with_seeds(self) -> tuple[bool, str]:
+        """(whether this embedder reproduces the seeds' vectors, why not): the model the seeds
+        name, and one seed ingredient's vector within PROBE_MIN of its committed one. Asked
+        once per process when it answers; EmbedderUnavailableError when it cannot be reached
+        (and is not remembered, so a later call asks again)."""
+        if self._agrees is not None:
+            return self._agrees
+        from . import seeds as _seeds
+
+        s = _seeds.load()
+        if s.model and s.model != self.model:
+            self._agrees = (False, f"the seeds were embedded with {s.model!r}, not {self.model!r}")
+            return self._agrees
+        probe = min((i for i in s.ingredients.values() if i.vector), key=lambda i: i.name,
+                    default=None)
+        if probe is None:
+            self._agrees = (True, "")
+            return self._agrees
+        got = self._request([prompt(probe.name, "query")])[0]
+        cos = cosine(got, probe.vector)
+        self._agrees = ((True, "") if cos >= PROBE_MIN else
+                        (False, f"{self.name} does not reproduce the seeds' vectors (cosine "
+                                f"{cos:.3f} for {probe.name!r}, at least {PROBE_MIN} needed): "
+                                "another build of the model or another prompt"))
+        return self._agrees
 
     def ping(self) -> tuple[bool, str]:
         """(whether Ollama answers and has the model, why not), from GET /api/tags, at most
