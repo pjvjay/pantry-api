@@ -33,6 +33,7 @@ from __future__ import annotations
 import contextlib
 import json
 import math
+import random
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -154,6 +155,148 @@ def score() -> dict:
     return {"rows": rows, "mean": mean, "n": len(rows), "catalog": catalog}
 
 
+# ─── How sure the means are ──────────────────────────────────
+
+BOOTSTRAP = 10_000
+SEED = 20261105
+
+
+def paired_bootstrap(a: list[float], b: list[float], *, reps: int = BOOTSTRAP,
+                     seed: int = SEED) -> dict:
+    """95% intervals for the means of `a` and `b` and of b - a, resampling the ingredient
+    names (paired: one draw picks the same names for both methods), and the share of draws
+    where b does not beat a. Fixed seed, so the report is reproducible."""
+    assert len(a) == len(b) and a
+    rng = random.Random(seed)
+    n = len(a)
+    ma, mb, md = [], [], []
+    for _ in range(reps):
+        idx = [rng.randrange(n) for _ in range(n)]
+        sa = sum(a[i] for i in idx) / n
+        sb = sum(b[i] for i in idx) / n
+        ma.append(sa)
+        mb.append(sb)
+        md.append(sb - sa)
+
+    def ci(xs: list[float]) -> tuple[float, float]:
+        xs = sorted(xs)
+        return xs[int(0.025 * (len(xs) - 1))], xs[int(0.975 * (len(xs) - 1))]
+
+    return {"a": ci(ma), "b": ci(mb), "diff": ci(md),
+            "diff_mean": sum(b) / n - sum(a) / n,
+            "p_not_better": sum(d <= 0 for d in md) / reps}
+
+
+# ─── When the exact item is missing ──────────────────────────
+# What Options are for: the ingredient's own products are out of stock or excluded, so the
+# shopper takes the first thing offered instead. Every product the judge labelled E is taken
+# out, the hard rule Options apply is applied (no product that adds an allergen or diet tag
+# the exact item lacks; alternatives.rule), and the first product left is scored:
+#   Sub@1    it is labelled S (works instead in the recipe line)
+#   Safe@1   it adds no tag (always true after the rule; reported before it, to show what the
+#            rule catches)
+#   Offered  anything is left at all
+# A product neither method ranked in its top 20 has no label and counts as not S.
+
+GAINS_MISSING = {"S": 1.0, "C": 0.01, "I": 0.0}
+
+
+def missing_exact(ranked: list[int], labels: dict[int, str], catalog: dict) -> dict:
+    from pantry_planner.alternatives import rule
+
+    exact = sorted(pid for pid, lab in labels.items() if lab == "E" and pid in catalog)
+    left = [pid for pid in ranked if labels.get(pid) != "E"]
+    if not exact:
+        return {"applies": False}
+    # The product the plan would have bought: this method's first exact product, else the
+    # lowest-id one; the rule compares substitutes against what was actually missing.
+    original = catalog[next((pid for pid in ranked if pid in exact), exact[0])]
+    unsafe_first = bool(left) and rule(catalog[left[0]], original, set()) is not None
+    safe = [pid for pid in left if rule(catalog[pid], original, set()) is None]
+    first = safe[0] if safe else None
+    return {"applies": True, "offered": first is not None,
+            "sub": first is not None and labels.get(first) == "S",
+            "unsafe_before_rule": unsafe_first,
+            "first": (first, labels.get(first, "?")) if first is not None else None}
+
+
+def score_missing(catalog: dict | None = None) -> dict:
+    """Both methods with the exact items gone (missing_exact), per name and as shares."""
+    from pantry_planner import db
+
+    catalog = catalog or {p.id: p for p in db.load_all_products()}
+    rows = []
+    for name, labels in load_golden().items():
+        row = {"name": name}
+        for method, rank in (("words", rank_words), ("meaning", rank_meaning)):
+            row[method] = missing_exact(rank(name, catalog), labels, catalog)
+        if row["words"]["applies"]:
+            rows.append(row)
+    n = len(rows) or 1
+    share = {m: {k: sum(r[m][k] for r in rows) / n
+                 for k in ("sub", "offered", "unsafe_before_rule")}
+             for m in ("words", "meaning")}
+    return {"rows": rows, "share": share, "n": len(rows)}
+
+
+def _uncertainty_lines(s: dict) -> list[str]:
+    rows = s["rows"]
+    nd = paired_bootstrap([r["words"]["ndcg"] for r in rows], [r["meaning"]["ndcg"] for r in rows])
+    ht = paired_bootstrap([float(r["words"]["hit"]) for r in rows],
+                          [float(r["meaning"]["hit"]) for r in rows])
+
+    def iv(t: tuple[float, float], pct: bool = False) -> str:
+        return f"{t[0]:.0%}–{t[1]:.0%}" if pct else f"{t[0]:.3f}–{t[1]:.3f}"
+
+    return [
+        "## How sure these numbers are",
+        "",
+        f"95% intervals from a paired bootstrap over the {s['n']} names ({BOOTSTRAP:,} draws,",
+        "seed fixed). The difference is meaning minus words on the same names.",
+        "",
+        "| Metric | Words | Meaning | Difference | Draws where meaning is not better |",
+        "|---|---|---|---|---|",
+        f"| nDCG@3 | {iv(nd['a'])} | {iv(nd['b'])} | {nd['diff_mean']:+.3f} ({iv(nd['diff'])}) "
+        f"| {nd['p_not_better']:.1%} |",
+        f"| Hit@1 | {iv(ht['a'], True)} | {iv(ht['b'], True)} | {ht['diff_mean']:+.1%} "
+        f"({iv(ht['diff'], True)}) | {ht['p_not_better']:.1%} |",
+        "",
+        "Caveats: the same Gemini family wrote the product profiles and judged the labels, and",
+        "the matcher's weights were tuned on this set, so these are optimistic for new names.",
+        "",
+    ]
+
+
+def _missing_lines(m: dict, catalog: dict) -> list[str]:
+    w, me = m["share"]["words"], m["share"]["meaning"]
+    lines = [
+        "## When the exact item is missing",
+        "",
+        f"{m['n']} names with an exact product: every product labelled E removed, Options' hard",
+        "rule applied (nothing that adds an allergen or diet tag the exact item lacks), and the",
+        "first product left scored. Unlabelled products count as not a substitute.",
+        "",
+        "| Method | Sub@1 (first offer works instead) | Something offered "
+        "| First offer would add an allergen without the rule |",
+        "|---|---|---|---|",
+        f"| Words | {w['sub']:.0%} | {w['offered']:.0%} | {w['unsafe_before_rule']:.0%} |",
+        f"| Meaning | {me['sub']:.0%} | {me['offered']:.0%} | {me['unsafe_before_rule']:.0%} |",
+        "",
+        "| Ingredient | Words: first offer | Meaning: first offer |",
+        "|---|---|---|",
+    ]
+
+    def first(x: dict) -> str:
+        if not x["first"]:
+            return "nothing"
+        pid, lab = x["first"]
+        return f"{catalog[pid].name} ({lab})"
+
+    for r in sorted(m["rows"], key=lambda r: r["name"]):
+        lines.append(f"| {r['name']} | {first(r['words'])} | {first(r['meaning'])} |")
+    return lines + [""]
+
+
 def main() -> int:
     s = score()
     catalog = s["catalog"]
@@ -171,6 +314,8 @@ def main() -> int:
         f"| Words (today's fallback) | {w['ndcg']:.3f} | {w['hit']:.0%} |",
         f"| Meaning (EmbeddingGemma + Gemini seeds) | {m['ndcg']:.3f} | {m['hit']:.0%} |",
         "",
+        *_uncertainty_lines(s),
+        *_missing_lines(score_missing(catalog), catalog),
         "## Per ingredient",
         "",
         "| Ingredient | Words nDCG@3 | Words top 3 | Meaning nDCG@3 | Meaning top 3 |",
@@ -188,6 +333,9 @@ def main() -> int:
     (REPORTS / "substitutes.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"words   nDCG@3 {w['ndcg']:.3f}  Hit@1 {w['hit']:.0%}")
     print(f"meaning nDCG@3 {m['ndcg']:.3f}  Hit@1 {m['hit']:.0%}")
+    ms = score_missing(catalog)["share"]
+    print(f"exact missing: words Sub@1 {ms['words']['sub']:.0%}, "
+          f"meaning Sub@1 {ms['meaning']['sub']:.0%}")
     print(f"wrote {REPORTS / 'substitutes.md'}")
     return 0
 

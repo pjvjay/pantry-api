@@ -361,7 +361,9 @@ def test_timing_times_the_trips_and_cooks_and_sets_each_kinds_reminders(frozen):
     trip = next(t for t in a["trips"])
     assert f"DTSTART;TZID=America/Vancouver:{trip['date'].replace('-', '')}T100000" in lines
     assert "BEGIN:VTIMEZONE" not in text
-    assert ics(a, timing=None) == ics(a)
+    # DTSTAMP is when each file was made, so two files a second apart differ only there
+    stamp = re.compile(r"DTSTAMP:\d{8}T\d{6}Z\r\n")
+    assert stamp.sub("", ics(a, timing=None)) == stamp.sub("", ics(a))
     r = post("/calendar/preview", a, timing={**timing, "timezone": "Mars/Olympus_Mons"})
     assert r.status_code == 422
 

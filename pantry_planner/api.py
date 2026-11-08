@@ -883,7 +883,7 @@ class MealPlanCatalogRequest(BaseModel):
 
     household_servings: int = Field(default=2, ge=1, le=20)
     diet: Diet = "any"
-    avoid: list[Avoid] = Field(default_factory=list, max_length=5)
+    avoid: list[Avoid] = Field(default_factory=list, max_length=12)
     settings: PlanSettings = Field(default_factory=PlanSettings)
     slots: list[Slot] | None = Field(default=None, min_length=1, max_length=4)
     recipes: list[RecipeRef] = Field(default_factory=list, max_length=MAX_OWN_RECIPES)
