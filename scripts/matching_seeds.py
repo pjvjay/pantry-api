@@ -385,15 +385,13 @@ def cmd_gemini_vectors(g: Gemini, args) -> None:
     prof = json.loads((SEEDS / "product_profiles.json").read_text())["products"]
     types = json.loads((SEEDS / "ingredient_types.json").read_text())["ingredients"]
     model = args.gemini_embedding_model.split(":", 1)[-1]
-    e = emb.GeminiEmbedder(model, os.environ.get("GEMINI_API_KEY", ""))
+    e = emb.GeminiEmbedder(model, os.environ.get("GEMINI_API_KEY", ""), max_wait_s=600.0)
     p_text = [mseeds.identity_text(p["product_type"], p["form"], p["variant"]) for p in prof]
     i_text = {k: mseeds.identity_text(i["exact_types"][0] if i["exact_types"] else i["name"],
                                       i["form"], i["variant"]) for k, i in types.items()}
     texts = list(dict.fromkeys(p_text + list(i_text.values())))
     vec: dict[str, list[float]] = {}
-    for i in range(0, len(texts), 50):
-        chunk = texts[i:i + 50]
-        vec.update(zip(chunk, e.embed(chunk), strict=True))
+    vec.update(zip(texts, e.embed(texts), strict=True))
     _write(SEEDS / mseeds.GEMINI_VECTORS, {
         "v": 1, "model": model, "dims": emb.GEMINI_DIMS, "text": "identity",
         "about": mseeds.GEMINI_ABOUT,

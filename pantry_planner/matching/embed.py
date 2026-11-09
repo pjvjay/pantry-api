@@ -26,8 +26,10 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import threading
 import time
+from collections import deque
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal, Protocol
@@ -225,6 +227,31 @@ class OllamaEmbedder:
 
 GEMINI_DIMS = 768
 GEMINI_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
+# Texts per request. Gemini counts every text of a request against its quotas, and the free tier
+# allows 100 texts a minute and 1,000 a day (measured 2026-11-09: a 20-text request got HTTP 429
+# "requests per minute ... limit: 100" seconds after a 1-text one passed), so a call for more
+# texts is sent in parts, each kept as it arrives, paced to MATCHING_EMBED_TEXTS_PER_MINUTE.
+GEMINI_BATCH = 20
+GEMINI_TEXTS_PER_MINUTE = 100
+GEMINI_RETRIES = 2            # more attempts after a refusal naming a short delay (scripts)
+_monotonic = time.monotonic   # the Gemini embedder's clock and sleep: tests replace them
+_sleep = time.sleep
+
+
+def _gemini_error(resp) -> tuple[str, float | None]:
+    """Gemini's error message, shortened so a refusal says why (which quota, per minute or per
+    day), and the delay it asks for ("Please retry in 56.8s", "retry in 21h17m36.85s"), when
+    it gives one."""
+    try:
+        msg = " ".join(str(resp.json()["error"]["message"]).split())
+    except Exception:  # noqa: BLE001 - any body shape: the status alone must do
+        return "", None
+    m = re.search(r"retry in (?:(\d+)h)?(?:(\d+)m)?([0-9.]+)s", msg)
+    delay = (int(m.group(1) or 0) * 3600 + int(m.group(2) or 0) * 60 + float(m.group(3))
+             if m else None)
+    quota = re.search(r"Quota exceeded for metric: \S+, limit: \d+.*?(?=\. See |\. Please|$)", msg)
+    text = (quota.group(0) if quota else msg)[:200]
+    return (f": {text}" if text else ""), delay
 
 
 class GeminiEmbedder:
@@ -233,19 +260,27 @@ class GeminiEmbedder:
     Its vectors are compared only with seeds/gemini_vectors.json's (seeds.py), whose texts are
     identity strings, so `kind` and `titles` are not sent: the endpoint has no task types.
 
-    Each text counts as one request against Gemini's quota (the free tier allows 1,000 a day),
-    so every vector is kept in the database cache (matching/cache.py) and the day's allowance
-    is counted before a request is made."""
+    Each text counts as one request against Gemini's quotas (the free tier allows 100 a minute
+    and 1,000 a day), so every vector is kept in the database cache (matching/cache.py), the
+    day's allowance is counted before a request is made, and requests are paced to `per_minute`
+    texts: a call that would have to wait longer than `max_wait_s` for room fails instead
+    (the app's default, 0, so an import falls back to words for the rest rather than stall;
+    scripts wait). After a refusal nothing is asked until the delay Gemini named has passed
+    (RETRY_AFTER_S when it named none)."""
 
     def __init__(self, model: str, api_key: str, base_url: str = "",
-                 transport: httpx.BaseTransport | None = None):
+                 transport: httpx.BaseTransport | None = None,
+                 per_minute: int = GEMINI_TEXTS_PER_MINUTE, max_wait_s: float = 0.0):
         self.model = model
         self.api_key = api_key
         self.url = (base_url or "https://generativelanguage.googleapis.com/v1beta/openai").rstrip("/")
         self.name = f"{model} via Gemini"
         self._transport = transport
-        self.down_since: float | None = None
+        self.per_minute = max(0, per_minute)      # 0 = unpaced (a paid key)
+        self.max_wait_s = max_wait_s
+        self.retry_at: float | None = None        # _monotonic() before which nothing is asked
         self.last_error = ""
+        self._sent: deque[tuple[float, int]] = deque()   # (when, texts) within the last minute
         self._agrees: tuple[bool, str] | None = None
 
     def _key(self, text: str) -> str:
@@ -267,27 +302,83 @@ class GeminiEmbedder:
                 found.update({k: v["vector"] for k, v in
                               cache.embeddings.get_many(keys[t] for t in todo).items()})
                 todo = [t for t in todo if keys[t] not in found]
-                if todo:
+                step = min(GEMINI_BATCH, self.per_minute or GEMINI_BATCH)
+                for i in range(0, len(todo), step):
+                    chunk = todo[i:i + step]
                     try:
-                        cache.budget().spend("embed_texts", len(todo))
-                    except cache.BudgetExceededError as e:
-                        raise EmbedderUnavailableError(f"{self.name}: {e}") from e
-                    fresh = self._request(todo)
+                        fresh = self._request_patiently(chunk)
+                    except (cache.BudgetExceededError, EmbedderUnavailableError) as e:
+                        kept = f"; {i} of {len(todo)} texts were embedded and kept" if i else ""
+                        why = str(e) if isinstance(e, EmbedderUnavailableError) else \
+                            f"{self.name}: {e}"
+                        raise EmbedderUnavailableError(why + kept) from e
                     rows = {keys[t]: {"model": self.model, "dims": GEMINI_DIMS, "text": t,
-                                      "vector": v} for t, v in zip(todo, fresh, strict=True)}
+                                      "vector": v} for t, v in zip(chunk, fresh, strict=True)}
                     cache.embeddings.put_many(rows)
                     found.update({k: v["vector"] for k, v in rows.items()})
         return [found[keys[t]] for t in texts]
 
+    def _request_patiently(self, chunk: list[str]) -> list[list[float]]:
+        """One chunk, within the minute's room and the day's allowance. A refusal that names a
+        short delay (Gemini's own count of the minute runs ahead of ours now and then) is
+        waited out and the chunk asked again, at most GEMINI_RETRIES times, while the wait fits
+        max_wait_s: so a script finishes, and the app gives up at once. Every attempt, refused
+        or not, counts against Gemini's day (measured 2026-11-09: a retry loop spent the whole
+        allowance), so the day's allowance is charged per attempt and a refusal that names the
+        day's quota is never retried."""
+        from . import cache
+
+        for attempt in range(GEMINI_RETRIES + 1):
+            self._wait_for_room(len(chunk))
+            cache.budget().spend("embed_texts", len(chunk))
+            try:
+                return self._request(chunk)
+            except EmbedderUnavailableError:
+                wait = (self.retry_at - _monotonic()) if self.retry_at is not None else None
+                if (attempt == GEMINI_RETRIES or wait is None or wait <= 0
+                        or wait > self.max_wait_s or "per day" in self.last_error):
+                    raise
+                _sleep(wait)
+                self.retry_at = None
+        raise AssertionError("unreachable")
+
+    def _wait_for_room(self, n: int) -> None:
+        """Waits until `n` more texts fit in the minute's allowance, or raises when that would
+        take longer than max_wait_s (the room opens as the texts sent a minute ago age out)."""
+        if not self.per_minute:
+            return
+        now = _monotonic()
+        while self._sent and now - self._sent[0][0] >= 60.0:
+            self._sent.popleft()
+        over = sum(c for _, c in self._sent) + n - self.per_minute
+        if over <= 0:
+            return
+        freed, until = 0, now
+        for when, count in self._sent:
+            freed += count
+            if freed >= over:
+                until = when + 60.0
+                break
+        wait = max(0.0, until - now)
+        if wait > self.max_wait_s:
+            raise EmbedderUnavailableError(
+                f"{self.name}: the minute's allowance of {self.per_minute} texts is spent, "
+                f"room for {n} more in {wait:.0f}s")
+        _sleep(wait)
+
     def _request(self, texts: list[str]) -> list[list[float]]:
+        """One request for `texts` (at most GEMINI_BATCH, within the minute's room)."""
         if not self.api_key:
             raise EmbedderUnavailableError("GEMINI_API_KEY is empty: Gemini embedding is off")
-        if self.down_since is not None and time.monotonic() - self.down_since < RETRY_AFTER_S:
+        if self.retry_at is not None and _monotonic() < self.retry_at:
             raise EmbedderUnavailableError(f"{self.name} is unavailable ({self.last_error})")
-        body = {"model": self.model, "input": texts, "dimensions": GEMINI_DIMS}
+        self._wait_for_room(len(texts))
+        self._sent.append((_monotonic(), len(texts)))
         try:
             with httpx.Client(timeout=GEMINI_TIMEOUT, transport=self._transport) as client:
-                resp = client.post(f"{self.url}/embeddings", json=body,
+                resp = client.post(f"{self.url}/embeddings",
+                                   json={"model": self.model, "input": texts,
+                                         "dimensions": GEMINI_DIMS},
                                    headers={"Authorization": f"Bearer {self.api_key}"})
             resp.raise_for_status()
             rows = resp.json()["data"]
@@ -295,11 +386,13 @@ class GeminiEmbedder:
                 raise ValueError(f"{len(rows)} embeddings for {len(texts)} texts")
             out = [truncate(r["embedding"], GEMINI_DIMS) for r in rows]
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:
-            self.down_since = time.monotonic()
-            status = getattr(getattr(e, "response", None), "status_code", None)
-            self.last_error = (f"HTTP {status}" if status else type(e).__name__)
+            resp = getattr(e, "response", None)
+            status = getattr(resp, "status_code", None)
+            reason, delay = _gemini_error(resp) if status else ("", None)
+            self.last_error = f"HTTP {status}{reason}" if status else type(e).__name__
+            self.retry_at = _monotonic() + (delay if delay is not None else RETRY_AFTER_S)
             raise EmbedderUnavailableError(f"{self.name} is unavailable ({self.last_error})") from e
-        self.down_since, self.last_error = None, ""
+        self.retry_at, self.last_error = None, ""
         return out
 
     def agrees_with_seeds(self) -> tuple[bool, str]:
@@ -348,7 +441,8 @@ def get_embedder() -> Embedder | None:
             cfg = settings()
             if cfg.embedding_model.startswith("gemini:"):
                 _embedder = GeminiEmbedder(cfg.embedding_model.split(":", 1)[1],
-                                           cfg.gemini_api_key, cfg.gemini_base_url)
+                                           cfg.gemini_api_key, cfg.gemini_base_url,
+                                           per_minute=cfg.matching_embed_texts_per_minute)
             else:
                 cache = Path(cfg.data_dir).expanduser() / "matching"
                 _embedder = (OllamaEmbedder(cfg.ollama_url, cfg.embedding_model, cache)

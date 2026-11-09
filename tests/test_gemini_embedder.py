@@ -49,6 +49,138 @@ def test_a_refusal_makes_it_unavailable_for_a_while_without_asking_again():
     assert len(asked) == 1
 
 
+def _clock(monkeypatch):
+    """A clock the embedder reads and a sleep that only advances it."""
+    from pantry_planner.matching import embed
+
+    now = {"t": 1000.0}
+    monkeypatch.setattr(embed, "_monotonic", lambda: now["t"])
+    monkeypatch.setattr(embed, "_sleep", lambda s: now.__setitem__("t", now["t"] + s))
+    return now
+
+
+def test_the_minutes_allowance_is_paced_and_a_call_beyond_it_keeps_what_it_got(monkeypatch):
+    """Gemini counts texts, 100 a minute on the free tier. In the app (max_wait_s 0) a call
+    for more than fits sends what fits, keeps those vectors, and fails for the rest with the
+    wait named; the kept ones are then served from the cache without a request."""
+    from pantry_planner.matching import embed
+
+    now = _clock(monkeypatch)
+    e, asked = _gemini(lambda t: [1.0] * 768)
+    e.per_minute, e.max_wait_s = 5, 0.0
+    texts = [f"pace {i} | jar | plain" for i in range(7)]
+    with pytest.raises(embed.EmbedderUnavailableError,
+                       match=r"allowance of 5 texts is spent, room for 2 more in 60s; "
+                             r"5 of 7 texts were embedded and kept"):
+        e.embed(texts)
+    assert [len(a["input"]) for a in asked] == [5]
+    assert len(e.embed(texts[:5])) == 5 and len(asked) == 1      # cached, no request
+    now["t"] += 60.0                                              # the minute has passed
+    assert len(e.embed(texts)) == 7 and [len(a["input"]) for a in asked] == [5, 2]
+
+
+def test_a_script_waits_for_the_minutes_room_instead(monkeypatch):
+    from pantry_planner.matching import embed
+
+    now = _clock(monkeypatch)
+    e, asked = _gemini(lambda t: [1.0] * 768)
+    e.per_minute, e.max_wait_s = 5, 600.0
+    before = now["t"]
+    assert len(e.embed([f"wait {i} | jar | plain" for i in range(12)])) == 12
+    assert [len(a["input"]) for a in asked] == [5, 5, 2]
+    assert now["t"] - before == pytest.approx(120.0)             # slept out two minutes
+    assert embed.GEMINI_BATCH == 20 and e.per_minute == 5         # chunks never exceed the room
+
+
+def test_a_refusal_naming_a_delay_is_honoured_and_explained(monkeypatch):
+    from pantry_planner.matching import embed
+
+    now = _clock(monkeypatch)
+    asked: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        asked.append(1)
+        if len(asked) == 1:
+            return httpx.Response(429, json={"error": {"code": 429, "message": (
+                "You exceeded your current quota.\n* Quota exceeded for metric: embed_content"
+                "_free_tier_requests, limit: 100 ... per minute ...\nPlease retry in 7.5s.")}})
+        n = len(json.loads(request.content)["input"])
+        return httpx.Response(200, json={"data": [{"embedding": [1.0] * 768}] * n})
+
+    e = embed.GeminiEmbedder("gemini-embedding-001", "k", "https://gemini.test/v1beta/openai",
+                             transport=httpx.MockTransport(handler))
+    with pytest.raises(embed.EmbedderUnavailableError,
+                       match="HTTP 429: Quota exceeded for metric: embed_content_free_tier_"
+                             "requests, limit: 100"):
+        e.embed(["kale | bunch | "])
+    now["t"] += 7.0                                               # still within the delay
+    with pytest.raises(embed.EmbedderUnavailableError, match="HTTP 429"):
+        e.embed(["kale | bunch | "])
+    assert len(asked) == 1
+    now["t"] += 1.0                                               # the delay has passed
+    assert len(e.embed(["kale | bunch | "])) == 1 and len(asked) == 2
+
+
+def test_a_script_waits_out_a_named_delay_and_asks_again(monkeypatch):
+    """Gemini's count of the minute can run ahead of ours: with max_wait_s a 429 naming a
+    delay is slept out and the same chunk is asked again, once; the day's allowance is charged
+    for both attempts (what Gemini may have counted)."""
+    from pantry_planner.matching import cache, embed
+
+    now = _clock(monkeypatch)
+    asked: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        n = len(json.loads(request.content)["input"])
+        asked.append(n)
+        if len(asked) == 1:
+            return httpx.Response(429, json={"error": {"code": 429, "message": (
+                "Quota exceeded for metric: embed_content_free_tier_requests, limit: 100, "
+                "model: gemini-embedding-1.0, description: ... per minute ... See x. "
+                "Please retry in 12.5s.")}})
+        return httpx.Response(200, json={"data": [{"embedding": [1.0] * 768}] * n})
+
+    e = embed.GeminiEmbedder("gemini-embedding-001", "k", "https://gemini.test/v1beta/openai",
+                             transport=httpx.MockTransport(handler), max_wait_s=600.0)
+    before = now["t"]
+    assert len(e.embed(["retry 1 | jar | ", "retry 2 | jar | "])) == 2
+    assert asked == [2, 2] and now["t"] - before == pytest.approx(12.5)
+    assert cache.budget().used("embed_texts") >= 4
+    e.max_wait_s = 0.0                                            # the app: no second try
+    asked.clear()
+    with pytest.raises(embed.EmbedderUnavailableError,
+                       match=r"HTTP 429: Quota exceeded for metric: \S+, limit: 100"):
+        e.embed(["retry 3 | jar | "])
+    assert asked == [1]
+
+
+def test_a_refusal_naming_the_days_quota_is_never_retried_and_lasts_until_it_resets(monkeypatch):
+    """Gemini counts refused attempts too, so after the day's quota a script must stop asking:
+    nothing is sent again until the delay Gemini named (hours) has passed."""
+    from pantry_planner.matching import embed
+
+    now = _clock(monkeypatch)
+    asked: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        asked.append(len(json.loads(request.content)["input"]))
+        return httpx.Response(429, json={"error": {"code": 429, "message": (
+            "You exceeded your current quota. * Quota exceeded for metric: generativelanguage."
+            "googleapis.com/embed_content_free_tier_requests, limit: 1000, model: gemini-"
+            "embedding-1.0, description: Embed content requests per day limit exceeded on Free "
+            "Tier. See https://x. Please retry in 21h17m36.850534475s.")}})
+
+    e = embed.GeminiEmbedder("gemini-embedding-001", "k", "https://gemini.test/v1beta/openai",
+                             transport=httpx.MockTransport(handler), max_wait_s=600.0)
+    with pytest.raises(embed.EmbedderUnavailableError, match="limit: 1000.*per day"):
+        e.embed(["day 1 | jar | "])
+    assert asked == [1] and e.retry_at - now["t"] == pytest.approx(21 * 3600 + 17 * 60 + 36.85)
+    now["t"] += 3600.0
+    with pytest.raises(embed.EmbedderUnavailableError, match="per day"):
+        e.embed(["day 2 | jar | "])
+    assert asked == [1], "nothing was sent again"
+
+
 def test_no_key_means_no_request():
     from pantry_planner.matching import embed
 

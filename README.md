@@ -103,6 +103,7 @@ Everything's env-var driven. Defaults in `pantry_planner/config.py`.
 | `EMBEDDING_MODEL`            | `embeddinggemma`                 | The embedding model: an Ollama model the EmbeddingGemma seeds were made with, or `gemini:gemini-embedding-001`, Gemini's embedding API (with `GEMINI_API_KEY`) against `seeds/gemini_vectors.json` |
 | `DESCRIBER_MODEL`            | *(unset: off)*                   | A model spec (`gemini:gemini-3.1-flash-lite`) that identifies an ingredient name no seed knows (its catalog type, form and variant) before it is matched; cached in the database (docs/meal-planning.md "Describing names no seed knows") |
 | `MATCHING_DAILY_EMBED_TEXTS`, `MATCHING_DAILY_DESCRIBE_CALLS` | `900`, `200` | The matcher's daily allowances of model requests, counted per UTC day across instances (`matching_usage`); Gemini's free tier allows 1,000 embedding texts a day. `0` = no limit |
+| `MATCHING_EMBED_TEXTS_PER_MINUTE` | `100` | How many texts a minute the Gemini embedder sends (the free tier's limit; each text of a request counts). A call for more waits in scripts and, in the app, falls back to words for the rest. `0` = unpaced, for a paid key |
 | `PANTRY_DATA_DIR`            | `~/.pantry-data`                 | The embedding cache and the matching event log (`matching/events.jsonl`) |
 | `MATCHING_EVENTS`            | `1`                              | `0` stops the shown / picked / passed-over log |
 

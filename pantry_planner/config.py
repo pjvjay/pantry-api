@@ -247,8 +247,11 @@ class Settings:
     # The matcher's daily allowance of model requests (matching/cache.py), counted per UTC day
     # across every instance: embedding texts (Gemini's free tier allows 1,000) and describer
     # calls. 0 = no limit. MATCHING_DAILY_EMBED_TEXTS, MATCHING_DAILY_DESCRIBE_CALLS.
+    # Gemini's embedding requests are also paced to MATCHING_EMBED_TEXTS_PER_MINUTE texts a
+    # minute (the free tier's limit; 0 = unpaced, for a paid key).
     matching_daily_embed_texts: int = 900
     matching_daily_describe_calls: int = 200
+    matching_embed_texts_per_minute: int = 100
     data_dir: str = "~/.pantry-data"
     matching_events: bool = True
 
@@ -306,6 +309,8 @@ class Settings:
             matching_daily_embed_texts=int(os.environ.get("MATCHING_DAILY_EMBED_TEXTS", "900")),
             matching_daily_describe_calls=int(
                 os.environ.get("MATCHING_DAILY_DESCRIBE_CALLS", "200")),
+            matching_embed_texts_per_minute=int(
+                os.environ.get("MATCHING_EMBED_TEXTS_PER_MINUTE", "100")),
             data_dir=os.environ.get("PANTRY_DATA_DIR", "").strip() or "~/.pantry-data",
             matching_events=os.environ.get("MATCHING_EVENTS", "1").strip().lower()
             not in {"0", "false", "no", "off"},

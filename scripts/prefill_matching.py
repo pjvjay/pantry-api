@@ -53,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     e = embed.get_embedder()
     if d is None or e is None:
         sys.exit("DESCRIBER_MODEL and EMBEDDING_MODEL (gemini:...) must both be set")
+    e.max_wait_s = 600.0    # a script waits for the minute's allowance; the app does not
 
     described = embedded = 0
     stopped = ""
