@@ -18,9 +18,11 @@ and shallots alike and pulls them together. The matcher (matcher.py) takes produ
 Same item when the catalog has it, compares form and variant as fields, and embeds the identity
 string (seeds.identity_text) for what works instead.
 
-Answers are cached by the describer's version, the model, the catalog's type list and the
-normalized name, so a name is described once; a failure is not cached. A model that cannot be
-reached raises DescriberUnavailableError, and the matcher falls back to embedding the bare name.
+Answers are cached (matching/cache.py: the database, with an in-process memo) by the
+describer's version, the model, the catalog's type list and the normalized name, so a name is
+described once; a failure is not cached. A model that cannot be reached, or a day's allowance
+of calls that is spent, raises DescriberUnavailableError, and the matcher falls back to
+embedding the bare name.
 """
 from __future__ import annotations
 
@@ -31,7 +33,7 @@ import threading
 import unicodedata
 from dataclasses import dataclass
 
-from . import seeds
+from . import cache, seeds
 
 PROMPT_VERSION = 1
 BATCH = 30
@@ -108,51 +110,72 @@ class Describer:
 
     def __init__(self, model: str):
         self.model = model
-        self._memo: dict[str, Identity] = {}
         self._lock = threading.Lock()
         self.calls = 0
         self.tokens_in = 0
         self.tokens_out = 0
 
     def key(self, name: str, fingerprint: str) -> str:
-        raw = f"{PROMPT_VERSION}|{self.model}|{fingerprint}|{normalize(name)}"
-        return hashlib.sha256(raw.encode()).hexdigest()
+        return cache.identity_key(PROMPT_VERSION, self.model, fingerprint, normalize(name))
+
+    @property
+    def cached(self) -> int:
+        return len(cache.identities.memo)
 
     def describe(self, names: list[str]) -> dict[str, Identity]:
-        """name -> Identity for every name (one model call per BATCH names not cached)."""
+        """name -> Identity for every name: from the cache (matching/cache.py), else one model
+        call per BATCH names, within the day's allowance of describer calls."""
         from .. import llm
 
         types, forms, fp = _catalog()
-        with self._lock:
-            todo = list(dict.fromkeys(n for n in names if self.key(n, fp) not in self._memo))
+        keys = {n: self.key(n, fp) for n in dict.fromkeys(names)}
+        found = cache.identities.get_many(keys.values())
+        todo = [n for n, k in keys.items() if k not in found]
         for i in range(0, len(todo), BATCH):
             chunk = todo[i:i + BATCH]
-            try:
-                result = llm.forced_tool_call(
-                    model=self.model, system=system_prompt(types, forms),
-                    messages=[{"role": "user", "content": json.dumps({"names": chunk})}],
-                    tool=TOOL, max_tokens=MAX_TOKENS)
-            except llm.LLMError as e:
-                raise DescriberUnavailableError(f"{self.model} is unavailable: {e}") from e
-            self.calls += 1
-            self.tokens_in += result.input_tokens
-            self.tokens_out += result.output_tokens
-            got = {normalize(it.get("name", "")): it for it in result.input.get("items", [])
-                   if isinstance(it, dict)}
-            with self._lock:
+            with cache.identities.lock(keys[chunk[0]]):      # one flight per first name
+                found.update(cache.identities.get_many(keys[n] for n in chunk))
+                chunk = [n for n in chunk if keys[n] not in found]
+                if not chunk:
+                    continue
+                try:
+                    cache.budget().spend("describe_calls", 1)
+                except cache.BudgetExceededError as e:
+                    raise DescriberUnavailableError(str(e)) from e
+                try:
+                    result = llm.forced_tool_call(
+                        model=self.model, system=system_prompt(types, forms),
+                        messages=[{"role": "user", "content": json.dumps({"names": chunk})}],
+                        tool=TOOL, max_tokens=MAX_TOKENS)
+                except llm.LLMError as e:
+                    raise DescriberUnavailableError(f"{self.model} is unavailable: {e}") from e
+                self.calls += 1
+                self.tokens_in += result.input_tokens
+                self.tokens_out += result.output_tokens
+                got = {normalize(it.get("name", "")): it for it in result.input.get("items", [])
+                       if isinstance(it, dict)}
+                fresh: dict[str, dict] = {}
                 for n in chunk:
                     it = got.get(normalize(n))
                     if not it or not str(it.get("product_type", "")).strip():
                         continue            # not answered: asked again next time
-                    self._memo[self.key(n, fp)] = Identity(
-                        name=n, product_type=str(it["product_type"]).strip().lower(),
-                        form=str(it.get("form", "")).strip().lower(),
-                        variant=str(it.get("variant", "")).strip().lower(),
-                        look_alikes=tuple(str(x).strip().lower() for x in it.get("look_alikes", [])
-                                          if str(x).strip())[:3])
-        with self._lock:
-            return {n: self._memo[self.key(n, fp)] for n in names
-                    if self.key(n, fp) in self._memo}
+                    ptype = str(it["product_type"]).strip().lower()
+                    form = str(it.get("form", "")).strip().lower()
+                    variant = str(it.get("variant", "")).strip().lower()
+                    fresh[keys[n]] = {
+                        "name": n, "normalized": normalize(n), "product_type": ptype,
+                        "form": form, "variant": variant,
+                        "look_alikes": tuple(str(x).strip().lower()
+                                             for x in it.get("look_alikes", [])
+                                             if str(x).strip())[:3],
+                        "identity": seeds.identity_text(ptype, form, variant),
+                        "model": self.model, "prompt_version": PROMPT_VERSION,
+                        "fingerprint": fp, "status": "auto"}
+                cache.identities.put_many(fresh)
+                found.update(fresh)
+        return {n: Identity(name=n, product_type=v["product_type"], form=v["form"],
+                            variant=v["variant"], look_alikes=tuple(v["look_alikes"]))
+                for n in names if (v := found.get(keys[n])) is not None}
 
 
 _describer: Describer | None = None

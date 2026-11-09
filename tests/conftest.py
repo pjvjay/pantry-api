@@ -29,13 +29,15 @@ def _no_embedder():
     when the embedder is down, unless a test installs a fake embedder (tests/fake_embedder.py)
     or a fake describer (tests/test_describe.py).
     The committed seeds are the matcher's only knowledge."""
-    from pantry_planner.matching import describe, embed
+    from pantry_planner.matching import cache, describe, embed
 
     embed.set_embedder(None)
     describe.set_describer(None)
+    cache.reset()
     yield
     embed.set_embedder(None)
     describe.set_describer(None)
+    cache.reset()
 
 
 @pytest.fixture(autouse=True)

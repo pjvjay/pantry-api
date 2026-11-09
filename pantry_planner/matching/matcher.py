@@ -70,7 +70,7 @@ from typing import Literal
 
 from ..models import Product
 from ..nlsearch.units import index_text, tokens
-from . import describe, embed, seeds
+from . import cache, describe, embed, seeds
 
 Group = Literal["same_item", "works_instead", "looser_match"]
 GROUPS: tuple[Group, ...] = ("same_item", "works_instead", "looser_match")
@@ -330,7 +330,7 @@ def describe_state() -> dict:
     if d is None:
         return {"model": None, "detail": "DESCRIBER_MODEL is empty: names no seed knows are "
                                           "embedded as they are"}
-    return {"model": d.model, "calls": d.calls, "cached": len(d._memo)}
+    return {"model": d.model, "calls": d.calls, "cached": d.cached}
 
 
 # ─── Candidates ──────────────────────────────────────────────
@@ -554,4 +554,5 @@ def state() -> dict:
             "unknown_names": "meaning" if up and s.centroids else "words",
             "detail": detail,
             "describer": describe_state(),
+            "cache": cache.state(),
             "floors": floors()}

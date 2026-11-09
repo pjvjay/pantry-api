@@ -8,6 +8,14 @@ import json
 import pytest
 
 from tests.fake_embedder import FakeEmbedder
+from tests.mealplan_fixtures import done_db, use_db
+
+
+@pytest.fixture(scope="module", autouse=True)
+def seeded_db(tmp_path_factory):
+    use_db(tmp_path_factory, "describe")
+    yield
+    done_db()
 
 BUTTER, PEANUT_BUTTER, GHEE = 18, 6, 95
 

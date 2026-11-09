@@ -276,6 +276,49 @@ class NutrientMeasureRow(Base):
     source_ref = Column(String, nullable=False, default="", server_default="")
 
 
+class IngredientIdentityRow(Base):
+    """0010_matching_cache — what the describer (matching/describe.py) said an ingredient
+    name is, kept so a name is described once. `key` hashes the prompt version, the model,
+    the catalog's type list and the normalized name; `status` is auto, reviewed or overridden
+    (a reviewed or overridden row is never replaced). look_alikes is a JSON list (text)."""
+    __tablename__ = "ingredient_identities"
+    key = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    normalized = Column(String, nullable=False, index=True)
+    product_type = Column(String, nullable=False)
+    form = Column(String, nullable=False, default="", server_default="")
+    variant = Column(String, nullable=False, default="", server_default="")
+    look_alikes = Column(String, nullable=False, default="[]", server_default="[]")
+    identity = Column(String, nullable=False)
+    model = Column(String, nullable=False)
+    prompt_version = Column(Integer, nullable=False)
+    catalog_fingerprint = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="auto", server_default="auto")
+    created_at = Column(String, nullable=False, default="", server_default="")
+
+
+class EmbeddingCacheRow(Base):
+    """0010_matching_cache — one embedded text (matching/cache.py): `key` hashes the model,
+    its dimensions and the text; `vector` is a JSON array of floats (text), the same on
+    SQLite and Postgres."""
+    __tablename__ = "embedding_cache"
+    key = Column(String, primary_key=True)
+    model = Column(String, nullable=False)
+    dims = Column(Integer, nullable=False)
+    text = Column(String, nullable=False)
+    vector = Column(String, nullable=False)
+    created_at = Column(String, nullable=False, default="", server_default="")
+
+
+class MatchingUsageRow(Base):
+    """0010_matching_cache — model requests made per UTC day and kind (embed_texts,
+    describe_calls), so every instance counts against one free-tier budget."""
+    __tablename__ = "matching_usage"
+    day = Column(String, primary_key=True)
+    kind = Column(String, primary_key=True)
+    count = Column(Integer, nullable=False, default=0, server_default="0")
+
+
 # ─── Engine / session helpers ────────────────────────────────
 
 @functools.lru_cache(maxsize=8)

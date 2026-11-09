@@ -234,7 +234,8 @@ class GeminiEmbedder:
     identity strings, so `kind` and `titles` are not sent: the endpoint has no task types.
 
     Each text counts as one request against Gemini's quota (the free tier allows 1,000 a day),
-    so vectors are kept in memory for the life of the process."""
+    so every vector is kept in the database cache (matching/cache.py) and the day's allowance
+    is counted before a request is made."""
 
     def __init__(self, model: str, api_key: str, base_url: str = "",
                  transport: httpx.BaseTransport | None = None):
@@ -243,21 +244,40 @@ class GeminiEmbedder:
         self.url = (base_url or "https://generativelanguage.googleapis.com/v1beta/openai").rstrip("/")
         self.name = f"{model} via Gemini"
         self._transport = transport
-        self._memo: dict[str, list[float]] = {}
-        self._lock = threading.Lock()
         self.down_since: float | None = None
         self.last_error = ""
         self._agrees: tuple[bool, str] | None = None
 
+    def _key(self, text: str) -> str:
+        from . import cache
+
+        return cache.embedding_key(self.model, GEMINI_DIMS, text)
+
     def embed(self, texts: list[str], kind: Kind = "query",
               titles: list[str] | None = None) -> list[list[float]]:
-        with self._lock:
-            todo = [t for t in dict.fromkeys(texts) if t not in self._memo]
+        """One unit vector per text: from the cache (matching/cache.py, every instance's
+        answers), else one request for the rest, within the day's allowance of texts."""
+        from . import cache
+
+        keys = {t: self._key(t) for t in dict.fromkeys(texts)}
+        found = {k: v["vector"] for k, v in cache.embeddings.get_many(keys.values()).items()}
+        todo = [t for t, k in keys.items() if k not in found]
         if todo:
-            fresh = self._request(todo)
-            with self._lock:
-                self._memo.update(zip(todo, fresh, strict=True))
-        return [self._memo[t] for t in texts]
+            with cache.embeddings.lock(keys[todo[0]]):
+                found.update({k: v["vector"] for k, v in
+                              cache.embeddings.get_many(keys[t] for t in todo).items()})
+                todo = [t for t in todo if keys[t] not in found]
+                if todo:
+                    try:
+                        cache.budget().spend("embed_texts", len(todo))
+                    except cache.BudgetExceededError as e:
+                        raise EmbedderUnavailableError(f"{self.name}: {e}") from e
+                    fresh = self._request(todo)
+                    rows = {keys[t]: {"model": self.model, "dims": GEMINI_DIMS, "text": t,
+                                      "vector": v} for t, v in zip(todo, fresh, strict=True)}
+                    cache.embeddings.put_many(rows)
+                    found.update({k: v["vector"] for k, v in rows.items()})
+        return [found[keys[t]] for t in texts]
 
     def _request(self, texts: list[str]) -> list[list[float]]:
         if not self.api_key:

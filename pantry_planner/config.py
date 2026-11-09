@@ -244,6 +244,11 @@ class Settings:
     ollama_url: str = "http://127.0.0.1:11434"
     embedding_model: str = "embeddinggemma"
     describer_model: str = ""
+    # The matcher's daily allowance of model requests (matching/cache.py), counted per UTC day
+    # across every instance: embedding texts (Gemini's free tier allows 1,000) and describer
+    # calls. 0 = no limit. MATCHING_DAILY_EMBED_TEXTS, MATCHING_DAILY_DESCRIBE_CALLS.
+    matching_daily_embed_texts: int = 900
+    matching_daily_describe_calls: int = 200
     data_dir: str = "~/.pantry-data"
     matching_events: bool = True
 
@@ -298,6 +303,9 @@ class Settings:
             ollama_url=os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").strip(),
             embedding_model=os.environ.get("EMBEDDING_MODEL", "").strip() or "embeddinggemma",
             describer_model=os.environ.get("DESCRIBER_MODEL", "").strip(),
+            matching_daily_embed_texts=int(os.environ.get("MATCHING_DAILY_EMBED_TEXTS", "900")),
+            matching_daily_describe_calls=int(
+                os.environ.get("MATCHING_DAILY_DESCRIBE_CALLS", "200")),
             data_dir=os.environ.get("PANTRY_DATA_DIR", "").strip() or "~/.pantry-data",
             matching_events=os.environ.get("MATCHING_EVENTS", "1").strip().lower()
             not in {"0", "false", "no", "off"},
