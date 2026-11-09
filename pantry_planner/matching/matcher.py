@@ -70,13 +70,13 @@ from typing import Literal
 
 from ..models import Product
 from ..nlsearch.units import index_text, tokens
-from . import embed, seeds
+from . import describe, embed, seeds
 
 Group = Literal["same_item", "works_instead", "looser_match"]
 GROUPS: tuple[Group, ...] = ("same_item", "works_instead", "looser_match")
 GROUP_LABELS = {"same_item": "Same item", "works_instead": "Works instead",
                 "looser_match": "Looser match"}
-Source = Literal["seed", "embedding", "words"]
+Source = Literal["seed", "described", "embedding", "words"]
 
 EXACT_FLOOR = 0.56
 TYPE_FLOOR = 0.50
@@ -85,6 +85,19 @@ MAX_SUBSTITUTES = 3
 LOOSER_K = 20
 LOOSER_FLOOR = 0.47
 SUBSTITUTE_STEP = 0.10
+# The floors above are EmbeddingGemma's (seeds' "profile" vectors). Gemini's identity-string
+# vectors sit higher and closer together, so they have their own, calibrated on the 47 seed
+# names only (docs/meal-planning.md, "Describing names no seed knows"); CHECK is the least
+# cosine a described name's identity string must have with its Same item type's centroid, or the
+# type is offered as working instead rather than as the same item.
+GEMINI_FLOORS = {"exact": 0.0, "type": 0.0, "looser": 0.0, "check": 0.0}
+
+
+def floors() -> dict[str, float]:
+    """The floors for the vectors the seeds hold (seeds.load().model)."""
+    if seeds.load().model.startswith("gemini"):
+        return dict(GEMINI_FLOORS)
+    return {"exact": EXACT_FLOOR, "type": TYPE_FLOOR, "looser": LOOSER_FLOOR, "check": 0.0}
 CATERING = 6            # as the word planner's SIZE_CAP_FACTOR
 TRIP_SPAN = 10.0        # dollars of trip total over which `trip` falls from 1 to 0
 
@@ -160,6 +173,13 @@ def meanings(items: list[tuple[str, str | None]]) -> list[Meaning]:
             todo.setdefault(_label(name, form), []).append(i)
     if todo:
         why = ""
+        identities: dict[str, describe.Identity] = {}
+        describer = describe.get_describer()
+        if describer is not None and s.profiles:
+            try:
+                identities = describer.describe(list(todo))
+            except describe.DescriberUnavailableError:
+                identities = {}         # embedded as they are, below
         vectors: dict[str, list[float]] = {}
         embedder = embed.get_embedder()
         if not s.centroids:
@@ -167,19 +187,28 @@ def meanings(items: list[tuple[str, str | None]]) -> list[Meaning]:
         elif embedder is None:
             why = "no embedding model is configured (OLLAMA_URL is empty)"
         else:
-            texts = list(todo)
+            # what is embedded: a described name's identity string when the seeds hold identity
+            # vectors ("butter | block | salted"), else the name as written
+            query = {text: (identities[text].text if text in identities and s.text == "identity"
+                            else text) for text in todo}
             try:
                 agrees, why = _agrees(embedder)
                 if agrees:
-                    vectors = dict(zip(texts, embedder.embed(texts, "query"), strict=True))
+                    asked = list(dict.fromkeys(query.values()))
+                    got = dict(zip(asked, embedder.embed(asked, "query"), strict=True))
+                    vectors = {text: got[q] for text, q in query.items()}
             except embed.EmbedderUnavailableError as e:
                 why = str(e)
         for text, idxs in todo.items():
             for i in idxs:
                 name, form = items[i]
-                out[i] = (_embedded(name, form, vectors[text]) if text in vectors
-                          else Meaning(name=name, source="words", form=(form or "").lower(),
-                                       why_words=why))
+                if text in identities:
+                    out[i] = _described(name, form, identities[text], vectors.get(text))
+                elif text in vectors:
+                    out[i] = _embedded(name, form, vectors[text])
+                else:
+                    out[i] = Meaning(name=name, source="words", form=(form or "").lower(),
+                                     why_words=why)
     return [m for m in out if m is not None]
 
 
@@ -239,7 +268,8 @@ def _embedded(name: str, form: str | None, vector: list[float]) -> Meaning:
             if hit is not None:
                 sims = [(sims[0][0], hit[1])] + [st for st in sims if st[1] != hit[1]]
     best = sims[0][0] if sims else 0.0
-    exact = tuple(t for sim, t in sims if sim >= EXACT_FLOOR and sim >= best - TIE)
+    f = floors()
+    exact = tuple(t for sim, t in sims if sim >= f["exact"] and sim >= best - TIE)
     # What works instead of a type a seed ingredient names as the same item is that seed's
     # (Gemini's labels, offline) rather than the type's embedding neighbours.
     seeded = [i for i in s.ingredients.values() if set(i.exact_types) & set(exact)]
@@ -248,13 +278,59 @@ def _embedded(name: str, form: str | None, vector: list[float]) -> Meaning:
                                    if t not in exact))
         unrelated = tuple(dict.fromkeys(t for i in seeded for t in i.unrelated_types))
     else:
-        subs = tuple(t for sim, t in sims if sim >= TYPE_FLOOR
+        subs = tuple(t for sim, t in sims if sim >= f["type"]
                      and t not in exact)[:MAX_SUBSTITUTES]
         unrelated = ()
     return Meaning(name=name, source="embedding", exact=exact, substitutes=subs,
                    unrelated=unrelated, form=want,
                    variant=asked_variant(name, set(exact) | set(subs)),
                    vector=tuple(vector), nearest=nearest)
+
+
+def _described(name: str, form: str | None, ident: describe.Identity,
+               vector: list[float] | None) -> Meaning:
+    """A name the describer identified (describe.py). Its product_type is the Same item when the
+    catalog has that type, unless its identity string is far from that type's centroid (below
+    floors()["check"]: the model may have filed it wrongly), when the type is offered as working
+    instead. What works instead is a seed's substitutes when a seed names the same type as the
+    same item, else the nearest other types at or above floors()["type"]. Form and variant are
+    the describer's, read as asked_form and asked_variant read a name's own words."""
+    s = seeds.load()
+    f = floors()
+    have = s.types()
+    exact: tuple[str, ...] = (ident.product_type,) if ident.product_type in have else ()
+    sims = (sorted(((embed.cosine(vector, c), t) for t, c in s.centroids.items()),
+                   key=lambda st: (-st[0], st[1])) if vector is not None else [])
+    demoted: tuple[str, ...] = ()
+    if exact and vector is not None and f["check"]:
+        own = embed.cosine(vector, s.centroids[exact[0]]) if exact[0] in s.centroids else 0.0
+        if own < f["check"]:
+            demoted, exact = exact, ()
+    seeded = [i for i in s.ingredients.values() if set(i.exact_types) & set(exact)]
+    if seeded:
+        subs = tuple(dict.fromkeys(t for i in seeded for t in i.substitute_types
+                                   if t not in exact))
+        unrelated = tuple(dict.fromkeys(t for i in seeded for t in i.unrelated_types))
+    else:
+        near = tuple(t for sim, t in sims if sim >= f["type"] and t not in exact
+                     and t not in demoted)
+        subs = (demoted + near)[:MAX_SUBSTITUTES]
+        unrelated = ()
+    want = SAME_FORM.get(ident.form, ident.form) if ident.form else asked_form(name, form)
+    return Meaning(name=name, source="described", exact=exact, substitutes=subs,
+                   unrelated=unrelated, form=want,
+                   variant=ident.variant or asked_variant(name, set(exact) | set(subs)),
+                   vector=tuple(vector) if vector is not None else None,
+                   nearest=(sims[0][1], round(sims[0][0], 4)) if sims else None)
+
+
+def describe_state() -> dict:
+    """The describer for /health: its model, and how many names it has described (cached)."""
+    d = describe.get_describer()
+    if d is None:
+        return {"model": None, "detail": "DESCRIBER_MODEL is empty: names no seed knows are "
+                                          "embedded as they are"}
+    return {"model": d.model, "calls": d.calls, "cached": len(d._memo)}
 
 
 # ─── Candidates ──────────────────────────────────────────────
@@ -298,6 +374,7 @@ def candidates(m: Meaning, catalog: dict[int, Product], *,
     if m.source == "words":
         return []
     s = seeds.load()
+    loose = floors()["looser"]
     profiles = matched(catalog)
     words = set(tokens(m.name if not m.form or m.form in m.name.lower()
                        else f"{m.form} {m.name}"))
@@ -314,7 +391,7 @@ def candidates(m: Meaning, catalog: dict[int, Product], *,
             step = 1.0 - SUBSTITUTE_STEP * subs.index(prof.product_type)
             out.append(Candidate(pid, "works_instead", prof.product_type, cos,
                                  cos * max(step, 0.0), fv))
-        elif (looser and cos >= LOOSER_FLOOR and prof.product_type not in m.unrelated):
+        elif (looser and cos >= loose and prof.product_type not in m.unrelated):
             near.append(Candidate(pid, "looser_match", prof.product_type, cos, cos, fv))
     for pid, p in catalog.items():
         if pid not in profiles and words and words <= set(tokens(index_text(p.name,
@@ -476,4 +553,5 @@ def state() -> dict:
             "embedder_matches_seeds": agrees,
             "unknown_names": "meaning" if up and s.centroids else "words",
             "detail": detail,
-            "floors": {"exact": EXACT_FLOOR, "type": TYPE_FLOOR, "looser": LOOSER_FLOOR}}
+            "describer": describe_state(),
+            "floors": floors()}

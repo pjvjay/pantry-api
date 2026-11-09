@@ -223,6 +223,92 @@ class OllamaEmbedder:
         return result
 
 
+GEMINI_DIMS = 768
+GEMINI_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
+
+
+class GeminiEmbedder:
+    """Gemini's embedding model through its OpenAI-compatible endpoint (POST /embeddings),
+    GEMINI_DIMS dimensions re-normalized to unit length, every text of a call in one request.
+    Its vectors are compared only with seeds/gemini_vectors.json's (seeds.py), whose texts are
+    identity strings, so `kind` and `titles` are not sent: the endpoint has no task types.
+
+    Each text counts as one request against Gemini's quota (the free tier allows 1,000 a day),
+    so vectors are kept in memory for the life of the process."""
+
+    def __init__(self, model: str, api_key: str, base_url: str = "",
+                 transport: httpx.BaseTransport | None = None):
+        self.model = model
+        self.api_key = api_key
+        self.url = (base_url or "https://generativelanguage.googleapis.com/v1beta/openai").rstrip("/")
+        self.name = f"{model} via Gemini"
+        self._transport = transport
+        self._memo: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
+        self.down_since: float | None = None
+        self.last_error = ""
+        self._agrees: tuple[bool, str] | None = None
+
+    def embed(self, texts: list[str], kind: Kind = "query",
+              titles: list[str] | None = None) -> list[list[float]]:
+        with self._lock:
+            todo = [t for t in dict.fromkeys(texts) if t not in self._memo]
+        if todo:
+            fresh = self._request(todo)
+            with self._lock:
+                self._memo.update(zip(todo, fresh, strict=True))
+        return [self._memo[t] for t in texts]
+
+    def _request(self, texts: list[str]) -> list[list[float]]:
+        if not self.api_key:
+            raise EmbedderUnavailableError("GEMINI_API_KEY is empty: Gemini embedding is off")
+        if self.down_since is not None and time.monotonic() - self.down_since < RETRY_AFTER_S:
+            raise EmbedderUnavailableError(f"{self.name} is unavailable ({self.last_error})")
+        body = {"model": self.model, "input": texts, "dimensions": GEMINI_DIMS}
+        try:
+            with httpx.Client(timeout=GEMINI_TIMEOUT, transport=self._transport) as client:
+                resp = client.post(f"{self.url}/embeddings", json=body,
+                                   headers={"Authorization": f"Bearer {self.api_key}"})
+            resp.raise_for_status()
+            rows = resp.json()["data"]
+            if len(rows) != len(texts):
+                raise ValueError(f"{len(rows)} embeddings for {len(texts)} texts")
+            out = [truncate(r["embedding"], GEMINI_DIMS) for r in rows]
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:
+            self.down_since = time.monotonic()
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            self.last_error = (f"HTTP {status}" if status else type(e).__name__)
+            raise EmbedderUnavailableError(f"{self.name} is unavailable ({self.last_error})") from e
+        self.down_since, self.last_error = None, ""
+        return out
+
+    def agrees_with_seeds(self) -> tuple[bool, str]:
+        """As OllamaEmbedder's: the seeds must name this model, and one seed name's identity
+        string must come back within PROBE_MIN of its committed vector (asked once)."""
+        if self._agrees is not None:
+            return self._agrees
+        from . import seeds as _seeds
+
+        s = _seeds.load()
+        if s.model != self.model:
+            self._agrees = (False, f"the seeds were embedded with {s.model!r}, not {self.model!r}")
+            return self._agrees
+        probe = min((i for i in s.ingredients.values() if i.vector and i.identity),
+                    key=lambda i: i.name, default=None)
+        if probe is None:
+            self._agrees = (False, "the Gemini seeds hold no ingredient vector to check against")
+            return self._agrees
+        got = self._request([probe.identity])[0]
+        cos = cosine(got, probe.vector)
+        self._agrees = ((True, "") if cos >= PROBE_MIN else
+                        (False, f"{self.name} does not reproduce the seeds' vectors (cosine "
+                                f"{cos:.3f} for {probe.identity!r}, at least {PROBE_MIN} needed)"))
+        return self._agrees
+
+    def ping(self) -> tuple[bool, str]:
+        return (True, "") if self.api_key else (False, "GEMINI_API_KEY is empty")
+
+
 # ─── The process's embedder ──────────────────────────────────
 
 _embedder: Embedder | None = None
@@ -231,17 +317,22 @@ _lock = threading.Lock()
 
 
 def get_embedder() -> Embedder | None:
-    """The embedder request time uses: one installed with set_embedder, else Ollama as the
-    settings name it (None when OLLAMA_URL is empty)."""
+    """The embedder request time uses: one installed with set_embedder, else Gemini when
+    EMBEDDING_MODEL is "gemini:<model>", else Ollama as the settings name it (None when
+    OLLAMA_URL is empty)."""
     global _embedder, _installed
     with _lock:
         if not _installed:
             from ..config import settings
 
             cfg = settings()
-            cache = Path(cfg.data_dir).expanduser() / "matching"
-            _embedder = (OllamaEmbedder(cfg.ollama_url, cfg.embedding_model, cache)
-                         if cfg.ollama_url else None)
+            if cfg.embedding_model.startswith("gemini:"):
+                _embedder = GeminiEmbedder(cfg.embedding_model.split(":", 1)[1],
+                                           cfg.gemini_api_key, cfg.gemini_base_url)
+            else:
+                cache = Path(cfg.data_dir).expanduser() / "matching"
+                _embedder = (OllamaEmbedder(cfg.ollama_url, cfg.embedding_model, cache)
+                             if cfg.ollama_url else None)
             _installed = True
         return _embedder
 
