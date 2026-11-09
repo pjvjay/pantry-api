@@ -259,6 +259,54 @@ which 33 were used).
 **Not matched by meaning yet**: the weekly menu optimizer (`POST /plan/week`) and the MCP
 `lookup_products` tool still match by words.
 
+### Describing names no seed knows
+
+A bare name is a poor query: "cooking onion", "caster sugar", "jeera" or "nam pla" give an
+embedding model a few words to guess from, and a bare name embedded against profile text that
+says what a product is *for* ("aromatic base for savoury dishes") pulls onion, garlic and
+shallots together. With `DESCRIBER_MODEL` set, a name no seed knows is first **identified** by
+a low-cost model (`matching/describe.py`), in fields that say only what identifies an item, as
+the catalog files its products:
+
+| field | "cooking onion" | "jeera" | "lamb shoulder" |
+|---|---|---|---|
+| `product_type` (from the catalog's own type list) | yellow onions | cumin seeds | lamb shoulder *(no such type: unstocked)* |
+| `form` (one of the catalog's forms) | whole | whole | raw |
+| `variant` | | | |
+| `look_alikes` (kept for review only) | red onion, shallots | black mustard seeds | pork shoulder roast |
+
+The matcher takes `product_type` as the **Same item** when the catalog has that type, so the
+decision is the catalog's type list, never a hand-kept rule; what works instead is the seed's
+list when a seed names the same type, else the nearest other types by embedding; and
+`form` and `variant` are compared as fields (`form_variant`). The look-alikes are stored so a
+reviewer can see them; the matcher does not read them. No prose is asked for: flavour and use
+are what blur similar items.
+
+Only the **identity string** is embedded (`seeds.identity_text`: "butter | block | salted"),
+with `EMBEDDING_MODEL=gemini:gemini-embedding-001` against `seeds/gemini_vectors.json`, whose
+product vectors are identity strings too (`scripts/matching_seeds.py gemini-vectors`). The
+embedding is the check and the tie-break: a described type whose identity string is far from
+that type's centroid (below `GEMINI_FLOORS["check"]`) is offered as working instead, not as the
+same item. Gemini's cosines sit higher and closer together than EmbeddingGemma's, so the
+Gemini floors are their own (`matcher.GEMINI_FLOORS`), calibrated on the 47 seed names only:
+FLOORS_TBD
+
+Measured on names labelled before any model ran (none a seed name), Same item right / wrong
+/ unstocked wrongly given one:
+
+MEASURED_TBD
+
+Every answer is cached in the database (`matching/cache.py`; pantry-db 0010): a name is
+described once, keyed by the prompt version, the model, the catalog's type list and the
+normalized name, and an identity string embedded once, keyed by the model, its dimensions and
+the text. A reviewed or corrected row (`status`) is never replaced. Requests are counted per
+UTC day across instances in `matching_usage` against `MATCHING_DAILY_EMBED_TEXTS` and
+`MATCHING_DAILY_DESCRIBE_CALLS`; past an allowance the describer or embedder reports itself
+unavailable and the name falls back (embedded as written, then words), and `/health` says
+so under `matching.cache.budget`. `scripts/prefill_matching.py` describes and embeds
+`seeds/common_ingredients.json` (511 names) ahead of any import, within the allowance, and a
+rerun costs nothing for what is cached.
+
 ## Options for a trip line, and pins
 
 Every trip line has the chat cart's Options dialog. `POST /mealplan/alternatives` takes
