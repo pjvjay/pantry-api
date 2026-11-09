@@ -43,9 +43,11 @@ def answers(monkeypatch):
     return table, asked
 
 
-def _ident(product_type, form="", variant="", look_alikes=()):
-    return {"product_type": product_type, "form": form, "variant": variant,
-            "look_alikes": list(look_alikes)}
+def _ident(item, catalog_type="", form="", variant="", relation=None):
+    """The describer's answer for a name (prompt version 2's fields); the relation defaults to
+    "same" when a catalog type is given and "none" otherwise."""
+    return {"item": item, "catalog_type": catalog_type, "form": form, "variant": variant,
+            "relation": relation or ("same" if catalog_type else "none")}
 
 
 def _groups(name):
@@ -62,12 +64,15 @@ def test_a_described_name_is_the_catalog_type_the_describer_names(answers):
     from pantry_planner.matching import describe, matcher
 
     table, asked = answers
-    table["clarified butter"] = _ident("ghee", "jarred", "", ["butter"])
+    table["clarified butter"] = _ident("clarified butter", "ghee", "jarred")
     describe.set_describer(describe.Describer("gemini:test-lite"))
     m = matcher.meaning_of("clarified butter")
     assert (m.source, m.matching, m.exact) == ("described", "meaning", ("ghee",))
     assert m.form == "jarred"
     assert asked == [["clarified butter"]]
+    ident = describe.get_describer().describe(["clarified butter"])["clarified butter"]
+    assert (ident.item, ident.product_type, ident.text) == (
+        "clarified butter", "ghee", "clarified butter | jarred | ")
     groups = _groups("clarified butter")
     assert groups["same_item"] == [GHEE]
     # what works instead is the ghee seed's own list, and peanut butter is never offered
@@ -80,7 +85,7 @@ def test_a_name_the_catalog_does_not_stock_has_no_same_item(answers):
     from pantry_planner.matching import describe, embed, matcher, seeds
 
     table, _ = answers
-    table["lamb shoulder"] = _ident("lamb shoulder", "raw", "", ["pork shoulder roast"])
+    table["lamb shoulder"] = _ident("lamb shoulder", "", "raw")
     describe.set_describer(describe.Describer("gemini:test-lite"))
     embed.set_embedder(FakeEmbedder.mapping(**{"lamb shoulder": "pork shoulder roast"}))
     m = matcher.meaning_of("lamb shoulder")
@@ -89,27 +94,89 @@ def test_a_name_the_catalog_does_not_stock_has_no_same_item(answers):
     assert "lamb shoulder" not in seeds.load().types()
 
 
-def test_look_alikes_are_kept_for_review_and_never_read_as_a_rule(answers):
-    from pantry_planner.matching import describe, matcher
+def test_the_answer_is_validated_against_the_catalog(answers):
+    """A catalog_type that is not a type exactly leaves the item's own name standing (so it is
+    never read as a type); a form off the catalog's list is dropped, and a variant that merely
+    repeats the form is dropped; a cached row gives the same Identity back."""
+    from pantry_planner.matching import describe
+
+    table, asked = answers
+    table["cooking onion"] = _ident("onion", "Yellow Onions ", "whole", "yellow")
+    table["fresh thyme"] = _ident("thyme", "dried thyme leaves", "bunch", "fresh")
+    table["thyme sprigs"] = _ident("thyme", "", "fresh", "fresh")
+    d = describe.Describer("gemini:test-lite")
+    got = d.describe(["cooking onion", "fresh thyme", "thyme sprigs"])
+    assert (got["cooking onion"].product_type, got["cooking onion"].form,
+            got["cooking onion"].variant) == ("yellow onions", "whole", "yellow")
+    assert (got["fresh thyme"].product_type, got["fresh thyme"].form) == ("thyme", "")
+    assert (got["thyme sprigs"].form, got["thyme sprigs"].variant) == ("fresh", "")
+    assert got["thyme sprigs"].text == "thyme | fresh | "
+    from pantry_planner.matching import cache
+
+    cache.identities.memo.clear()                     # the database row, not the memo
+    again = describe.Describer("gemini:test-lite").describe(["fresh thyme"])
+    assert again["fresh thyme"] == got["fresh thyme"] and len(asked) == 1
+
+
+def test_a_stand_in_is_offered_as_working_instead_never_as_the_same_item(answers):
+    """The relation outlet: a catalog type the describer calls a substitute is not the Same
+    item (the item's own name stands), but it is the first thing that works instead, before
+    what the vector finds; a cached row keeps it."""
+    from pantry_planner.matching import cache, describe, embed, matcher
+
+    table, asked = answers
+    table["self-raising flour"] = _ident("self-raising flour", "all-purpose flour", "",
+                                         "self-raising", relation="substitute")
+    describe.set_describer(describe.Describer("gemini:test-lite"))
+    embed.set_embedder(FakeEmbedder.mapping(**{"self-raising flour": "sugar"}))
+    m = matcher.meaning_of("self-raising flour")
+    assert m.source == "described" and m.exact == ()
+    assert m.substitutes[:2] == ("all-purpose flour", "sugar")
+    ident = describe.get_describer().describe(["self-raising flour"])["self-raising flour"]
+    assert (ident.product_type, ident.substitute) == ("self-raising flour", "all-purpose flour")
+    cache.identities.memo.clear()
+    assert describe.Describer("gemini:test-lite").describe(
+        ["self-raising flour"])["self-raising flour"] == ident and len(asked) == 1
+
+
+def test_a_field_the_model_ran_into_the_next_one_is_cut_there(answers):
+    """Seen once in 400 answers: "white fish fillets,form:" as the catalog type."""
+    from pantry_planner.matching import describe
 
     table, _ = answers
-    table["cooking onion"] = _ident("yellow onions", "whole", "", ["red onion", "shallots"])
-    describe.set_describer(describe.Describer("gemini:test-lite"))
-    m = matcher.meaning_of("cooking onion")
-    assert m.exact == ("yellow onions",)
-    assert "red onion" not in m.unrelated and "shallots" not in m.unrelated
+    table["basa fillets"] = _ident("basa", "white fish fillets,form:", "frozen", "",
+                                   relation="variety")
+    got = describe.Describer("gemini:test-lite").describe(["basa fillets"])["basa fillets"]
+    assert (got.product_type, got.form) == ("white fish fillets", "frozen")
+
+
+def test_the_model_is_called_at_temperature_zero_without_a_reasoning_effort(monkeypatch):
+    from pantry_planner import llm
+    from pantry_planner.matching import describe
+
+    seen = {}
+
+    def fake(**kw):
+        seen.update(kw)
+        return llm.ToolCallResult(input={"items": []}, input_tokens=1, output_tokens=1,
+                                  model=kw["model"], provider="gemini")
+
+    monkeypatch.setattr(llm, "forced_tool_call", fake)
+    describe.Describer("gemini:test-lite").describe(["kale"])
+    assert (seen["gemini_temperature"], seen["gemini_reasoning_effort"]) == (0.0, "")
 
 
 def test_a_name_is_described_once_whatever_its_case_or_spacing(answers):
     from pantry_planner.matching import describe
 
     table, asked = answers
-    table["caster sugar"] = _ident("sugar", "", "caster")
+    table["caster sugar"] = _ident("caster sugar", "sugar", "", "caster")
     d = describe.Describer("gemini:test-lite")
     first = d.describe(["Caster  Sugar"])
     again = d.describe(["caster sugar", "CASTER SUGAR."])
     assert asked == [["Caster  Sugar"]], "the cache answered the second time"
-    assert first["Caster  Sugar"].text == "sugar |  | caster"
+    assert first["Caster  Sugar"].text == "caster sugar |  | caster"
+    assert first["Caster  Sugar"].product_type == "sugar"
     assert set(again) == {"caster sugar", "CASTER SUGAR."}
     assert (d.calls, d.tokens_in, d.tokens_out) == (1, 100, 40)
 
@@ -121,7 +188,7 @@ def test_an_unanswered_name_is_asked_again_and_a_failure_is_not_cached(answers, 
     table, asked = answers
     d = describe.Describer("gemini:test-lite")
     assert d.describe(["harissa"]) == {}                 # the model skipped it
-    table["harissa"] = _ident("harissa", "paste")
+    table["harissa"] = _ident("harissa", "", "paste")
     assert d.describe(["harissa"])["harissa"].product_type == "harissa"
     assert asked == [["harissa"], ["harissa"]]
 
@@ -156,7 +223,7 @@ def test_a_type_far_from_its_identity_string_is_offered_as_working_instead(answe
     from pantry_planner.matching import describe, embed, matcher
 
     table, _ = answers
-    table["smoked salmon"] = _ident("salmon fillets", "sliced", "smoked")
+    table["smoked salmon"] = _ident("smoked salmon", "salmon fillets", "sliced", "smoked")
     describe.set_describer(describe.Describer("gemini:test-lite"))
     embed.set_embedder(FakeEmbedder())                    # far from every type
     base = matcher.floors()
@@ -181,6 +248,6 @@ def test_health_reports_the_describer(answers):
 
     assert matcher.state()["describer"]["model"] is None
     describe.set_describer(describe.Describer("gemini:test-lite"))
-    answers[0]["kale"] = _ident("kale", "fresh")
+    answers[0]["kale"] = _ident("kale", "kale", "fresh")
     describe.get_describer().describe(["kale"])
     assert matcher.state()["describer"] == {"model": "gemini:test-lite", "calls": 1, "cached": 1}

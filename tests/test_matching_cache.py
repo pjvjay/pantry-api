@@ -148,9 +148,9 @@ def test_two_threads_asking_for_the_same_name_share_one_model_call(monkeypatch):
 
     def slow(*, model, system, messages, tool, max_tokens, **_kw):
         calls.append(json.loads(messages[0]["content"])["names"])
-        return llm.ToolCallResult(input={"items": [{"name": "kale", "product_type": "kale",
-                                                   "form": "fresh", "variant": "",
-                                                   "look_alikes": []}]},
+        return llm.ToolCallResult(input={"items": [{"name": "kale", "item": "kale",
+                                                   "catalog_type": "kale", "relation": "same",
+                                                   "form": "fresh", "variant": ""}]},
                                   input_tokens=1, output_tokens=1, model=model, provider="gemini")
 
     monkeypatch.setattr(llm, "forced_tool_call", slow)

@@ -90,7 +90,17 @@ SUBSTITUTE_STEP = 0.10
 # names only (docs/meal-planning.md, "Describing names no seed knows"); CHECK is the least
 # cosine a described name's identity string must have with its Same item type's centroid, or the
 # type is offered as working instead rather than as the same item.
-GEMINI_FLOORS = {"exact": 0.0, "type": 0.0, "looser": 0.0, "check": 0.0}
+# Calibrated 2026-11-09 on the 47 seed names, by the rule that gave EmbeddingGemma's floors
+# the same number of works-instead types (0.87 a name) and looser products (1.13 a name):
+# type 0.81, looser 0.79; exact 0.97 (identity strings of the same type score 0.97-1.0, so a
+# bare name embedded without the describer is the same item only when it IS the identity);
+# check: off (0) until calibrated. A described name's identity string is built from the item's
+# own words (describe.Identity.text, "clarified butter | jarred | "), not from the catalog type
+# it was filed under, so the check can tell a misfile from a right filing; what cosine
+# separates the two has to be measured on filings of the evaluation sets (the day's embedding
+# allowance was spent before that could be done, 2026-11-09). The 0.75 measured for the seeds'
+# own type-based identity strings (least 0.775, eggs) does not transfer to own-word strings.
+GEMINI_FLOORS = {"exact": 0.97, "type": 0.81, "looser": 0.79, "check": 0.0}
 
 
 def floors() -> dict[str, float]:
@@ -298,11 +308,12 @@ def _embedded(name: str, form: str | None, vector: list[float]) -> Meaning:
 def _described(name: str, form: str | None, ident: describe.Identity,
                vector: list[float] | None) -> Meaning:
     """A name the describer identified (describe.py). Its product_type is the Same item when the
-    catalog has that type, unless its identity string is far from that type's centroid (below
-    floors()["check"]: the model may have filed it wrongly), when the type is offered as working
-    instead. What works instead is a seed's substitutes when a seed names the same type as the
-    same item, else the nearest other types at or above floors()["type"]. Form and variant are
-    the describer's, read as asked_form and asked_variant read a name's own words."""
+    catalog has that type, unless its identity string (the item's own words, form and variant)
+    is far from that type's centroid (below floors()["check"], when that floor is set: the model
+    may have filed it wrongly), when the type is offered as working instead. What works instead
+    is a seed's substitutes when a seed names the same type as the same item, else the stand-in
+    the describer named and then the nearest other types at or above floors()["type"]. Form and
+    variant are the describer's, read as asked_form and asked_variant read a name's own words."""
     s = seeds.load()
     f = floors()
     have = s.types()
@@ -322,7 +333,8 @@ def _described(name: str, form: str | None, ident: describe.Identity,
     else:
         near = tuple(t for sim, t in sims if sim >= f["type"] and t not in exact
                      and t not in demoted)
-        subs = (demoted + near)[:MAX_SUBSTITUTES]
+        named = (ident.substitute,) if ident.substitute and ident.substitute in have else ()
+        subs = tuple(dict.fromkeys(demoted + named + near))[:MAX_SUBSTITUTES]
         unrelated = ()
     want = SAME_FORM.get(ident.form, ident.form) if ident.form else asked_form(name, form)
     return Meaning(name=name, source="described", exact=exact, substitutes=subs,

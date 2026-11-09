@@ -5,18 +5,23 @@ unusual; embedding it alone leaves the matcher to guess from a few words. The de
 model (DESCRIBER_MODEL, a model spec such as "gemini:gemini-3.1-flash-lite") to identify each
 name the way the catalog files its products, in fields that say only what identifies an item:
 
-  product_type   the catalog type that IS the item, chosen from the catalog's own type list;
-                 when none is the item itself, the item's own plain name ("dill", "lamb
-                 shoulder"), so it can never be read as a catalog type
+  item           the item's own plain name ("thyme", "brown rice", "lamb shoulder")
+  catalog_type   the nearest catalog type, from the catalog's own type list, and
+  relation       what the item is to it: same, variety (the same food in another colour, size,
+                 cut, grade, brand or packaging), substitute (a different food that could stand
+                 in) or none. product_type is the catalog type when the relation is same or
+                 variety, else the item's own name (so it can never be read as a catalog type);
+                 a stand-in is kept as `substitute`, offered as working instead
   form           one of the forms the catalog's products have ("fresh", "ground", "canned"…)
   variant        the variant the name asks for ("salted", "extra virgin"), or ""
-  look_alikes    catalog types a shopper might confuse it with: kept for review only, never a
-                 rule (the matcher does not read it)
 
 Never flavour or culinary use: prose like "aromatic base for savoury dishes" fits onion, garlic
-and shallots alike and pulls them together. The matcher (matcher.py) takes product_type as the
-Same item when the catalog has it, compares form and variant as fields, and embeds the identity
-string (seeds.identity_text) for what works instead.
+and shallots alike and pulls them together. No list of look-alikes or confusable pairs either:
+the prompt asks for the item's own name before the catalog choice, and the matcher checks the
+filing by meaning. The matcher (matcher.py) takes product_type as the Same item when the
+catalog has it, compares form and variant as fields, and embeds the identity string of the
+item's own words (seeds.identity_text) to check that filing against the type's centroid and
+for what works instead.
 
 Answers are cached (matching/cache.py: the database, with an in-process memo) by the
 describer's version, the model, the catalog's type list and the normalized name, so a name is
@@ -35,9 +40,18 @@ from dataclasses import dataclass
 
 from . import cache, seeds
 
-PROMPT_VERSION = 1
+PROMPT_VERSION = 2
 BATCH = 30
 MAX_TOKENS = 4096
+# The model call's settings, measured on 2026-11-09 with gemini-3.1-flash-lite over 30 names,
+# three runs each: at the model's default temperature the answers swung between runs (7, 6 and
+# 0 of 10 unstocked names filed under a neighbouring catalog type); at temperature 0 with the
+# configured reasoning effort ("low") the same answer every run but only 3 of 20 stocked names
+# filed under their type; at temperature 0 without a reasoning effort the same answer every run,
+# 17 of 20 stocked names right, 1 of 10 unstocked filed. So the describer fixes both, whatever
+# GEMINI_REASONING_EFFORT says for the planner's calls.
+TEMPERATURE = 0.0
+REASONING_EFFORT = ""
 
 
 class DescriberUnavailableError(RuntimeError):
@@ -46,15 +60,21 @@ class DescriberUnavailableError(RuntimeError):
 
 @dataclass(frozen=True)
 class Identity:
+    """What a name is: `item`, its own plain name ("thyme", "brown rice"); `product_type`, the
+    catalog type that is the same food when the describer found one, else the item's own name
+    (so it can never be read as a catalog type); the form and variant the name asks for. `text`
+    is the identity string that is embedded (seeds.identity_text), built from the item's own
+    words, not the catalog type, so a filing can be checked against that type's centroid."""
     name: str
+    item: str
     product_type: str
     form: str
     variant: str
-    look_alikes: tuple[str, ...]
+    substitute: str = ""        # the catalog type the describer called a stand-in, or ""
 
     @property
     def text(self) -> str:
-        return seeds.identity_text(self.product_type, self.form, self.variant)
+        return seeds.identity_text(self.item, self.form, self.variant)
 
 
 TOOL = {
@@ -64,30 +84,44 @@ TOOL = {
         "type": "object", "required": ["items"],
         "properties": {"items": {"type": "array", "items": {
             "type": "object",
-            "required": ["name", "product_type", "form", "variant", "look_alikes"],
+            "required": ["name", "item", "catalog_type", "relation", "form", "variant"],
             "properties": {
                 "name": {"type": "string"},
-                "product_type": {"type": "string"},
+                "item": {"type": "string"},
+                "catalog_type": {"type": "string"},
+                "relation": {"type": "string",
+                             "description": "same, variety, substitute or none"},
                 "form": {"type": "string"},
                 "variant": {"type": "string"},
-                "look_alikes": {"type": "array", "items": {"type": "string"}},
             }}}},
     },
 }
 
 
 def system_prompt(types: list[str], forms: list[str]) -> str:
+    """Prompt version 2: the item's own name first; then the nearest catalog type and how the
+    item relates to it, with "substitute" as an answer of its own. Forced to choose between
+    filing a name under a type and nothing, the model filed brown rice under white rice and
+    pecorino under parmesan (5 of 10 unstocked names, 2026-11-09); given the stand-in answer,
+    1 of 10, at a cost of 1 stocked name in 53 and 2 in 100. The examples are foods none of the
+    evaluation sets hold."""
     return (
         "You identify recipe ingredient names precisely, as a grocery catalog would file them. "
         "For each name return only what identifies the item, never flavour or how it is used:\n"
-        "- product_type: the catalog type that IS this item, chosen from the list below, exactly "
-        "as written; when none is the item itself (only similar ones), give the item's own plain "
-        "name in lower case.\n"
+        "- item: the item's own plain name in lower case, without form, size or variant words "
+        "(\"thyme\", \"brown rice\", \"onion\").\n"
+        "- catalog_type: the catalog type from the list below, exactly as written, that is "
+        "nearest to this item, or \"\" when none is close.\n"
+        "- relation: how the item relates to that catalog type: \"same\" (the very same "
+        "product), \"variety\" (the same food in another colour, size, cut, grade, brand or "
+        "packaging, e.g. medium eggs and eggs, small red onions and red onion), \"substitute\" "
+        "(a different food or product that could stand in for it, e.g. sweet potato and russet "
+        "potatoes, ground lamb and ground beef), or \"none\". A shopper who asked for the item "
+        "and was handed the catalog type: would they say it is what they asked for (same or "
+        "variety) or a stand-in (substitute)? When unsure, say substitute.\n"
         f"- form: one of {json.dumps(forms)}, or \"\" when the name implies none.\n"
         "- variant: the specific variant the name asks for (\"salted\", \"extra virgin\", "
         "\"boneless skinless\", \"low sodium\"), or \"\".\n"
-        "- look_alikes: up to 3 catalog types a shopper might confuse with it but that are a "
-        "different item; [] when none.\n"
         f"Catalog types: {json.dumps(types)}")
 
 
@@ -146,7 +180,8 @@ class Describer:
                     result = llm.forced_tool_call(
                         model=self.model, system=system_prompt(types, forms),
                         messages=[{"role": "user", "content": json.dumps({"names": chunk})}],
-                        tool=TOOL, max_tokens=MAX_TOKENS)
+                        tool=TOOL, max_tokens=MAX_TOKENS, gemini_temperature=TEMPERATURE,
+                        gemini_reasoning_effort=REASONING_EFFORT)
                 except llm.LLMError as e:
                     raise DescriberUnavailableError(f"{self.model} is unavailable: {e}") from e
                 self.calls += 1
@@ -157,25 +192,51 @@ class Describer:
                 fresh: dict[str, dict] = {}
                 for n in chunk:
                     it = got.get(normalize(n))
-                    if not it or not str(it.get("product_type", "")).strip():
+                    if not it or not str(it.get("item", "")).strip():
                         continue            # not answered: asked again next time
-                    ptype = str(it["product_type"]).strip().lower()
-                    form = str(it.get("form", "")).strip().lower()
-                    variant = str(it.get("variant", "")).strip().lower()
+                    ident = _fields(n, it, types, forms)
                     fresh[keys[n]] = {
-                        "name": n, "normalized": normalize(n), "product_type": ptype,
-                        "form": form, "variant": variant,
-                        "look_alikes": tuple(str(x).strip().lower()
-                                             for x in it.get("look_alikes", [])
-                                             if str(x).strip())[:3],
-                        "identity": seeds.identity_text(ptype, form, variant),
-                        "model": self.model, "prompt_version": PROMPT_VERSION,
-                        "fingerprint": fp, "status": "auto"}
+                        "name": n, "normalized": normalize(n),
+                        "product_type": ident.product_type, "form": ident.form,
+                        "variant": ident.variant,
+                        "look_alikes": (ident.substitute,) if ident.substitute else (),
+                        "identity": ident.text, "model": self.model,
+                        "prompt_version": PROMPT_VERSION, "fingerprint": fp,
+                        "status": "auto"}
                 cache.identities.put_many(fresh)
                 found.update(fresh)
-        return {n: Identity(name=n, product_type=v["product_type"], form=v["form"],
-                            variant=v["variant"], look_alikes=tuple(v["look_alikes"]))
-                for n in names if (v := found.get(keys[n])) is not None}
+        return {n: _from_row(n, v) for n in names if (v := found.get(keys[n])) is not None}
+
+
+def _field(it: dict, key: str) -> str:
+    """One answer field, cleaned: lower case, single spaces, and cut at the point where the
+    model's function-call output now and then runs the next field into this one's value
+    ("white fish fillets,form:" was seen once in 400 answers)."""
+    value = re.split(r",\s*[a-z_]+:", str(it.get(key, "")))[0]
+    return " ".join(value.split()).lower()
+
+
+def _fields(name: str, it: dict, types: list[str], forms: list[str]) -> Identity:
+    """The model's answer, validated: the catalog type counts only when it is a type exactly
+    and the relation is same or variety (else the item's own name stands, and a stand-in is
+    kept as `substitute`); form must be one of the catalog's forms (else ""); variant never
+    repeats the form."""
+    item, ctype, relation = _field(it, "item"), _field(it, "catalog_type"), _field(it, "relation")
+    form, variant = _field(it, "form"), _field(it, "variant")
+    known = ctype in types
+    return Identity(name=name, item=item,
+                    product_type=ctype if known and relation in ("same", "variety") else item,
+                    form=form if form in forms else "",
+                    variant="" if variant == form else variant,
+                    substitute=ctype if known and relation == "substitute" else "")
+
+
+def _from_row(name: str, v: dict) -> Identity:
+    """A cached row: the item's own name is the first part of its identity string, and the
+    stand-in the describer named is the look_alikes column's one entry."""
+    return Identity(name=name, item=v["identity"].split(" | ", 1)[0],
+                    product_type=v["product_type"], form=v["form"], variant=v["variant"],
+                    substitute=next(iter(v["look_alikes"]), ""))
 
 
 _describer: Describer | None = None

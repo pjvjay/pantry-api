@@ -268,33 +268,69 @@ shallots together. With `DESCRIBER_MODEL` set, a name no seed knows is first **i
 a low-cost model (`matching/describe.py`), in fields that say only what identifies an item, as
 the catalog files its products:
 
-| field | "cooking onion" | "jeera" | "lamb shoulder" |
+| field | "cooking onion" | "jeera" | "self-raising flour" | "lamb shoulder" |
+|---|---|---|---|---|
+| `item` (its own plain name) | onion | cumin | self-raising flour | lamb shoulder |
+| `catalog_type` (the nearest, from the catalog's own type list) | yellow onions | cumin seeds | all-purpose flour | pork shoulder roast |
+| `relation` to it | variety | same | substitute | substitute |
+| `form` (one of the catalog's forms) | whole | whole | | raw |
+| `variant` | | | self-raising | |
+
+The matcher takes the catalog type as the **Same item** when the relation is *same* or
+*variety* (the same food in another colour, size, cut, grade, brand or packaging), so the
+decision is the catalog's type list and the model's answer for that name, never a hand-kept
+rule or a list of confusable pairs. A *substitute* is kept (`Identity.substitute`) and offered
+first among what **works instead**, never as the same item; the rest of that group is the
+seed's list when a seed names the same type, else the nearest other types by embedding.
+`form` and `variant` are compared as fields (`form_variant`). No prose is asked for: flavour
+and use are what blur similar items. The answer is validated: a catalog type must be a type
+exactly (else the item's own name stands, which is never a type), a form must be one of the
+catalog's, a variant never repeats the form.
+
+**Why the relation has its own answer.** Forced to choose between filing a name under a type
+and giving its own name, the model filed brown rice under white rice, pecorino under parmesan
+and coconut sugar under sugar (5 of the 10 unstocked names below); with *substitute* as an
+answer of its own, and "when unsure, say substitute", 1 of 10, at a cost of 1 stocked name in
+53 and 2 in 100, each of which still gets the right type first under Works instead.
+
+**Why the call is fixed at temperature 0 without a reasoning effort.** At the model's default
+temperature the same 30 names, asked three times, were filed under a neighbouring catalog type
+7, 6 and 0 times out of 10; at temperature 0 with the planner's `GEMINI_REASONING_EFFORT`
+("low") the answers were the same every run but only 3 of 20 stocked names were filed under
+their type; at temperature 0 with no reasoning effort, the same every run, 17 of 20 right.
+`describe.TEMPERATURE` and `describe.REASONING_EFFORT` pin both for this call alone
+(`llm.forced_tool_call`'s `gemini_temperature` and `gemini_reasoning_effort`); two separate
+processes describing the 205 evaluation names gave identical answers.
+
+Only the **identity string** is embedded (`Identity.text`, the item's own words: "clarified
+butter | jarred | "), with `EMBEDDING_MODEL=gemini:gemini-embedding-001` against
+`seeds/gemini_vectors.json`, whose product vectors are identity strings too
+(`scripts/matching_seeds.py gemini-vectors`; 169 products, 47 seed names). Gemini's cosines
+sit higher and closer together than EmbeddingGemma's, so the Gemini floors are their own
+(`matcher.GEMINI_FLOORS`), calibrated on the 47 seed names only by the rule that gave
+EmbeddingGemma's floors the same number of works-instead types and looser products a name:
+type 0.81, looser 0.79, exact 0.97 (a bare name embedded without the describer is the same
+item only when it is the identity itself). The `check` floor, under which a filed type's
+centroid is too far from the name's own identity string and the type is demoted to working
+instead, is 0 (off) until it is calibrated on the evaluation sets' filings: that needs a
+day's embedding allowance, which the measurements below had spent.
+
+**Measured**, on names labelled by hand before any model ran, none a seed name, through the
+real describer and matcher (Same item right / wrong / none, and how many of the names the
+catalog does not stock were wrongly given a Same item):
+
+| names | word matching (before) | bare name embedded (Gemini) | described, this design |
 |---|---|---|---|
-| `product_type` (from the catalog's own type list) | yellow onions | cumin seeds | lamb shoulder *(no such type: unstocked)* |
-| `form` (one of the catalog's forms) | whole | whole | raw |
-| `variant` | | | |
-| `look_alikes` (kept for review only) | red onion, shallots | black mustard seeds | pork shoulder roast |
+| fresh set, 53 stocked | 40 right, 5 wrong | 33 right, 0 wrong, 20 none | **52 right, 0 wrong**, 1 none (right type first under Works instead) |
+| fresh set, 10 unstocked | 6 wrongly given a Same item | 0 | 1 (smoked salmon → salmon fillets) |
+| fresh set, 32 confusable pairs (cumin seeds vs ground cumin, parsley vs cilantro, …) | | | 0 filed under the other |
+| held-out set, 100 stocked | | 78 right, 0 wrong | **95 right, 1 wrong** (rapeseed oil → vegetable oil), 4 none (each with the labelled type first under Works instead) |
+| held-out set, 15 unstocked | | 0 | 0 |
 
-The matcher takes `product_type` as the **Same item** when the catalog has that type, so the
-decision is the catalog's type list, never a hand-kept rule; what works instead is the seed's
-list when a seed names the same type, else the nearest other types by embedding; and
-`form` and `variant` are compared as fields (`form_variant`). The look-alikes are stored so a
-reviewer can see them; the matcher does not read them. No prose is asked for: flavour and use
-are what blur similar items.
-
-Only the **identity string** is embedded (`seeds.identity_text`: "butter | block | salted"),
-with `EMBEDDING_MODEL=gemini:gemini-embedding-001` against `seeds/gemini_vectors.json`, whose
-product vectors are identity strings too (`scripts/matching_seeds.py gemini-vectors`). The
-embedding is the check and the tie-break: a described type whose identity string is far from
-that type's centroid (below `GEMINI_FLOORS["check"]`) is offered as working instead, not as the
-same item. Gemini's cosines sit higher and closer together than EmbeddingGemma's, so the
-Gemini floors are their own (`matcher.GEMINI_FLOORS`), calibrated on the 47 seed names only:
-FLOORS_TBD
-
-Measured on names labelled before any model ran (none a seed name), Same item right / wrong
-/ unstocked wrongly given one:
-
-MEASURED_TBD
+(The fresh set was written and labelled after the design was fixed; the held-out set had
+been seen while calibrating. Catalog descriptions in prose, the design this replaced in the
+comparison, reached 46 of 53 with 1 of 10 unstocked misfiled; identity strings embedded
+without the describer's type, 13 of 53.)
 
 Every answer is cached in the database (`matching/cache.py`; pantry-db 0010): a name is
 described once, keyed by the prompt version, the model, the catalog's type list and the
@@ -303,9 +339,12 @@ the text. A reviewed or corrected row (`status`) is never replaced. Requests are
 UTC day across instances in `matching_usage` against `MATCHING_DAILY_EMBED_TEXTS` and
 `MATCHING_DAILY_DESCRIBE_CALLS`; past an allowance the describer or embedder reports itself
 unavailable and the name falls back (embedded as written, then words), and `/health` says
-so under `matching.cache.budget`. `scripts/prefill_matching.py` describes and embeds
-`seeds/common_ingredients.json` (511 names) ahead of any import, within the allowance, and a
-rerun costs nothing for what is cached.
+so under `matching.cache.budget`. Gemini counts every text of an embedding request, refused
+attempts included, against its free tier's 100 a minute and 1,000 a day, so the embedder sends
+at most 20 texts a request paced to `MATCHING_EMBED_TEXTS_PER_MINUTE`, keeps each part's
+vectors as they arrive, and never asks again after a refusal naming the day's quota.
+`scripts/prefill_matching.py` describes and embeds `seeds/common_ingredients.json` (511
+names) ahead of any import, within the allowance, and a rerun costs nothing for what is cached.
 
 ## Options for a trip line, and pins
 

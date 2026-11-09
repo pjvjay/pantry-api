@@ -145,6 +145,20 @@ def test_gemini_base_url_and_reasoning_effort_overrides(monkeypatch):
     assert body["max_tokens"] == 4096 + 8192          # default-effort headroom
 
 
+def test_a_call_site_may_fix_geminis_temperature_and_reasoning_effort(monkeypatch):
+    """The describer's measured setting: temperature 0, no reasoning effort ("" = omitted),
+    whatever GEMINI_REASONING_EFFORT says; other call sites are unchanged."""
+    _set(monkeypatch, GEMINI_REASONING_EFFORT="low")
+    seen = _serve(monkeypatch, _ok(), _ok())
+    _call(max_tokens=4096, gemini_temperature=0.0, gemini_reasoning_effort="")
+    body = json.loads(seen[0].content)
+    assert body["temperature"] == 0.0 and "reasoning_effort" not in body
+    assert body["max_tokens"] == 4096 + 8192
+    _call(max_tokens=4096)
+    body = json.loads(seen[1].content)
+    assert "temperature" not in body and body["reasoning_effort"] == "low"
+
+
 def test_gemini_anthropic_text_blocks_become_one_string(monkeypatch):
     from pantry_planner.llm import forced_tool_call
 
