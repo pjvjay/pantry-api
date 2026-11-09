@@ -80,3 +80,27 @@ def test_embedding_model_gemini_chooses_it(monkeypatch):
     finally:
         config.settings.cache_clear()
         embed.set_embedder(None)
+
+
+def test_without_vectors_for_the_embedding_model_nothing_is_matched_by_meaning(monkeypatch):
+    """EMBEDDING_MODEL names Gemini but seeds/gemini_vectors.json is missing (or made from other
+    product rows): seed names included, every name is matched by words, which keeps peanut butter
+    out of butter's Same item, and /health says mode "words" with the reason."""
+    from pantry_planner import config
+    from pantry_planner.matching import matcher, seeds
+
+    monkeypatch.setenv("EMBEDDING_MODEL", "gemini:gemini-embedding-001")
+    monkeypatch.setattr(seeds, "GEMINI_VECTORS", "no-such-file.json")
+    config.settings.cache_clear()
+    seeds.clear_cache()
+    try:
+        s = seeds.load()
+        assert s.profiles and not s.vectors and not s.centroids
+        m = matcher.meaning_of("Butter")
+        assert (m.source, m.matching) == ("words", "words")
+        assert "no vectors" in m.why_words or "missing" in m.why_words
+        assert matcher.candidates(m, {}) == []
+        assert matcher.state()["mode"] == "words"
+    finally:
+        config.settings.cache_clear()
+        seeds.clear_cache()

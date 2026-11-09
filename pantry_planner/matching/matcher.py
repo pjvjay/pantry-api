@@ -159,6 +159,14 @@ def meanings(items: list[tuple[str, str | None]]) -> list[Meaning]:
     in one request. When the embedder cannot be reached (or there is none), those names are
     Meaning(source="words") with the reason."""
     s = seeds.load()
+    if not s.centroids:
+        # No vectors for EMBEDDING_MODEL (its seeds file is missing or made from other product
+        # rows): nothing can be matched by meaning, seed names included, and saying so keeps the
+        # word matcher's own rules (its another-food tier) in charge.
+        why = (f"the matching seeds hold no vectors for {s.model or 'the embedding model'}"
+               if not s.model else f"the seeds for {s.model!r} are missing")
+        return [Meaning(name=n, source="words", form=(f or "").lower(), why_words=why)
+                for n, f in items]
     out: list[Meaning | None] = []
     todo: dict[str, list[int]] = {}
     for i, (name, form) in enumerate(items):
@@ -546,7 +554,8 @@ def state() -> dict:
             up, why = False, str(err)
         if not up or not agrees:
             up, detail = False, why
-    return {"mode": "meaning" if s.profiles else "words", "profiles": len(s.profiles),
+    return {"mode": "meaning" if s.profiles and s.centroids else "words",
+            "profiles": len(s.profiles),
             "product_types": len(s.centroids), "seed_ingredients": len(s.ingredients),
             "embedding_model": s.model, "dims": s.dims,
             "embedder": getattr(e, "name", None), "embedder_up": up,
