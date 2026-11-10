@@ -155,7 +155,9 @@ def test_excluded_origin_never_ships_in_a_week_plan():
     from pantry_planner import db, weekplan
     from pantry_planner.nlsearch import PlanAborted
 
-    _mark([p.id for p in db.load_all_products()][:20])
+    # the first 20 by id: load_all_products has no order, and on Postgres a reseed after
+    # autovacuum can put rows back in another physical order than SQLite's rowid order
+    _mark(sorted(p.id for p in db.load_all_products())[:20])
     baseline = weekplan.plan_week(days=3)
     shipped = [w for w in baseline.shopping_list
                if w.origin and w.origin.manufactured_in == "United States"]

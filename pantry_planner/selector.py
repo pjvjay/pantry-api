@@ -80,11 +80,18 @@ def call_selector(
     constraints: dict | None = None,
     origins_by_id: dict | None = None,
     preference: list[str] | None = None,
+    substitutes: dict[int, list[int]] | None = None,
 ) -> SelectorResult:
     """Make one main-selector call. Returns structured selections.
 
     `constraints` (NL2SQL path) carries binding shopping constraints —
     budget, quantities needed, preferences — see SELECTOR_SYSTEM rule 6.
+
+    `substitutes` (NL2SQL path): recipe line_no -> the product ids that
+    line's own pool holds only as t4 substitutes. The demo selector keeps
+    them out of that line's choice only. The live payload is unchanged: a
+    product is flagged "substitute" there when it substitutes for every
+    line that retrieved it (planner.union_of_pools).
     """
     cfg = settings()
     if cfg.demo_mode:                       # public demo: no API key, no cost
@@ -93,7 +100,8 @@ def call_selector(
                                         enable_thinking=enable_thinking,
                                         constraints=constraints,
                                         origins_by_id=origins_by_id,
-                                        preference=preference)
+                                        preference=preference,
+                                        substitutes=substitutes)
     payload: dict = {
         "recipe_ingredients": _serialize_ingredients(ingredients),
         "available_products": _serialize_products(products, origins_by_id),

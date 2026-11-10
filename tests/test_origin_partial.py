@@ -121,6 +121,12 @@ def test_classic_partial_plan_reports_the_emptied_ingredient():
     assert "United States" in left.reason
     assert any("Fresh Garlic" in s for s in left.suggestions)
     assert plan.ingredient_count == 5
+    # one candidate is "its only candidate", never "all 1 candidate(s)"
+    removed = [s for s in left.suggestions if " via " in s]
+    assert left.reason == (f"{flow.candidates_are(len(removed))} evidenced as coming from "
+                           "United States, which this plan excludes")
+    assert (flow.candidates_are(1), flow.candidates_are(3)) == (
+        "its only candidate is", "all 3 candidates are")
     assert _planned(plan) + len(plan.out_of_range) == plan.ingredient_count
 
 

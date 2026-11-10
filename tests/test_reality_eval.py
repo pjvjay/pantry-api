@@ -58,9 +58,12 @@ def _obs(**kw):
 def test_unit_prices_per_kg_l_and_each():
     from evals.reality_eval import unit_price
 
-    assert unit_price(3.47, 1360, "g") == pytest.approx((2.551, "kg"), rel=1e-3)
+    # Number and unit apart: pytest 9's approx refuses a str beside rel=
+    price, unit = unit_price(3.47, 1360, "g")
+    assert price == pytest.approx(2.551, rel=1e-3) and unit == "kg"
     assert unit_price(1.99, 796, "ml")[1] == "L"
-    assert unit_price(4.0, 12, "each") == pytest.approx((1 / 3, "each"))
+    price, unit = unit_price(4.0, 12, "each")
+    assert price == pytest.approx(1 / 3) and unit == "each"
     assert unit_price(None, 100, "g") is None and unit_price(1.0, None, "g") is None
 
 

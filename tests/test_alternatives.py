@@ -298,6 +298,66 @@ def test_match_levels_and_tiers():
     assert "Baking Powder 225g" not in cumin or cumin["Baking Powder 225g"].match == "substitute"
 
 
+SAME_OR_NOT = ("Same or not\n- 400 g chicken breast\n- 1 can canned tomatoes\n"
+               "- 2 tbsp olive oil\n- 15 g butter\n")
+
+
+def test_a_product_that_matches_the_words_but_is_another_food_is_not_the_same_ingredient():
+    """Canadian Peanut Butter Cream matches every word of "butter", but it is peanut butter,
+    from the spreads, not the butter aisle: the other tier, saying so, below every butter.
+    Products named another way but mainly the ingredient, or from its aisle, stay the same
+    ingredient, and the planner's picks do not change."""
+    from pantry_planner import flow
+    from tests.seed_catalog import SEED_PRODUCTS
+
+    aisle = {p["id"]: p["subcategory"] for p in SEED_PRODUCTS}
+    for plan, name in ((flow.run_nl(SAME_OR_NOT), "butter"),
+                       (flow.run("grilled_cheese", max_km=12, **HOME), "Butter")):
+        rows = _by_name(_rank(plan, name))
+        butter, peanut = rows["Butter Salted 454g"], rows["Canadian Peanut Butter Cream"]
+        assert butter.current and (butter.match, butter.tier) == ("exact", "same")
+        assert (peanut.match, peanut.tier) == ("exact", "other")
+        assert (peanut.reasons[0].text, peanut.reasons[0].tone) == (
+            "Mentions butter, but it is peanut butter; not the same ingredient", "minus")
+        assert peanut.rank_reason == f"Below #{peanut.rank - 1}: not the same ingredient."
+        assert aisle[peanut.product_id] != aisle[butter.product_id]
+    plan = flow.run_nl(SAME_OR_NOT)
+    for line, product in (("olive oil", "Extra Virgin Olive Oil 500ml"),
+                          ("olive oil", "Olive Oil 1L"),
+                          ("chicken breast", "Boneless Skinless Chicken Breast"),
+                          ("tomatoes", "Crushed Tomatoes Canned 796ml"),
+                          ("tomatoes", "Tomato Paste 156ml")):      # not mainly tomato; canned
+        row = _by_name(_rank(plan, line))[product]
+        assert row.tier == "same", (line, product)
+        assert row.reasons[0].text.startswith("Match"), (line, product)
+    picks = {ln.name: ln.product_id for ln in plan.basis.lines}
+    assert picks == {"chicken breast": _id("Boneless Skinless Chicken Breast"),
+                     "tomatoes": _id("Canned Diced Tomatoes"),
+                     "olive oil": _id("Extra Virgin Olive Oil 500ml"),
+                     "butter": _id("Butter Salted 454g")}
+    sauce = _by_name(_rank(plan, "tomatoes"))["Tomato Sauce Jar 650ml"]
+    assert sauce.tier == "other" and sauce.reasons[0].text.startswith(
+        "Mentions tomato, but it is mainly sauce")
+
+
+def test_with_no_pick_the_ingredients_aisle_is_the_one_its_own_products_share():
+    """A line the plan bought nothing for (the meal plan's Options for it) has no pick: the
+    ingredient's aisle is the one most candidates mainly about its word share."""
+    from pantry_planner.alternatives import _aisle_of, _another_food, _catalog
+
+    catalog = _catalog()
+    butter, peanut, pbj = (_id("Butter Salted 454g"), _id("Canadian Peanut Butter Cream"),
+                           _id("Nestles PBJ"))
+    found = {butter: "exact", peanut: "exact", pbj: "exact"}
+    aisle = _aisle_of("butter", None, found, catalog)
+    assert aisle == catalog[butter].subcategory
+    assert _another_food(catalog[peanut], "butter", aisle)
+    assert not _another_food(catalog[butter], "butter", aisle)
+    # nothing mainly about the word: no aisle, and nothing is moved
+    assert _aisle_of("butter", None, {peanut: "exact"}, catalog) is None
+    assert not _another_food(catalog[peanut], "butter", None)
+
+
 def test_a_thin_pool_adds_same_aisle_substitutes():
     from pantry_planner import flow
     from tests.seed_catalog import SEED_PRODUCTS

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
@@ -48,6 +49,7 @@ from .models import (
     AltTrip,
     BasisLine,
     HeldBack,
+    OutOfReach,
     Pin,
     PlanBasis,
     Product,
@@ -113,7 +115,12 @@ class BasisError(ValueError):
 
 class PinError(ValueError):
     """A pin names a line that is not planned, an unknown product, or a product
-    that is not a choice for the line; the message says which and why."""
+    that is not a choice for the line; the message says which and why, and
+    `line_no` names the line when the pin's line is known."""
+
+    def __init__(self, message: str, line_no: int | None = None):
+        super().__init__(message)
+        self.line_no = line_no
 
 
 class LineNotPlannedError(PinError):
@@ -261,6 +268,42 @@ def closeness(line_name: str, product: Product) -> tuple[int, int, int, int]:
             0 if head_noun(product.name) == word else 1)
 
 
+def _aisle_of(word: str, pick: Product | None, found: dict[int, str],
+              catalog: dict[int, Product]) -> str | None:
+    """The aisle the ingredient `word` is in: the pick's subcategory, or with no pick the one
+    most of the same-ingredient candidates mainly about `word` share (ties by name); None
+    when that is not known."""
+    if pick is not None:
+        return pick.subcategory or None
+    shared = Counter(catalog[pid].subcategory for pid, m in found.items()
+                     if _TIER[m] == "same" and pid in catalog and catalog[pid].subcategory
+                     and head_noun(catalog[pid].name) == word)
+    return min(shared.items(), key=lambda kv: (-kv[1], kv[0]))[0] if shared else None
+
+
+def _another_food(product: Product, word: str, aisle: str | None) -> bool:
+    """A product that matches the line's words but is another food: not mainly the
+    ingredient (its head noun is not the line's ingredient word) and from another aisle than
+    the ingredient's. Canadian Peanut Butter Cream for butter is; Extra Virgin Olive Oil for
+    olive oil, Boneless Skinless Chicken Breast for chicken breast, Tomato Paste for canned
+    tomatoes (the canned aisle) are not."""
+    return (bool(word) and aisle is not None and head_noun(product.name) != word
+            and (product.subcategory or None) != aisle)
+
+
+def _what_it_is(product: Product, word: str) -> str:
+    """What a product that mentions `word` is instead: the word with the one before it in
+    the product's name ("peanut butter"), its own head noun when the name starts with the
+    word ("mainly sauce"), or its name when only its description mentions it."""
+    toks = tokens(product.name)
+    if word not in toks:
+        return product.name
+    if toks.index(word) > 0:
+        return f"{toks[toks.index(word) - 1]} {word}"
+    head = head_noun(product.name)
+    return f"mainly {head}" if head else product.name
+
+
 def _spec(line: BasisLine, name: str | None = None) -> IngredientSpec:
     if name is not None:      # the head noun alone: no purchase form to require
         return IngredientSpec(name=name, quantity=line.quantity, unit=line.unit)
@@ -357,8 +400,8 @@ def _gather(s: Session, basis: PlanBasis, line_nos: list[int], catalog: dict[int
             current: dict[int, int], extra_ids: set[int]) -> _Gathered:
     from .origins import filter_pool
 
-    planned = planned_lines(basis)
-    lines = [planned[n] for n in sorted(set(line_nos))]
+    by_no = {ln.line_no: ln for ln in basis.lines}
+    lines = [by_no[n] for n in sorted(set(line_nos))]
     pools = _fetch_pools(s, basis, lines, catalog, current)
     ids = sorted(({pid for p in pools.values() for pid in p.found} | extra_ids) & set(catalog))
     origins, demo = _evidence(ids, catalog)
@@ -386,16 +429,20 @@ def effective_picks(basis: PlanBasis, pins: dict[int, int] | None = None) -> dic
 
 def validate_pins(basis: PlanBasis, pins: list[Pin] | None = None, *,
                   catalog: dict[int, Product] | None = None,
-                  session: Session | None = None) -> dict[int, ValidPin]:
+                  session: Session | None = None,
+                  open_lines: bool = False) -> dict[int, ValidPin]:
     """The basis's own pins merged with `pins` (a later pin for a line wins), each checked:
     the line is planned, the product exists, it is a candidate for the line (any level,
     or a same-aisle substitute), the plan's origin exclusion does not hold it back, and it
     has an offer in range under the plan's price cap. A pin equal to the plan's own pick
-    is dropped, which is how a swap is undone. Raises PinError naming the problem."""
+    is dropped, which is how a swap is undone. Raises PinError naming the problem.
+    `open_lines`: a pin may also fill a line of the basis the plan bought nothing for (a
+    meal plan's line the resolve left out), checked the same way."""
     pins = list(pins or [])
     if len(pins) > MAX_PINS:
         raise PinError(f"at most {MAX_PINS} pins, got {len(pins)}")
-    planned = planned_lines(basis)
+    planned = ({ln.line_no: ln for ln in basis.lines} if open_lines
+               else planned_lines(basis))
     merged: dict[int, int] = {}
     for p in [*basis.pins, *pins]:
         merged[p.line_no] = p.product_id
@@ -404,9 +451,9 @@ def validate_pins(basis: PlanBasis, pins: list[Pin] | None = None, *,
     catalog = catalog if catalog is not None else (_catalog() if merged else {})
     for line_no, pid in merged.items():
         if line_no not in planned:
-            raise LineNotPlannedError(_not_planned(line_no, planned))
+            raise LineNotPlannedError(_not_planned(line_no, planned), line_no)
         if pid not in catalog:
-            raise PinError(f"unknown product id {pid} in pins")
+            raise PinError(f"unknown product id {pid} in pins", line_no)
     merged = {n: pid for n, pid in merged.items() if pid != planned[n].product_id}
     if not merged:
         return {}
@@ -427,13 +474,19 @@ def validate_pins(basis: PlanBasis, pins: list[Pin] | None = None, *,
         if pid in g.held:
             country, fld = g.held[pid]
             raise PinError(f"{product.name} is evidenced as {_where(country, fld)}, which "
-                           "this plan excludes")
+                           "this plan excludes", line_no)
+        if match is None and not _available(basis, offers.get(pid)) and pid not in near:
+            # Not found because no store sells it at all (same-aisle substitutes are looked
+            # up among offers): that is the reason, not the words.
+            raise PinError(f"{product.name} cannot be bought for line {line_no} "
+                           f"({line.name}): {_unavailable(basis, None)}", line_no)
         if match is None:
             raise PinError(f"{product.name} is not an option for line {line_no} "
-                           f"({line.name}): {_why_not(basis, line, product, near.get(pid))}")
+                           f"({line.name}): {_why_not(basis, line, product, near.get(pid))}",
+                           line_no)
         if not _available(basis, offers.get(pid)):
             raise PinError(f"{product.name} cannot be bought for line {line_no} "
-                           f"({line.name}): {_unavailable(basis, near.get(pid))}")
+                           f"({line.name}): {_unavailable(basis, near.get(pid))}", line_no)
         out[line_no] = ValidPin(product_id=pid, tier=_TIER[match], match=match)
     return out
 
@@ -468,12 +521,12 @@ def _why_not(basis: PlanBasis, line: BasisLine, product: Product, anywhere: dict
 
 
 def _unavailable(basis: PlanBasis, nearest: dict | None) -> str:
-    within = (f"within {basis.max_km:g} km" if basis.max_km is not None else "at any store")
+    within = f" within {basis.max_km:g} km" if basis.max_km is not None else ""
     cap = basis.constraints.max_item_price
     if nearest is None:
-        return f"no store {within} sells it" + (
+        return f"no store{within} sells it" + (
             f" at or under the ${cap:.2f} per-item price cap" if cap is not None else "")
-    return (f"no store {within} sells it"
+    return (f"no store{within} sells it"
             + (f" at or under the ${cap:.2f} per-item price cap" if cap is not None else "")
             + f"; the nearest offer is {nearest['store']}, {nearest['dist_km']:.1f} km away, "
               f"at ${nearest['price']:.2f}")
@@ -481,11 +534,13 @@ def _unavailable(basis: PlanBasis, nearest: dict | None) -> str:
 
 # ─── Offers ──────────────────────────────────────────────────
 
-def _matrix(s: Session, basis: PlanBasis, ids: set[int], max_km: float | None) -> list:
+def _matrix(s: Session, basis: PlanBasis, ids: set[int], max_km: float | None,
+            stores_off: frozenset[int] = frozenset()) -> list:
     from .nlsearch.sql_builder import build_price_matrix_sql
 
     lat, lon = _point(basis)
-    sql, params = build_price_matrix_sql(sorted(ids), lat, lon, max_km)
+    sql, params = build_price_matrix_sql(sorted(ids), lat, lon, max_km,
+                                         exclude_stores=sorted(stores_off))
     return list(s.execute(text(sql), params).mappings())
 
 
@@ -639,6 +694,9 @@ class _Row:
     semantic: tuple[int, int, int, int]     # closeness()
     preferred: bool = False         # matches an entry of the shopper's preference
     trip: AltTrip | None = None
+    # why a row the trip effect was worked out for has none (TripEffect): "its price on your
+    # plan's trips is unknown (...)"
+    trip_note: str = ""
 
     def trip_cents(self, located: bool) -> float:
         if self.trip is not None:
@@ -668,31 +726,75 @@ def _trip_of(options) -> tuple[float, list[str], dict[int, str]] | None:
     return best.total_cost, list(best.stores), {i.product_id: i.store_name for i in best.items}
 
 
-def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
-                      ) -> AlternativeRanking:
+@dataclass
+class TripEffect:
+    """The trip effect of another planner, in place of the cart's single trip: the meal
+    plan's trips (mealplan/options.py). The ranking keeps everything else (candidates, held
+    back, availability, facts, ORDER, reasons); only these come from the other planner:
+
+    needs      line_no -> the amount the purchase is for on that planner's trip, not the
+               recipe's one batch;
+    on_trip    the stores that trip stops at now;
+    packs      the packs that planner buys of a product for `needs`, before its effect is
+               worked out;
+    effect     product_id -> (the trip with that product on every line of the purchase,
+               the packs then bought, what that planner then charges for them, and why
+               there is no trip when there is none): its own figures, so a row says what
+               choosing it costs there;
+    where      how the reasons name the trip total ("your plan's trips");
+    stores_off the stores that planner's shopper turned off: no offer of theirs counts, so a
+               candidate sold in range only there is unavailable.
+
+    The current pick may have no offer in range any more (a line no longer stocked, the
+    reason to look for another product): it is then left out of the rows instead of making
+    the ranking stale."""
+    needs: dict[int, tuple[float, str] | None]
+    on_trip: set[str]
+    packs: Callable[[Product, list], int]
+    effect: Callable[[int], tuple[AltTrip | None, int | None, float | None, str]]
+    where: str = "your trip"
+    max_eval: int = MAX_TRIP_EVAL
+    stores_off: frozenset[int] = frozenset()
+
+
+def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT, *,
+                      effect: TripEffect | None = None,
+                      open_lines: bool = False) -> AlternativeRanking:
     """The other products that could fill `line_no`, in ORDER, with the cart's pick always
     included and flagged current. Deterministic for the same basis and database; no LLM,
-    no write. Raises BasisError or PinError (a bad basis, an unplanned line, a bad pin)."""
+    no write. Raises BasisError or PinError (a bad basis, an unplanned line, a bad pin).
+    `effect`: another planner's trips stand in for the cart's (TripEffect).
+
+    `open_lines`: `line_no` may be a line the plan bought nothing for. It then has no
+    current pick: the rows are every product that could fill it (and each unpicked line of
+    the same name, which one choice fills too), none flagged current."""
     from . import flow
     from .origins import preference_rank
 
     check_basis(basis)
     if not 1 <= limit <= MAX_LIMIT:
         raise BasisError(f"limit must be 1..{MAX_LIMIT}, got {limit}")
-    planned = planned_lines(basis)
+    planned = ({ln.line_no: ln for ln in basis.lines} if open_lines
+               else planned_lines(basis))
     if line_no not in planned:
         raise LineNotPlannedError(_not_planned(line_no, planned))
     catalog = _catalog()
     with Session(db.engine()) as s:
         valid = validate_pins(basis, [], catalog=catalog, session=s)
         picks = effective_picks(basis, {n: v.product_id for n, v in valid.items()})
-        current_id = picks[line_no]
-        group = sorted(n for n, pid in picks.items() if pid == current_id)
+        current_id = picks.get(line_no)
+        if current_id is None:
+            name = " ".join(planned[line_no].name.casefold().split())
+            group = sorted(n for n, ln in planned.items() if n not in picks
+                           and " ".join(ln.name.casefold().split()) == name)
+        else:
+            group = sorted(n for n, pid in picks.items() if pid == current_id)
         unknown = sorted({pid for pid in picks.values() if pid not in catalog})
         if unknown:
             raise StaleBasisError(f"product id(s) {unknown} in the basis are no longer in "
                                   "the catalog; plan the recipe again")
-        g = _gather(s, basis, group, catalog, picks, {current_id})
+        g = _gather(s, basis, group, catalog, picks,
+                    set() if current_id is None else {current_id})
         # A shared purchase is swapped for every line it covers, so a candidate must fill
         # each of them; it carries the loosest of its matches.
         found: dict[int, str] = dict(g.pools[group[0]].found)
@@ -703,32 +805,49 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
         held = sorted((pid for pid in g.pools[line_no].found if pid in g.held),
                       key=lambda pid: (catalog[pid].name, pid))
         selectable = {pid: m for pid, m in found.items() if pid not in g.held}
-        if current_id not in selectable:
+        if current_id is not None and current_id not in selectable:
             selectable[current_id] = "outside"
         stats = _stats(s, sorted(selectable))
         located = has_location(basis)
         basket = set(picks.values())
-        rows_all = _matrix(s, basis, basket | set(selectable), basis.max_km) if located else []
+        rows_all = _matrix(s, basis, basket | set(selectable), basis.max_km,
+                           effect.stores_off if effect else frozenset()) if located else []
 
     offers = flow._cheapest_offers(rows_all, basis.path) if located else {}
-    if located and current_id not in offers:
-        raise StaleBasisError(f"{catalog[current_id].name}, the cart's pick for line "
-                              f"{line_no}, has no offer in range any more; plan the recipe "
-                              "again")
+    if located and current_id is not None and current_id not in offers:
+        if effect is None:
+            raise StaleBasisError(f"{catalog[current_id].name}, the cart's pick for line "
+                                  f"{line_no}, has no offer in range any more; plan the "
+                                  "recipe again")
+        # Another planner's line no longer stocked: its options are what the shopper needs.
+        del selectable[current_id]
     unavailable = [pid for pid in selectable
                    if pid != current_id and not _available(basis, offers.get(pid))]
     for pid in unavailable:
         del selectable[pid]
+    reach = []
+    if effect is not None and located and unavailable:
+        reach = sorted(unavailable, key=lambda pid: (
+            _TIER_RANK[_TIER[found[pid]]], closeness(planned[line_no].name, catalog[pid]),
+            pid))[:limit]
+        reach = _out_of_reach(basis, reach, catalog, effect.stores_off)
 
     synthetic = settings().offers_synthetic
-    needs = _needs(basis, group)
+    # A row whose words match but which is another food moves to the other tier.
+    word = _strong_head(planned[line_no].name)
+    aisle = _aisle_of(word, catalog.get(current_id) if current_id is not None else None,
+                      g.pools[line_no].found, catalog)
+    needs = [effect.needs.get(n) for n in group] if effect else _needs(basis, group)
     lines = [planned[n] for n in group]
     library = basis.path == "library"
     use_pref = bool(basis.preference)
     worst = len(basis.preference) * 2
-    baseline = _price(basis, picks, catalog, rows_all)
-    base_trip = _trip_of(baseline[1]) if located else None
-    base_stores = set(base_trip[1]) if base_trip else set()
+    if effect is None:
+        baseline = _price(basis, picks, catalog, rows_all)
+        base_trip = _trip_of(baseline[1]) if located else None
+        base_stores = set(base_trip[1]) if base_trip else set()
+    else:
+        base_trip, base_stores = None, set(effect.on_trip)
 
     rows: list[_Row] = []
     for pid, match in selectable.items():
@@ -739,7 +858,7 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
                              on_trip=o["store"] in base_stores)
         else:
             offer = AltOffer(store="", price=p.price)
-        cart_packs = flow._packs(p, needs)
+        cart_packs = effect.packs(p, needs) if effect else flow._packs(p, needs)
         fit, cost, pack_reason = _pack_facts(p, offer.price, cart_packs, needs, lines, library)
         unit_price, unit_basis = _unit_price(p, offer.price)
         st = stats.get(pid)
@@ -747,7 +866,9 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
                   if st is not None and st[1] > 0 and st[0] is not None else None)
         pref = preference_rank(g.origins.get(pid), basis.preference) if use_pref else worst
         rows.append(_Row(
-            product=p, match=match, tier=_TIER[match], current=pid == current_id,
+            product=p, match=match,
+            tier=("other" if _TIER[match] == "same" and _another_food(p, word, aisle)
+                  else _TIER[match]), current=pid == current_id,
             offer=offer, packs=cart_packs, pack_fit=fit, cost_for_need=cost,
             pack_reason=pack_reason, unit_price=unit_price, unit_basis=unit_basis,
             origin=_alt_origin(g.origins.get(pid), pid in g.demo),
@@ -755,12 +876,17 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
             rating=rating, organic="organic" in tokens(f"{p.name} {p.description}"),
             semantic=closeness(planned[line_no].name, p)))
 
-    if located and base_trip is not None:
+    max_eval = effect.max_eval if effect else MAX_TRIP_EVAL
+    if located and (base_trip is not None or effect is not None):
         rows.sort(key=lambda r: r.pre_key(use_pref))
-        to_eval = rows[:MAX_TRIP_EVAL] + [r for r in rows[MAX_TRIP_EVAL:] if r.current]
+        to_eval = rows[:max_eval] + [r for r in rows[max_eval:] if r.current]
         for r in to_eval:
-            r.trip, packs_after = _trip_effect(basis, picks, group, r.product.id, catalog,
-                                               rows_all, base_trip, baseline[0])
+            charged: float | None = None
+            if effect is not None:
+                r.trip, packs_after, charged, r.trip_note = effect.effect(r.product.id)
+            else:
+                r.trip, packs_after = _trip_effect(basis, picks, group, r.product.id, catalog,
+                                                   rows_all, base_trip, baseline[0])
             if packs_after is not None:
                 # The product may already fill another line: one purchase, packs for both
                 # needs. The cart counts what the re-price buys.
@@ -771,11 +897,16 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
             price = r.trip.buys_at.price if r.trip and r.trip.buys_at else r.offer.price
             r.pack_fit, r.cost_for_need, r.pack_reason = _pack_facts(
                 r.product, price, r.packs, needs, lines, library)
+            if effect is not None:
+                # What the other planner charges for the packs it buys, never a figure of
+                # this module's own (unknown when it leaves the packs unknown).
+                r.cost_for_need = charged
             r.unit_price, r.unit_basis = _unit_price(r.product, price)
 
     rows.sort(key=lambda r: r.key(located, use_pref))
+    where = effect.where if effect else "your trip"
     items = [_item(i + 1, r, rows[i - 1] if i else None, planned[line_no], located, use_pref,
-                   synthetic)
+                   synthetic, where=where, max_eval=max_eval)
              for i, r in enumerate(rows)]
     shown = items[:limit] + [it for it in items[limit:] if it.current]
     need = _total_need(needs)
@@ -785,7 +916,7 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
         need_qty=need[0] if need else None, need_uom=need[1] if need else None,
         order=list(ORDER), ranking_text=RANKING_TEXT,
         items=shown,
-        held_back=[_held(pid, catalog, g) for pid in held],
+        held_back=[_held(pid, catalog, g) for pid in held], out_of_reach=reach,
         total=len(items), unavailable=len(unavailable),
         counts=AltCounts(
             exact=sum(1 for it in items if it.match == "exact"),
@@ -795,6 +926,38 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
             says_organic=sum(1 for it in items if it.says_organic),
             rated=sum(1 for it in items if it.rating is not None)),
         data_note=DATA_NOTE if synthetic else "")
+
+
+def _out_of_reach(basis: PlanBasis, pids: list[int], catalog: dict[int, Product],
+                  stores_off: frozenset[int]) -> list[OutOfReach]:
+    """Why each of these candidates has no offer in range at a store that is on, from every
+    store's offers (one price-matrix query): stores_off when every offer within the plan's
+    distance is at a store the shopper turned off (those stores, nearest first), out_of_range
+    when none is within it (the nearest offer, at a store that is on when one sells it), and
+    not_stocked when no store sells it. One over the price cap at a store in range is left
+    out: it is neither."""
+    with Session(db.engine()) as s:
+        rows = _matrix(s, basis, set(pids), None)
+    by_pid: dict[int, list] = {}
+    for r in sorted(rows, key=lambda r: (r["dist_km2"], r["price"], r["store_id"])):
+        by_pid.setdefault(r["product_id"], []).append(r)
+    reach2 = basis.max_km ** 2 if basis.max_km is not None else math.inf
+    out = []
+    for pid in pids:
+        sold = by_pid.get(pid, [])
+        near = [r for r in sold if r["dist_km2"] <= reach2]
+        if near and all(r["store_id"] in stores_off for r in near):
+            out.append(OutOfReach(product_id=pid, product=catalog[pid].name, why="stores_off",
+                                  stores=list(dict.fromkeys(r["store_name"] for r in near))))
+        elif sold and not near:
+            r = next((r for r in sold if r["store_id"] not in stores_off), sold[0])
+            out.append(OutOfReach(
+                product_id=pid, product=catalog[pid].name, why="out_of_range",
+                nearest=AltBuy(store=r["store_name"], price=r["price"],
+                               distance_km=round(math.sqrt(max(r["dist_km2"], 0.0)), 1))))
+        elif not sold:
+            out.append(OutOfReach(product_id=pid, product=catalog[pid].name, why="not_stocked"))
+    return out
 
 
 def _stats(s: Session, ids: list[int]) -> dict[int, tuple[float | None, int]]:
@@ -864,22 +1027,25 @@ def _held(pid: int, catalog: dict[int, Product], g: _Gathered) -> HeldBack:
 
 
 def _item(rank: int, r: _Row, above: _Row | None, line: BasisLine, located: bool,
-          use_pref: bool, synthetic: bool) -> RankedAlternative:
+          use_pref: bool, synthetic: bool, *, where: str = "your trip",
+          max_eval: int = MAX_TRIP_EVAL) -> RankedAlternative:
     p = r.product
     return RankedAlternative(
         rank=rank, current=r.current, product_id=p.id, product=p.name, brand=p.brand,
         size=p.unit_size, tier=r.tier, match=r.match, offer=r.offer, packs=r.packs,
         pack_fit=r.pack_fit, cost_for_need=r.cost_for_need, unit_price=r.unit_price,
         unit_basis=r.unit_basis, trip=r.trip, origin=r.origin, rating=r.rating,
-        says_organic=r.organic, reasons=_reasons(r, line, located, synthetic),
-        rank_reason=_rank_reason(rank, r, above, line, located, use_pref, synthetic))
+        says_organic=r.organic, reasons=_reasons(r, line, located, synthetic, where),
+        rank_reason=_rank_reason(rank, r, above, line, located, use_pref, synthetic,
+                                 where=where, max_eval=max_eval))
 
 
 def _money(cents: float) -> str:
     return f"${abs(cents) / 100:.2f}"
 
 
-def _reasons(r: _Row, line: BasisLine, located: bool, synthetic: bool) -> list[Reason]:
+def _reasons(r: _Row, line: BasisLine, located: bool, synthetic: bool,
+             where: str = "your trip") -> list[Reason]:
     """At most five reasons, each from a fact on the row: the match, the pack, the origin,
     the trip and the rating. Unknowns are stated as unknown."""
     p = r.product
@@ -902,6 +1068,10 @@ def _reasons(r: _Row, line: BasisLine, located: bool, synthetic: bool) -> list[R
                           text="The cart's pick; it matches none of the recipe's words",
                           tone="info"),
     }[r.match]
+    if r.tier == "other" and _TIER[r.match] == "same":
+        word = _strong_head(line.name)
+        match = Reason(code="match", text=f"Mentions {word}, but it is "
+                       f"{_what_it_is(p, word)}; not the same ingredient", tone="minus")
     o = r.origin
     origin_text = o.label + (f': "{o.verbatim}"' if o.verbatim else "") + (
         " (demo label photo)" if o.demo else "")
@@ -910,11 +1080,12 @@ def _reasons(r: _Row, line: BasisLine, located: bool, synthetic: bool) -> list[R
     if r.trip is not None:
         t = r.trip
         if t.delta < 0:
-            text_, tone = f"${-t.delta:.2f} less on your trip", "plus"
+            text_, tone = f"${-t.delta:.2f} less on {where}", "plus"
         elif t.delta > 0:
-            text_, tone = f"${t.delta:.2f} more on your trip", "minus"
+            text_, tone = f"${t.delta:.2f} more on {where}", "minus"
         else:
-            text_, tone = "No change to your trip total", "info"
+            text_, tone = ("No change to your trip total" if where == "your trip"
+                           else f"No change to the total of {where}"), "info"
         if t.stops_delta > 0:
             text_ += f" and {t.stops_delta} more stop{'s' if t.stops_delta > 1 else ''}"
             tone = "minus"
@@ -924,7 +1095,9 @@ def _reasons(r: _Row, line: BasisLine, located: bool, synthetic: bool) -> list[R
             text_ += f"; already bought for line {t.merges_with_line}"
         out.append(Reason(code="trip", text=text_, tone=tone))
     elif located:
-        out.append(Reason(code="trip", text="Trip effect not worked out", tone="unknown"))
+        out.append(Reason(code="trip", text=(r.trip_note[:1].upper() + r.trip_note[1:]
+                                             if r.trip_note else "Trip effect not worked out"),
+                          tone="unknown"))
     else:
         out.append(Reason(code="trip", text="Catalog price: the plan has no shopping location",
                           tone="info"))
@@ -938,16 +1111,20 @@ def _reasons(r: _Row, line: BasisLine, located: bool, synthetic: bool) -> list[R
 
 
 def _rank_reason(rank: int, r: _Row, above: _Row | None, line: BasisLine, located: bool,
-                 use_pref: bool, synthetic: bool) -> str:
+                 use_pref: bool, synthetic: bool, *, where: str = "your trip",
+                 max_eval: int = MAX_TRIP_EVAL) -> str:
     """Why `r` sits below the row above it: the first ranking key on which it is worse,
     in plain words."""
     if above is None:
         return "Ranked first: nothing ranks above it."
-    return f"Below #{rank - 1}: {_first_difference(r, above, line, located, use_pref, synthetic)}."
+    why = _first_difference(r, above, line, located, use_pref, synthetic, where=where,
+                            max_eval=max_eval)
+    return f"Below #{rank - 1}: {why}."
 
 
 def _first_difference(r: _Row, above: _Row, line: BasisLine, located: bool, use_pref: bool,
-                      synthetic: bool) -> str:
+                      synthetic: bool, *, where: str = "your trip",
+                      max_eval: int = MAX_TRIP_EVAL) -> str:
     if _TIER_RANK[r.tier] > _TIER_RANK[above.tier]:
         return ("not the same ingredient" if r.tier == "other"
                 else "it matches none of the recipe's words")
@@ -970,10 +1147,12 @@ def _first_difference(r: _Row, above: _Row, line: BasisLine, located: bool, use_
         return "its origin is further down your preference"
     mine, theirs = r.trip_cents(located), above.trip_cents(located)
     if mine != theirs:
+        if mine == math.inf and r.trip_note:
+            return r.trip_note
         if mine == math.inf:
-            return f"its trip effect was not worked out (only the first {MAX_TRIP_EVAL} are)"
+            return f"its trip effect was not worked out (only the first {max_eval} are)"
         if located:
-            return f"{_money(mine - theirs)} more on your trip"
+            return f"{_money(mine - theirs)} more on {where}"
         return f"it costs {_money(mine - theirs)} more"
     mine_c = round(r.cost_for_need * 100) if r.cost_for_need is not None else math.inf
     theirs_c = round(above.cost_for_need * 100) if above.cost_for_need is not None else math.inf
