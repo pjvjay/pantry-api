@@ -56,6 +56,7 @@ from .models import (
     TripOption,
     WeekPlan,
 )
+from .version import app_version
 
 # Tool annotations are hints for the client, not security: a read tool
 # never writes, and nothing here reaches outside the seeded catalog, so
@@ -88,7 +89,7 @@ _ORIGIN_STATUSES = {"resolved", "conflicting", "unknown", "lookup_failed", "gues
 
 server = MCPServer(
     name="pantry-planner",
-    version="0.1.0",
+    version=app_version(),   # the release, or "unknown" (version.py)
     instructions=(
         "Grocery planning over a seeded Canadian store catalog. Browse "
         "recipes and products for free; plan_recipe / plan_from_text run "
