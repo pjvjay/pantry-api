@@ -102,7 +102,9 @@ class ToolCallResult:
 def forced_tool_call(*, model: str, system: str, messages: list[dict],
                      tool: dict, max_tokens: int,
                      temperature: float | None = None,
-                     thinking_budget: int | None = None) -> ToolCallResult:
+                     thinking_budget: int | None = None,
+                     gemini_temperature: float | None = None,
+                     gemini_reasoning_effort: str | None = None) -> ToolCallResult:
     """Make one call that MUST invoke `tool`; return its arguments + usage.
 
     `tool` is an Anthropic tool definition (name, description,
@@ -110,13 +112,19 @@ def forced_tool_call(*, model: str, system: str, messages: list[dict],
     given, and only to Anthropic: Gemini thinks according to
     GEMINI_REASONING_EFFORT, and Gemini 3 is documented to degrade (loops,
     worse output) at temperatures below its default, so neither is sent.
+    A call site that has measured otherwise for its own task sets
+    `gemini_temperature` and/or `gemini_reasoning_effort` ("" = omit, the
+    model's default): the matcher's describer (matching/describe.py), a
+    classification whose answers were consistent across runs only at
+    temperature 0 without a reasoning effort.
     """
     provider, name = split_model_spec(model)
     if not name:
         raise LLMConfigError(f"model spec {model!r} names no model", provider=provider)
     if provider == GEMINI:
         result = _gemini_call(name, system=system, messages=messages, tool=tool,
-                              max_tokens=max_tokens)
+                              max_tokens=max_tokens, temperature=gemini_temperature,
+                              reasoning_effort=gemini_reasoning_effort)
     else:
         result = _anthropic_call(name, system=system, messages=messages, tool=tool,
                                  max_tokens=max_tokens, temperature=temperature,
@@ -174,7 +182,8 @@ def gemini_max_tokens(max_tokens: int, reasoning_effort: str) -> int:
 
 
 def gemini_request_body(name: str, *, system: str, messages: list[dict], tool: dict,
-                        max_tokens: int, reasoning_effort: str) -> dict:
+                        max_tokens: int, reasoning_effort: str,
+                        temperature: float | None = None) -> dict:
     """The chat/completions body: the forced tool as a function call."""
     chat: list[dict] = [{"role": "system", "content": system}] if system else []
     for m in messages:
@@ -199,11 +208,14 @@ def gemini_request_body(name: str, *, system: str, messages: list[dict], tool: d
     }
     if reasoning_effort:
         body["reasoning_effort"] = reasoning_effort
+    if temperature is not None:
+        body["temperature"] = temperature
     return body
 
 
 def _gemini_call(name: str, *, system: str, messages: list[dict], tool: dict,
-                 max_tokens: int) -> ToolCallResult:
+                 max_tokens: int, temperature: float | None = None,
+                 reasoning_effort: str | None = None) -> ToolCallResult:
     cfg = settings()
     key = cfg.gemini_api_key
     if not key:
@@ -213,8 +225,10 @@ def _gemini_call(name: str, *, system: str, messages: list[dict], tool: dict,
             provider=GEMINI)
     url = (cfg.gemini_base_url or DEFAULT_GEMINI_BASE_URL).rstrip("/") + "/chat/completions"
     body = gemini_request_body(name, system=system, messages=messages, tool=tool,
-                               max_tokens=max_tokens,
-                               reasoning_effort=cfg.gemini_reasoning_effort)
+                               max_tokens=max_tokens, temperature=temperature,
+                               reasoning_effort=(cfg.gemini_reasoning_effort
+                                                 if reasoning_effort is None
+                                                 else reasoning_effort))
     trace: dict[str, Any] = {"step": tool["name"]}
     data = _gemini_post(url, body, key=key, name=name, trace=trace)
     result = _gemini_tool_result(data, name=name, tool_name=tool["name"],

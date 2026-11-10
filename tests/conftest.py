@@ -26,13 +26,18 @@ os.environ["PANTRY_DATA_DIR"] = tempfile.mkdtemp(prefix="pantry-data-tests-")
 @pytest.fixture(autouse=True)
 def _no_embedder():
     """Tests never reach Ollama (or Gemini): a name no seed knows is matched by words, as it is
-    when the embedder is down, unless a test installs a fake embedder (tests/fake_embedder.py).
+    when the embedder is down, unless a test installs a fake embedder (tests/fake_embedder.py)
+    or a fake describer (tests/test_describe.py).
     The committed seeds are the matcher's only knowledge."""
-    from pantry_planner.matching import embed
+    from pantry_planner.matching import cache, describe, embed
 
     embed.set_embedder(None)
+    describe.set_describer(None)
+    cache.reset()
     yield
     embed.set_embedder(None)
+    describe.set_describer(None)
+    cache.reset()
 
 
 @pytest.fixture(autouse=True)

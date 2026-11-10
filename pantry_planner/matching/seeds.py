@@ -17,6 +17,16 @@ database serves is pantry-db's copy of seeds/products.json, so in practice none 
 
 A type's centroid is the normalized mean of its products' vectors: an ingredient name no seed
 knows is mapped to the types whose centroids are nearest (matcher.py).
+
+Two sets of vectors, chosen by EMBEDDING_MODEL:
+
+  embeddinggemma (default)   product_embeddings.json and ingredient_types.json's vectors: each
+                             product's profile_text and each seed name, as EmbeddingGemma embeds
+                             them through Ollama
+  gemini:<model>             gemini_vectors.json: each product's and each seed name's identity
+                             string (identity_text: "butter | block | salted"), as Gemini's
+                             embedding API embeds it. Only what identifies an item is embedded,
+                             never its culinary role or aisle, so look-alikes stay apart.
 """
 from __future__ import annotations
 
@@ -115,6 +125,7 @@ class SeedIngredient:
     form: str
     variant: str
     vector: tuple[float, ...]
+    identity: str = ""          # the identity string its Gemini vector embeds ("" otherwise)
 
 
 @dataclass
@@ -125,9 +136,29 @@ class Seeds:
     centroids: dict[str, tuple[float, ...]] = field(default_factory=dict)
     model: str = ""
     dims: int = 0
+    text: str = "profile"       # what the vectors embed: "profile" text or "identity" strings
 
     def types(self) -> set[str]:
         return {p.product_type for p in self.profiles.values()}
+
+
+GEMINI_VECTORS = "gemini_vectors.json"
+GEMINI_ABOUT = (
+    "Gemini embedding vectors (OpenAI-compatible embeddings endpoint, unit length) of each "
+    "product's identity string, product_type | form | variant (identity_text), and of each seed "
+    "ingredient name's identity string as the describer (matching/describe.py) identified it. "
+    "Kept beside the EmbeddingGemma seeds; EMBEDDING_MODEL chooses which set is read.")
+
+
+def identity_text(product_type: str, form: str, variant: str) -> str:
+    """What identifies an item, and nothing else: "butter | block | salted"."""
+    return " | ".join([product_type.strip().lower(), form.strip().lower(), variant.strip().lower()])
+
+
+def _embedding_model() -> str:
+    from ..config import settings
+
+    return settings().embedding_model
 
 
 def _read(name: str) -> dict:
@@ -140,9 +171,12 @@ def load() -> Seeds:
     """The three seed files, as committed. Missing files load as empty: nothing is then known
     by meaning and every name is matched by words."""
     prof = _read("product_profiles.json")
-    vecs = _read("product_embeddings.json")
     types = _read("ingredient_types.json")
-    out = Seeds(model=vecs.get("model", ""), dims=int(vecs.get("dims", 0) or 0))
+    gemini = _embedding_model().startswith("gemini:")
+    vecs = _read(GEMINI_VECTORS) if gemini else _read("product_embeddings.json")
+    out = Seeds(model=vecs.get("model", ""), dims=int(vecs.get("dims", 0) or 0),
+                text="identity" if gemini else "profile")
+    gem_ing = vecs.get("ingredients", {}) if gemini else {}
     for p in prof.get("products", []):
         out.profiles[p["id"]] = Profile(
             id=p["id"], hash=p["hash"], product_type=p["product_type"],
@@ -158,7 +192,9 @@ def load() -> Seeds:
             name=i["name"], exact_types=tuple(i["exact_types"]),
             substitute_types=tuple(i["substitute_types"]),
             unrelated_types=tuple(i["unrelated_types"]), form=i["form"], variant=i["variant"],
-            vector=tuple(i["vector"]))
+            vector=(tuple(gem_ing[key]["vector"]) if key in gem_ing else ()) if gemini
+            else tuple(i["vector"]),
+            identity=gem_ing.get(key, {}).get("identity", ""))
     by_type: dict[str, list[tuple[float, ...]]] = {}
     for pid, v in out.vectors.items():
         by_type.setdefault(out.profiles[pid].product_type, []).append(v)

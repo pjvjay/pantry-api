@@ -12,6 +12,8 @@ committed seeds that pantry-api reads at request time with no model call.
              and the demo starters, its exact, substitute and unrelated product types
              (Gemini), and its EmbeddingGemma query vector
   review     the review page (one row per product, flagged rows first)
+  gemini-vectors  seeds/gemini_vectors.json: Gemini embedding vectors of each product's and
+             each seed name's identity string, for EMBEDDING_MODEL=gemini:<model>
   golden     evals/substitutes_golden.json: a Gemini judge labels each seed ingredient's top
              candidates, old word matching and new matching together, Exact / Substitute /
              Complement / Irrelevant (evals/substitutes_eval.py scores them)
@@ -372,6 +374,36 @@ def cmd_embed(g: Gemini, args) -> None:
     print(f"embedded {len(vectors)} profiles")
 
 
+def cmd_gemini_vectors(g: Gemini, args) -> None:
+    """seeds/gemini_vectors.json: Gemini embedding vectors of each product's identity string
+    (product_type | form | variant, from its reviewed profile) and of each seed ingredient's
+    (its labelled exact type, form and variant), for EMBEDDING_MODEL=gemini:<model>. No
+    describer call: the seed names' identities come from their reviewed labels. Each text
+    counts against Gemini's embedding quota (1,000 a day on the free tier)."""
+    import os
+
+    prof = json.loads((SEEDS / "product_profiles.json").read_text())["products"]
+    types = json.loads((SEEDS / "ingredient_types.json").read_text())["ingredients"]
+    model = args.gemini_embedding_model.split(":", 1)[-1]
+    e = emb.GeminiEmbedder(model, os.environ.get("GEMINI_API_KEY", ""), max_wait_s=600.0)
+    p_text = [mseeds.identity_text(p["product_type"], p["form"], p["variant"]) for p in prof]
+    i_text = {k: mseeds.identity_text(i["exact_types"][0] if i["exact_types"] else i["name"],
+                                      i["form"], i["variant"]) for k, i in types.items()}
+    texts = list(dict.fromkeys(p_text + list(i_text.values())))
+    vec: dict[str, list[float]] = {}
+    vec.update(zip(texts, e.embed(texts), strict=True))
+    _write(SEEDS / mseeds.GEMINI_VECTORS, {
+        "v": 1, "model": model, "dims": emb.GEMINI_DIMS, "text": "identity",
+        "about": mseeds.GEMINI_ABOUT,
+        "products": [{"id": p["id"], "hash": p["hash"], "identity": t,
+                      "vector": [round(x, 6) for x in vec[t]]}
+                     for p, t in zip(prof, p_text, strict=True)],
+        "ingredients": {k: {"identity": t, "vector": [round(x, 6) for x in vec[t]]}
+                        for k, t in i_text.items()}})
+    print(f"embedded {len(texts)} identity strings "
+          f"({len(prof)} products, {len(i_text)} seed names)")
+
+
 # ─── types ───────────────────────────────────────────────────
 
 TYPES_SYSTEM = """You map recipe ingredient names to the product types a grocery catalog \
@@ -664,13 +696,14 @@ def main(argv: list[str] | None = None) -> None:
     global MODEL
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("step", choices=["profiles", "check", "embed", "types", "review", "golden",
-                                     "spent"])
+                                     "gemini-vectors", "spent"])
     ap.add_argument("--cache-dir", type=Path,
                     default=Path("~/.cache/pantry-matching").expanduser())
     ap.add_argument("--budget", type=int, default=40, help="Gemini HTTP attempts allowed, "
                     "counted across every run that shares the cache dir")
     ap.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     ap.add_argument("--embedding-model", default="embeddinggemma")
+    ap.add_argument("--gemini-embedding-model", default="gemini:gemini-embedding-001")
     ap.add_argument("--out", default="~/Downloads/pantry-design/product-profiles-review.html")
     ap.add_argument("--depth", type=int, default=20, help="golden: candidates per method")
     ap.add_argument("--model", default=MODEL, help="a Gemini flash model, gemini:<name>")
@@ -684,7 +717,8 @@ def main(argv: list[str] | None = None) -> None:
         print(f"{g.spent()} of {args.budget} Gemini calls spent")
         return
     {"profiles": cmd_profiles, "check": cmd_check, "embed": cmd_embed, "types": cmd_types,
-     "review": cmd_review, "golden": cmd_golden}[args.step](g, args)
+     "review": cmd_review, "golden": cmd_golden,
+     "gemini-vectors": cmd_gemini_vectors}[args.step](g, args)
     print(f"Gemini calls spent so far: {g.spent()} of {args.budget}")
 
 

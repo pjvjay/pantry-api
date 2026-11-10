@@ -100,7 +100,10 @@ Everything's env-var driven. Defaults in `pantry_planner/config.py`.
 | `OFFERS_SYNTHETIC`           | `true`                           | Store prices, stock and reviews are the seeded demo data; the alternatives ranking labels them so (`data_note`, "(demo)" ratings). Set false only for real offers |
 | `STORES_SYNTHETIC`           | `true`                           | The stores are fictional: a calendar export names each as "<store> (demo store)" and never gives its seeded address, and `/mealplan/stores` says `synthetic: true` so the console labels them demo stores |
 | `OLLAMA_URL`                 | `http://127.0.0.1:11434`         | The local Ollama that embeds an ingredient name no seed knows (product matching); empty = off, and such names are matched by words |
-| `EMBEDDING_MODEL`            | `embeddinggemma`                 | The Ollama embedding model; it must be the one the seeds were made with |
+| `EMBEDDING_MODEL`            | `embeddinggemma`                 | The embedding model: an Ollama model the EmbeddingGemma seeds were made with, or `gemini:gemini-embedding-001`, Gemini's embedding API (with `GEMINI_API_KEY`) against `seeds/gemini_vectors.json` |
+| `DESCRIBER_MODEL`            | *(unset: off)*                   | A model spec (`gemini:gemini-3.1-flash-lite`) that identifies an ingredient name no seed knows (its catalog type, form and variant) before it is matched; cached in the database (docs/meal-planning.md "Describing names no seed knows") |
+| `MATCHING_DAILY_EMBED_TEXTS`, `MATCHING_DAILY_DESCRIBE_CALLS` | `900`, `200` | The matcher's daily allowances of model requests, counted per UTC day across instances (`matching_usage`); Gemini's free tier allows 1,000 embedding texts a day. `0` = no limit |
+| `MATCHING_EMBED_TEXTS_PER_MINUTE` | `100` | How many texts a minute the Gemini embedder sends (the free tier's limit; each text of a request counts). A call for more waits in scripts and, in the app, falls back to words for the rest. `0` = unpaced, for a paid key |
 | `PANTRY_DATA_DIR`            | `~/.pantry-data`                 | The embedding cache and the matching event log (`matching/events.jsonl`) |
 | `MATCHING_EVENTS`            | `1`                              | `0` stops the shown / picked / passed-over log |
 

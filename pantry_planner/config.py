@@ -237,8 +237,21 @@ class Settings:
     # ingredient names no seed knows, with EMBEDDING_MODEL; "" turns it off, and those names
     # are then matched by words. PANTRY_DATA_DIR holds the embedding cache and the matching
     # event log (matching/events.py); MATCHING_EVENTS=0 stops the log.
+    # EMBEDDING_MODEL "gemini:gemini-embedding-001" uses Gemini's embedding API (GEMINI_API_KEY)
+    # and seeds/gemini_vectors.json instead of Ollama and the EmbeddingGemma seeds.
+    # DESCRIBER_MODEL (a model spec, e.g. "gemini:gemini-3.1-flash-lite"; "" = off): an ingredient
+    # name no seed knows is first identified by this model (matching/describe.py).
     ollama_url: str = "http://127.0.0.1:11434"
     embedding_model: str = "embeddinggemma"
+    describer_model: str = ""
+    # The matcher's daily allowance of model requests (matching/cache.py), counted per UTC day
+    # across every instance: embedding texts (Gemini's free tier allows 1,000) and describer
+    # calls. 0 = no limit. MATCHING_DAILY_EMBED_TEXTS, MATCHING_DAILY_DESCRIBE_CALLS.
+    # Gemini's embedding requests are also paced to MATCHING_EMBED_TEXTS_PER_MINUTE texts a
+    # minute (the free tier's limit; 0 = unpaced, for a paid key).
+    matching_daily_embed_texts: int = 900
+    matching_daily_describe_calls: int = 200
+    matching_embed_texts_per_minute: int = 100
     data_dir: str = "~/.pantry-data"
     matching_events: bool = True
 
@@ -292,6 +305,12 @@ class Settings:
             not in {"0", "false", "no", "off"},
             ollama_url=os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").strip(),
             embedding_model=os.environ.get("EMBEDDING_MODEL", "").strip() or "embeddinggemma",
+            describer_model=os.environ.get("DESCRIBER_MODEL", "").strip(),
+            matching_daily_embed_texts=int(os.environ.get("MATCHING_DAILY_EMBED_TEXTS", "900")),
+            matching_daily_describe_calls=int(
+                os.environ.get("MATCHING_DAILY_DESCRIBE_CALLS", "200")),
+            matching_embed_texts_per_minute=int(
+                os.environ.get("MATCHING_EMBED_TEXTS_PER_MINUTE", "100")),
             data_dir=os.environ.get("PANTRY_DATA_DIR", "").strip() or "~/.pantry-data",
             matching_events=os.environ.get("MATCHING_EVENTS", "1").strip().lower()
             not in {"0", "false", "no", "off"},
