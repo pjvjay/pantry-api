@@ -509,7 +509,9 @@ picks in demo mode, no model call even live), and its lines, so the console cost
 selection by whole packs as the basket does. `POST /mealplan/basket` lists each chosen
 recipe's ingredients with the draft's product, its store and distance, price, share of the
 whole packs, origin evidence and labels, and what is not available nearby and why (the
-origin rule, out of range, or not stocked). The
+origin rule, out of range, or not stocked), and on every line what the origin rule left out
+(`held_back`: say, Ground Beef Medium 900g, "Product of USA", when the line buys a Canadian
+ground beef instead) and across the basket how many products (`origin_held_back`). The
 draft's prefs carry a budget, and the schedule warns `over_budget` (should fix) when a
 strategy's total passes it. Details, sources and the JSON contracts:
 `docs/meal-planning.md`.

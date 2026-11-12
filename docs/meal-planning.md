@@ -420,8 +420,11 @@ it there), the product is one of its candidates, no hard rule keeps it out (it a
 contains-tag the resolve's product lacks, and contains nothing the plan's diet, avoid list or
 the recipe's diets leave out), the plan's origin exclusion does not hold it back, and a store
 in range sells it. Otherwise it is 422 `pin_invalid` with `recipe_key`, `line_no` and the reason
-("... is evidenced as United States (made or packed there), which this plan excludes"). A pin
-applies to every meal of its recipe, wherever the meals move. Pins are bounded: at most 40
+("... is evidenced as United States (made or packed there), which this plan excludes"). The
+Ingredients stage (`/mealplan/basket` and `/mealplan/stores`, through `basket.purchases`)
+checks every rule but the origin exclusion: a pin evidence holds back only after it was
+pinned, or once the rule is turned on, stays on its line there, held back, for the shopper to
+answer. A pin applies to every meal of its recipe, wherever the meals move. Pins are bounded: at most 40
 lines per recipe, line numbers of at most 4 digits, product ids from 1 to 2^31 - 1. An
 approved trip whose products change through a pin becomes `needs_review` by the fingerprint
 rule below.
@@ -543,12 +546,14 @@ as the resolve's does, so new evidence is new picks without a restart.
 - `null` otherwise (a pasted recipe, a page with no preview image).
 
 **`POST /mealplan/basket`** takes `{draft}` and answers `{v, rev, recipes[],
-unavailable_count, est_total, budget, latency_ms}` for every recipe with a meal
-(`mealplan/basket.py`): `{key, title, image, status, meals, lines[]}` (`image` as the
+unavailable_count, est_total, budget, latency_ms, origin_held_back}` for every recipe with a
+meal (`mealplan/basket.py`): `{key, title, image, status, meals, lines[]}` (`image` as the
 catalog's), each line `{line_no, ingredient, need, product, store, price, cost_for_need,
-origin, pinned, shared_with, available, unavailable_kind, why_unavailable}`. Products are the
-draft's (resolved, then pinned, checked as the schedule checks them); a recipe not resolved yet
-lists no lines. Each product is bought once for every meal at its cheapest offer in range
+origin, pinned, shared_with, available, unavailable_kind, why_unavailable, held_back}`.
+Products are the draft's (resolved, then pinned, checked as the schedule checks them, but
+for a pin the origin exclusion now holds back: the schedule refuses it, the basket keeps it
+on its line, held back, for the shopper to answer there); a recipe not resolved yet lists no
+lines. Each product is bought once for every meal at its cheapest offer in range
 (`store`, and `price` one pack there: the catalog's `pack_price`), by the whole-pack rule
 above; each line's `cost_for_need` is its share of the packs by need (one pack for a line of
 unknown need), so the lines add up to `est_total`. Trips that buy on several dates can buy
@@ -561,6 +566,24 @@ priced; a product no store in range sells names the nearest offer. `unavailable_
 `not_stocked` (null when available); for a line the
 resolve bought nothing for, the kind and the reason are the planner's ("its only candidate
 is evidenced as coming from United States, which this plan excludes").
+
+What the origin exclusion did is on every line, not only on those left without a product.
+`held_back` names, at most three, the products it left out for the line, each `{product_id,
+product, country, claim, field, store, price}`: the line's own product first when the
+exclusion now holds it back (planned or pinned), then the candidates for its ingredient it
+dropped from the pool the plan picks from (`catalog.held_back`: the resolve's retrieval run
+without the exclusion; the same item, or what works instead when there is no same item; by
+words, the products sharing the most words with the line), those a store that is on sells in
+range, in the order the plan ranks them without the exclusion. So a Ground Beef line that
+buys Ground Beef Lean names Ground Beef Medium 900g, "Product of USA". `country` is the
+excluded country the evidence matched; `claim` that evidence in a shopper's words, the
+label's own text when there is one, else "From United States" for a full claim and "Made in
+United States" for a processing one (`origins.exclusion_claim`, from the row the verdict
+rests on); `field` `ingredient_origin`, `manufactured_in` or `conflicting_evidence`, as
+`origins.filter_pool` reports it; `store` and `price` the offer it would have been bought at
+(null when it has none). `origin_held_back` counts the products left out across the basket,
+each once, every line's before the three it shows. A plan with no exclusion names none: `[]`
+and `0`. Products of unknown origin are never held back.
 
 ## Storage times: sources, day semantics, safety and quality
 

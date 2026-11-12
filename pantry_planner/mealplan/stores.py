@@ -29,7 +29,8 @@ from .models import GeoPoint, MealPlanDraft, PlanStore, PlanStores
 
 
 def stores(draft: MealPlanDraft) -> PlanStores:
-    """Raises MealPlanError (REST 422) as /mealplan/schedule does."""
+    """Raises MealPlanError (REST 422) as /mealplan/schedule does, but for a pin the origin
+    exclusion holds back, which basket.purchases keeps and leaves out of products_total."""
     pu = basket.purchases(draft)
     ids = sorted(pu.buying.keys() - pu.held.keys())
     lat, lon, max_km = schedule.shopping_point(draft.settings)

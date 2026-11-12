@@ -543,9 +543,10 @@ class Prepared:
     cook: dict[str, tuple[int, str, str]]
 
 
-def prepare(draft: MealPlanDraft) -> Prepared:
+def prepare(draft: MealPlanDraft, *, keep_held: bool = False) -> Prepared:
     """Read and place a draft. Raises MealPlanError (REST 422) for a draft no schedule can
-    be computed for, a pin alternatives.validate_pins refuses among them."""
+    be computed for, a pin alternatives.validate_pins refuses among them; with `keep_held`,
+    not a pin the origin exclusion holds back (pins.check_pins)."""
     from .pins import check_pins
 
     if draft.v != 1:
@@ -554,7 +555,7 @@ def prepare(draft: MealPlanDraft) -> Prepared:
     products = {p.id: p for p in db.load_all_products()}
     docs = {key: recipe_doc(dr.ref, dr.servings) for key, dr in sorted(draft.recipes.items())}
     chosen = {key: line_products(draft, key, docs[key], products) for key in docs}
-    check_pins(draft, docs, products)
+    check_pins(draft, docs, products, keep_held=keep_held)
     meals, days = place.place(draft)
 
     board = Board(days=draft.days, used={})

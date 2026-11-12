@@ -399,6 +399,27 @@ def _rows_disagree(rows, field: str) -> bool:
     return any(a != b for a in seen for b in seen)
 
 
+def _usable(evidence: list) -> list:
+    """The rows that can state an origin: not a guess, not a non-claim, not an
+    importer's address, and naming a country in either field."""
+    return [e for e in evidence
+            if e.source != "guess"
+            and (e.claim_type or "unknown") not in NON_CLAIMS
+            and not e.importer_only
+            and ((e.manufactured_in or "").strip()
+                 or (e.ingredient_origin or "").strip())]
+
+
+def _strength(e) -> tuple[int, int, int]:
+    """How strongly one row states its origin: a full claim, then its
+    confidence, then a transcribed label over a crowd-sourced record."""
+    return (
+        1 if (e.claim_type or "") in FULL_CLAIMS else 0,
+        CONF_ORDER.get(e.confidence or "low", 1),
+        1 if e.source in LABEL_SOURCES else 0,
+    )
+
+
 def resolve_origin(product_id: int, product_name: str, evidence: list
                    ) -> ProductOrigin:
     """Collapse one product's evidence into a summary.
@@ -407,12 +428,7 @@ def resolve_origin(product_id: int, product_name: str, evidence: list
     manufacturing countries the status is `conflicting` and nothing is
     ranked. Picking a winner here would be inventing a fact.
     """
-    usable = [e for e in evidence
-              if e.source != "guess"
-              and (e.claim_type or "unknown") not in NON_CLAIMS
-              and not e.importer_only
-              and ((e.manufactured_in or "").strip()
-                   or (e.ingredient_origin or "").strip())]
+    usable = _usable(evidence)
 
     if not usable:
         has_guess = any(e.source == "guess" for e in evidence)
@@ -443,14 +459,8 @@ def resolve_origin(product_id: int, product_name: str, evidence: list
             note="sources disagree; not ranked")
 
     # Strongest claim wins as the representative row: a transcribed label
-    # beats a crowd-sourced database record at equal confidence.
-    def strength(e):
-        return (
-            1 if (e.claim_type or "") in FULL_CLAIMS else 0,
-            CONF_ORDER.get(e.confidence or "low", 1),
-            1 if e.source in LABEL_SOURCES else 0,
-        )
-
+    # beats a crowd-sourced database record at equal confidence (_strength).
+    #
     # Fields are merged across rows, not read off the strongest one: one
     # source often knows only where the ingredients came from and another
     # only where it was processed, and keeping just the winner's fields
@@ -461,7 +471,7 @@ def resolve_origin(product_id: int, product_name: str, evidence: list
     # turns "Made in Canada" into "Product of Canada" — promoting a
     # processing country into the >=98%-domestic-content tier, which is
     # the precise misreading this module exists to prevent.
-    ranked_rows = sorted(usable, key=strength, reverse=True)
+    ranked_rows = sorted(usable, key=_strength, reverse=True)
     ing_row = next((r for r in ranked_rows
                     if (r.ingredient_origin or "").strip()), None)
     mfg_row = next((r for r in ranked_rows
@@ -470,7 +480,7 @@ def resolve_origin(product_id: int, product_name: str, evidence: list
     # The representative row is whichever supplied the country shown first,
     # so the flat verbatim/confidence/source are a receipt for the flat
     # claim_type rather than a mix of two sources.
-    rep = mfg_row or ing_row or max(usable, key=strength)
+    rep = mfg_row or ing_row or max(usable, key=_strength)
     return ProductOrigin(
         product_id=product_id, product_name=product_name, status="resolved",
         claim_type=rep.claim_type or "unknown",
@@ -733,6 +743,31 @@ def filter_pool(products: list[Product], *, exclude: list[str] | None = None,
         else:
             kept.append(p)
     return kept, dropped
+
+
+def exclusion_claim(evidence: list, country: str, field: str) -> str:
+    """What a product's evidence says that filter_pool dropped it for, in a
+    shopper's words. `country` and `field` are its verdict; `evidence` the
+    product's rows (db.load_origin_evidence). The words are the verbatim
+    text of the row the verdict rests on, the strongest usable row (ranked as
+    resolve_origin ranks them) naming that country in that field, or in
+    either field for conflicting_evidence: "Product of USA". A row with no
+    text says it by its claim: "From United States" for a full claim, "Made
+    in United States" for a processing one, "From United States, as the
+    source states" for any other."""
+    fields = (("ingredient_origin", "manufactured_in") if field == "conflicting_evidence"
+              else (field,))
+    row = next((r for r in sorted(_usable(evidence), key=_strength, reverse=True)
+                if any(country_matches(getattr(r, f, "") or "", country) for f in fields)),
+               None)
+    if row is not None and (row.verbatim or "").strip():
+        return row.verbatim.strip()
+    claim = (row.claim_type or "") if row is not None else ""
+    if claim in FULL_CLAIMS:
+        return f"From {country}"
+    if claim in PROCESSING_CLAIMS:
+        return f"Made in {country}"
+    return f"From {country}, as the source states"
 
 
 def basket_coverage(lines: list[tuple[int, float]], *,

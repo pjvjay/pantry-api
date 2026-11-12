@@ -96,13 +96,18 @@ def forbidden(draft: MealPlanDraft, keys: list[str]) -> frozenset[str]:
 
 
 def check_pins(draft: MealPlanDraft, docs: dict[str, RecipeDoc],
-               products: dict[int, Product]) -> None:
+               products: dict[int, Product], *, keep_held: bool = False) -> None:
     """Every pin of every resolved recipe through alternatives.validate_pins, with what the
     plan and the recipe leave out (forbidden); the first that fails is 422 pin_invalid,
     naming the recipe, the line and the reason. A pin may fill a line the resolve bought
     nothing for, checked the same way. A recipe not resolved yet (or whose resolve failed)
     buys nothing, so its pins wait until it is. A pin seen for the first time is logged as a
-    pick (matching/events.py)."""
+    pick (matching/events.py).
+
+    `keep_held` (the Ingredients stage: basket.purchases) checks every rule but the origin
+    exclusion: a pin the exclusion now holds back (evidence added since the pin, or the rule
+    turned on after it) stays on its line, which the basket shows held back, as it shows a
+    planned product the exclusion holds back, for the shopper to answer there."""
     from .. import alternatives
     from ..matching import events
 
@@ -111,6 +116,8 @@ def check_pins(draft: MealPlanDraft, docs: dict[str, RecipeDoc],
         if not lines or key not in docs or resolved is None or resolved.status not in USABLE:
             continue
         basis = meal_basis(draft, key, docs[key])
+        if keep_held:
+            basis = basis.model_copy(update={"exclude_origin": []})
         pins = [Pin(line_no=int(raw), product_id=pid) for raw, pid in sorted(lines.items())]
         try:
             valid = alternatives.validate_pins(basis, pins, catalog=products, open_lines=True,

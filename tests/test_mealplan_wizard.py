@@ -639,6 +639,13 @@ def test_an_excluded_product_is_not_available_and_never_priced(chosen, reseed):
     assert line["origin"] == {"country": "United States", "claim": "Made in United States, "
                               "ingredients may be imported", "status": "evidenced",
                               "preferred_rank": None}
+    # named on its own line, with the offer it would have been bought at
+    offer = _cheapest_offer(THIGHS)
+    assert line["held_back"] == [{
+        "product_id": THIGHS, "product": "Chicken Thighs Bone-In", "country": "United States",
+        "claim": "Made in United States", "field": "manufactured_in",
+        "store": offer["store_name"], "price": offer["price"]}]
+    assert (excl["origin_held_back"], plain["origin_held_back"]) == (1, 0)
     assert excl["unavailable_count"] == 1
     (before,) = [ln for r in plain["recipes"] for ln in r["lines"]
                  if ln["product"]["id"] == THIGHS]
@@ -681,6 +688,8 @@ def test_a_line_the_resolve_left_out_says_which_rule_left_it_out(reseed):
         None, False, "origin_excluded")
     assert garlic["why_unavailable"] == ("its only candidate is evidenced as coming from "
                                          "United States, which this plan excludes")
+    assert [(h["product_id"], h["claim"]) for h in garlic["held_back"]] == [
+        (GARLIC, "Made in United States")]
     assert body["unavailable_count"] == 1
     assert all(ln["unavailable_kind"] is None for r in body["recipes"] for ln in r["lines"]
                if ln["available"])
@@ -1002,9 +1011,157 @@ def test_the_stores_route_refuses_what_the_schedule_refuses(chosen, monkeypatch)
     assert client().post("/mealplan/stores", json={"draft": chosen}).status_code == 429
 
 
-# ─── Picks that follow the evidence ──────────────────────────
+# ─── What the origin rule left out; picks that follow the evidence ─
 
 US = ["United States"]
+SAUCES = ("lib:tomato_penne", "lib:spaghetti_bolognese", "lib:beef_rice_bowl")
+BEEF_LEAN, BEEF_MEDIUM, BEEF_EXTRA_LEAN = 22, 35, 36     # the catalog's three ground beefs
+
+
+def _us_label(pid: int, verbatim: str) -> None:
+    """A package label read as a full claim of the United States, in its own words."""
+    from pantry_planner import db
+
+    db.save_origin_evidence([dict(
+        product_id=pid, source="label-photo", source_ref=f"{pid}-label.jpg",
+        claim_type="product-of", verbatim=verbatim, ingredient_origin="United States",
+        manufactured_in="United States", confidence="high", importer_only=False, note="",
+        observed_at="")])
+
+
+def _resolved_draft(keys, settings: dict | None = None, **knobs) -> dict:
+    """Library recipes and demo starters, two dinners each, resolved in demo mode with
+    `knobs` (as the console resolves them), under the plan's `settings`."""
+    from pantry_planner.mealplan.models import RecipeRef
+    from pantry_planner.mealplan.resolve import resolve_one
+
+    recipes, resolved = {}, {}
+    for key in keys:
+        kind, _, name = key.partition(":")
+        ref = RecipeRef(key=key, **({"slug": name} if kind == "lib" else {"starter": name}))
+        recipes[key] = {"ref": ref.model_dump(mode="json"), "wanted": 2, "slot": "dinner"}
+        resolved[key] = resolve_one(ref, **knobs).model_dump(mode="json")
+    return {"start_date": "2026-10-09", "days": 7, "recipes": recipes, "resolved": resolved,
+            "settings": settings or {}}
+
+
+def _named(line: dict) -> list[tuple[int, str, str]]:
+    return [(h["product_id"], h["claim"], h["field"]) for h in line["held_back"]]
+
+
+def test_each_line_names_what_the_origin_rule_left_out_in_the_plans_order(reseed):
+    """Ground beef: the plan's first choice is evidenced as from the United States, then the
+    choice it makes instead. Both lines buying ground beef name both, in that order, with
+    their evidence in a shopper's words and the offer each would have been bought at, and buy
+    a third. Canned tomatoes: the first choice, by a label claim with no text of its own.
+    Each product is counted once, though four lines name them; a plan that excludes nothing
+    names nothing."""
+    first = _resolved("lib:beef_rice_bowl")[1]
+    _us_label(first, "Product of USA")
+    second = _resolved("lib:beef_rice_bowl", exclude=US)[1]
+    _us_evidence(second)
+    tomatoes = _resolved("lib:tomato_penne")[2]
+    _us_label(tomatoes, "")
+    draft = _resolved_draft(SAUCES, {"exclude_origin": US}, exclude=US)
+    body = bask(draft)
+    lines = {(r["key"], ln["ingredient"]): ln for r in body["recipes"] for ln in r["lines"]}
+    for key in ("lib:beef_rice_bowl", "lib:spaghetti_bolognese"):
+        beef = lines[key, "Ground Beef"]
+        assert beef["available"] and beef["product"]["id"] not in (first, second)
+        assert _named(beef) == [(first, "Product of USA", "ingredient_origin"),
+                                (second, "Made in United States", "manufactured_in")]
+        for h in beef["held_back"]:
+            offer = _cheapest_offer(h["product_id"])
+            assert (h["product"], h["country"], h["store"], h["price"]) == (
+                PRODUCTS[h["product_id"]]["name"], "United States", offer["store_name"],
+                offer["price"])
+    for key in ("lib:tomato_penne", "lib:spaghetti_bolognese"):
+        assert _named(lines[key, "Canned Tomatoes"]) == [
+            (tomatoes, "From United States", "ingredient_origin")]
+    others = [ln for (_key, name), ln in lines.items()
+              if name not in ("Ground Beef", "Canned Tomatoes")]
+    assert others and all(ln["held_back"] == [] for ln in others)
+    assert body["origin_held_back"] == 3
+    plain = bask({**draft, "settings": {}})
+    assert plain["origin_held_back"] == 0
+    assert all(ln["held_back"] == [] for r in plain["recipes"] for ln in r["lines"])
+
+
+def test_a_line_names_at_most_three_and_only_what_a_store_that_is_on_sells(reseed):
+    """Every yellow onion evidenced as from the United States: the bolognese's Yellow Onion
+    buys nothing and names the first three of the four, the plan's first choice first, while
+    origin_held_back counts all four. One sold only at stores the shopper turned off is
+    neither named nor counted."""
+    onions = [pid for pid, p in PRODUCTS.items()
+              if {"yellow", "onion"} <= set(p["name"].lower().replace("onions", "onion").split())]
+    first = _resolved("lib:spaghetti_bolognese")[3]
+    assert first in onions and len(onions) == 4
+    for pid in onions:
+        _us_label(pid, "Grown in USA")
+    draft = _resolved_draft(["lib:spaghetti_bolognese"], {"exclude_origin": US}, exclude=US)
+
+    def onion(body: dict) -> dict:
+        (line,) = [ln for r in body["recipes"] for ln in r["lines"]
+                   if ln["ingredient"] == "Yellow Onion"]
+        return line
+
+    body = bask(draft)
+    line = onion(body)
+    assert (line["product"], line["unavailable_kind"]) == (None, "origin_excluded")
+    named = [h["product_id"] for h in line["held_back"]]
+    assert len(named) == 3 and named[0] == first and set(named) < set(onions)
+    assert body["origin_held_back"] == 4
+    _sql("DELETE FROM store_products WHERE product_id = :p AND store_id NOT IN (:a, :b)",
+         p=first, a=OFF[0], b=OFF[1])
+    off = bask({**draft, "settings": {"exclude_origin": US, "stores_off": OFF}})
+    assert sorted(h["product_id"] for h in onion(off)["held_back"]) == sorted(
+        set(onions) - {first})
+    assert off["origin_held_back"] == 3
+
+
+def test_a_pinned_product_the_rule_now_holds_back_is_named_first_on_its_line(reseed):
+    """Pinned, then evidenced as from the United States: the Ingredients stage keeps the pin
+    and shows its line held back, naming it first and then what else the rule dropped, while
+    the schedule refuses the pin until the shopper answers it there."""
+    draft = _resolved_draft(["lib:beef_rice_bowl"])
+    planned = draft["resolved"]["lib:beef_rice_bowl"]["lines"][0]["product_id"]
+    pin, other = [p for p in (BEEF_EXTRA_LEAN, BEEF_MEDIUM, BEEF_LEAN) if p != planned][:2]
+    draft["pins"] = {"lib:beef_rice_bowl": {"1": pin}}
+    before = bask(draft)
+    (beef,) = [ln for r in before["recipes"] for ln in r["lines"] if ln["line_no"] == 1]
+    assert (beef["product"]["id"], beef["pinned"], beef["available"]) == (pin, True, True)
+    _us_evidence(pin, other)
+    ruled = {**draft, "settings": {"exclude_origin": US}}
+    body = bask(ruled)
+    (beef,) = [ln for r in body["recipes"] for ln in r["lines"] if ln["line_no"] == 1]
+    assert (beef["product"]["id"], beef["pinned"], beef["available"],
+            beef["unavailable_kind"]) == (pin, True, False, "origin_excluded")
+    assert [h["product_id"] for h in beef["held_back"]] == [pin, other]
+    assert (body["origin_held_back"], body["unavailable_count"]) == (2, 1)
+    assert _stores(ruled)["products_total"] == _stores(draft)["products_total"] - 1
+    r = client().post("/mealplan/schedule", json=ruled)
+    assert (r.status_code, r.json()["detail"]["error"]) == (422, "pin_invalid")
+
+
+def test_a_line_matched_by_words_names_the_products_sharing_the_most_words(reseed, by_words):
+    """Matched by words (names no seed knows, with the embedder down), a line's candidates are
+    the products sharing the most words with it. A shopper's recipe resolved before the
+    evidence: Yellow Onion names its own product, the yellow onion, and not the green onions
+    the rule also holds back, which share one word with it; Diced Tomatoes buys the petite
+    ones and names the canned diced tomatoes the rule dropped."""
+    _changed()          # what is cached was matched by meaning
+    yellow, green, diced, petite = 12, 142, 15, 165
+    for pid in (yellow, green, diced):
+        _us_label(pid, "Product of USA")
+    recipe = doc_recipe("my:onions", "Onion Salsa", 2, [
+        ("Yellow Onion", 200, "g", yellow), ("Green Onions", 50, "g", green),
+        ("Diced Tomatoes", 400, "g", petite)], wanted=2)
+    body = bask({**doc_draft({"my:onions": recipe}), "settings": {"exclude_origin": US}})
+    named = {ln["ingredient"]: [h["product_id"] for h in ln["held_back"]]
+             for r in body["recipes"] for ln in r["lines"]}
+    assert named == {"Yellow Onion": [yellow], "Green Onions": [green],
+                     "Diced Tomatoes": [diced]}
+    assert body["origin_held_back"] == 3
 
 
 def test_picks_follow_new_evidence_with_no_cache_cleared(reseed):
@@ -1034,13 +1191,50 @@ def test_picks_follow_new_evidence_with_no_cache_cleared(reseed):
              "recipes": {ref["key"]: {"ref": ref, "wanted": 2, "slot": "dinner"}},
              "resolved": {ref["key"]: before}}
     stale = beef(bask(draft))
-    assert stale["unavailable_kind"] == "origin_excluded"
+    assert (stale["unavailable_kind"], _named(stale)[0][0]) == ("origin_excluded", pick)
     after = resolve()
     now = after["lines"][0]["product_id"]
     assert not after["cached"] and now not in (pick, None)
     assert catalog_pick() == now
     fresh = beef(bask({**draft, "resolved": {ref["key"]: after}}))
     assert fresh["available"] and fresh["product"]["id"] == now
+    assert [h["product_id"] for h in fresh["held_back"]] == [pick]
+
+
+def test_what_the_rule_left_out_calls_no_model_and_is_the_same_live(reseed, monkeypatch):
+    """Live, the resolve's selector is a model, but what the rule left out of each line is
+    the planner's retrieval and ranking with no model, as the catalog's picks are: the same
+    in demo mode and live, for a library recipe and a starter."""
+    from pantry_planner import config, flow, llm, selector
+    from pantry_planner.mealplan import catalog
+    from pantry_planner.nlsearch import planner, query_parser
+    from pantry_planner.router import classifier
+
+    _us_label(_resolved("lib:beef_rice_bowl")[1], "Product of USA")
+    _us_label(_resolved("starter:tomato_pilaf")[3], "Grown in USA")
+    draft = _resolved_draft(["lib:beef_rice_bowl", "starter:tomato_pilaf"],
+                            {"exclude_origin": US}, exclude=US)
+
+    def boom(*_a, **_k):
+        raise AssertionError("the basket called a model")
+
+    for mod, name in ((llm, "forced_tool_call"), (selector, "forced_tool_call"),
+                      (classifier, "forced_tool_call"), (query_parser, "forced_tool_call"),
+                      (selector, "call_selector"), (flow, "call_selector"),
+                      (query_parser, "parse_input"), (planner, "parse_input")):
+        monkeypatch.setattr(mod, name, boom)
+    catalog.clear_cache()
+    demo = bask(draft)
+    catalog.clear_cache()
+    config.set_runtime_overrides(demo_mode=False)
+    try:
+        assert not config.settings().demo_mode
+        live = bask(draft)
+    finally:
+        config.clear_runtime_overrides()
+    assert demo["origin_held_back"] == 2
+    del demo["latency_ms"], live["latency_ms"]
+    assert live == demo
 
 
 def test_the_evidence_is_read_once_a_request_and_only_under_an_origin_rule(chosen,

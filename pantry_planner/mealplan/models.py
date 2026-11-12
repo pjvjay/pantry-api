@@ -630,6 +630,24 @@ class BasketOrigin(BaseModel):
     preferred_rank: int | None
 
 
+class HeldBackProduct(BaseModel):
+    """A product the plan's origin exclusion left out of a basket line. country is the
+    excluded country its evidence matched; claim that evidence in a shopper's words: the
+    label's own text when there is one ("Product of USA"), else "From United States" for a
+    full claim and "Made in United States" for a processing one (origins.exclusion_claim);
+    field the evidence that matched, as origins.filter_pool reports it. store and price are
+    the offer it would have been bought at, its cheapest in range at a store that is on
+    (None when it has none)."""
+    product_id: int
+    product: str
+    country: str
+    claim: str
+    # ingredient_origin | manufactured_in | conflicting_evidence
+    field: str
+    store: str | None
+    price: float | None
+
+
 class BasketLine(BaseModel):
     """One ingredient of one recipe and the product the plan buys for it. need is the
     recipe's amount for all its meals; price is one pack at the store; cost_for_need is this
@@ -638,7 +656,15 @@ class BasketLine(BaseModel):
     names the other recipes buying the same product. unavailable_kind says why an unavailable
     line is: origin_excluded, stores_off (sold in range only at stores the shopper turned
     off), out_of_range or not_stocked (None when it is available, or no product was chosen
-    for another reason)."""
+    for another reason).
+
+    held_back is what the plan's origin exclusion left out for this line, at most three: the
+    line's own product (planned or pinned) first when the exclusion now holds it back, then
+    the candidates for its ingredient the exclusion dropped from the pool the plan picks
+    from (the same item, or what works instead when there is no same item:
+    catalog.held_back), those a store that is on sells in range, in the order the plan ranks
+    them without the exclusion. Empty when the plan excludes no country or nothing was
+    dropped."""
     line_no: int
     ingredient: str
     need: str
@@ -653,6 +679,7 @@ class BasketLine(BaseModel):
     unavailable_kind: Literal["origin_excluded", "stores_off", "not_stocked",
                               "out_of_range"] | None
     why_unavailable: str | None
+    held_back: list[HeldBackProduct] = Field(default_factory=list)
 
 
 class BasketRecipe(BaseModel):
@@ -707,7 +734,9 @@ class Basket(BaseModel):
     price and origin. est_total is what the whole packs cost, each product bought once for
     every meal at its cheapest store in range, by the catalog's rule (catalog.whole_packs):
     the summed need over the pack size rounded up, and at least one pack (one in all) when a
-    line's need or the pack size is unknown. Trips that buy a product on two dates can cost more."""
+    line's need or the pack size is unknown. Trips that buy a product on two dates can cost more.
+    origin_held_back counts the products the origin exclusion left out of the whole basket,
+    each once: every line's held_back before the three it shows."""
     v: Literal[1] = 1
     rev: int
     recipes: list[BasketRecipe]
@@ -715,3 +744,4 @@ class Basket(BaseModel):
     est_total: float | None
     budget: float | None
     latency_ms: int
+    origin_held_back: int = 0

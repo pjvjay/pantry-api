@@ -52,7 +52,8 @@ from .. import db, demomode, flow
 from ..models import Product, RecipeDoc
 from ..nlsearch.planner import PlanAborted, UnparseableRecipe
 from ..nlsearch.schemas import Constraints, ParsedInput
-from ..nlsearch.units import is_non_purchase, normalize_quantity
+from ..nlsearch.units import is_non_purchase, normalize_quantity, semantic_key
+from ..origins import filter_pool
 from ..recipe_doc import UnconfirmedLines, to_recipe_text, to_spec
 from . import diets, schedule
 from .models import (
@@ -172,14 +173,55 @@ def picks(ref: RecipeRef, doc: RecipeDoc, s: PlanSettings) -> Picks:
     return Picks(by_line=by_line, left_out=_lines_left_out(doc, by_line, why))
 
 
+def held_back(ref: RecipeRef, doc: RecipeDoc, s: PlanSettings
+              ) -> dict[int, list[tuple[int, str, str]]]:
+    """line_no -> the candidates for the line's ingredient that the plan's origin exclusion
+    drops, each (product id, the excluded country it matched, the field: origins.filter_pool's
+    verdict), in the order the planner ranks them with no exclusion. The pool is the plan's
+    own: the resolve's retrieval run without the exclusion, the products it would have chosen
+    among, then filter_pool, the plan's own filter. Its candidates for the ingredient are the
+    ones it picks from. For a line matched by meaning, the matcher's best group in the pool
+    (flow's match_order): the same item, or what works instead when the pool has no same
+    item, never both, since a same item is always picked first. For a line matched by words,
+    the products sharing the most words with it, in the demo selector's order
+    (demomode.by_words). Empty with no exclusion, and for a recipe that cannot be planned.
+    Nothing here asks whether a store sells them: the basket does."""
+    exclude = list(s.exclude_origin)
+    if not exclude:
+        return {}
+    try:
+        st = _retrieve(ref, doc, s, [])
+    except (UnconfirmedLines, UnparseableRecipe, PlanAborted):
+        return {}
+    shown = st.get("products") or []
+    by_id = {p.id: p for p in shown}
+    origins = st.get("origins") or {}
+    order = st.get("match_order") or {}
+    out: dict[int, list[tuple[int, str, str]]] = {}
+    for ing in st["recipe"].ingredients:
+        if ing.line_no in order:
+            ranked = [(pid, group) for pid, group in order[ing.line_no] if pid in by_id]
+            pool = [by_id[pid] for pid, group in ranked if group == ranked[0][1]]
+        else:
+            words = demomode.by_words(ing, shown, origins_by_id=origins,
+                                      preference=st.get("preference") or [],
+                                      substitutes=st.get("substitutes"))
+            most = semantic_key(ing.name, words[0])[0] if words else 0
+            pool = [p for p in words if most < 0 and semantic_key(ing.name, p)[0] == most]
+        _kept, dropped = filter_pool(pool, exclude=exclude, origins=origins)
+        if dropped:
+            out[ing.line_no] = [(p.id, country, fld) for p, country, fld in dropped]
+    return out
+
+
 # Picks depend only on the recipe and the plan's shopping point and origin rules, not on the
-# diet, the household or the budget the shopper changes in this stage: cached in process.
-# Under an origin rule they depend on the origin evidence too, which another process can add
-# (an ingest from the CLI), so the key holds its version (db.origin_evidence_version), read
-# once per request: new evidence is new picks. With no rule, evidence changes no pick and is
-# not read.
+# diet, the household or the budget the shopper changes in this stage: cached in process,
+# with what the exclusion drops from each line's pool. Under an origin rule they depend on the
+# origin evidence too, which another process can add (an ingest from the CLI), so the key
+# holds its version (db.origin_evidence_version), read once per request: new evidence is new
+# picks. With no rule, evidence changes no pick and is not read.
 _CACHE_SIZE = 256
-_cache: OrderedDict[str, Picks] = OrderedDict()
+_cache: OrderedDict[str, object] = OrderedDict()
 _cache_lock = threading.Lock()
 
 
@@ -193,15 +235,13 @@ def evidence_version(s: PlanSettings) -> tuple[int, int] | None:
     return db.origin_evidence_version() if s.exclude_origin or s.preference else None
 
 
-def cached_picks(ref: RecipeRef, doc: RecipeDoc, s: PlanSettings,
-                 evidence: tuple[int, int] | None = None) -> Picks:
-    """picks, from the cache when it can. `evidence` is the version this request read
-    (evidence_version); read here when the plan has an origin rule and it is not given."""
+def _cached(kind: str, ref: RecipeRef, s: PlanSettings, evidence: tuple[int, int] | None,
+            compute):
     if not (s.exclude_origin or s.preference):
         evidence = None
     elif evidence is None:
         evidence = db.origin_evidence_version()
-    body = {"ref": ref.model_dump(mode="json"), "lat": s.lat, "lon": s.lon,
+    body = {"kind": kind, "ref": ref.model_dump(mode="json"), "lat": s.lat, "lon": s.lon,
             "max_km": s.max_km, "exclude": list(s.exclude_origin),
             "preference": list(s.preference),
             "evidence": list(evidence) if evidence is not None else None}
@@ -211,12 +251,26 @@ def cached_picks(ref: RecipeRef, doc: RecipeDoc, s: PlanSettings,
         if hit is not None:
             _cache.move_to_end(key)
             return hit
-    out = picks(ref, doc, s)
+    out = compute()
     with _cache_lock:
         _cache[key] = out
         while len(_cache) > _CACHE_SIZE:
             _cache.popitem(last=False)
     return out
+
+
+def cached_picks(ref: RecipeRef, doc: RecipeDoc, s: PlanSettings,
+                 evidence: tuple[int, int] | None = None) -> Picks:
+    """picks, from the cache when it can. `evidence` is the version this request read
+    (evidence_version); read here when the plan has an origin rule and it is not given."""
+    return _cached("picks", ref, s, evidence, lambda: picks(ref, doc, s))
+
+
+def cached_held_back(ref: RecipeRef, doc: RecipeDoc, s: PlanSettings,
+                     evidence: tuple[int, int] | None = None
+                     ) -> dict[int, list[tuple[int, str, str]]]:
+    """held_back, from the cache when it can, as cached_picks."""
+    return _cached("held_back", ref, s, evidence, lambda: held_back(ref, doc, s))
 
 
 def image(ref: RecipeRef, doc: RecipeDoc) -> WikiImage | UrlImage | None:
@@ -257,7 +311,6 @@ def _with_pins(found: dict[str, Picks], pins: dict[str, dict[str, int]],
     product the catalog does not know, or one the origin exclusion holds back, is ignored
     here: the schedule's pin check says why."""
     from .. import alternatives
-    from ..origins import filter_pool
 
     pinned = {int(pid) for by_line in pins.values() for pid in by_line.values()}
     pinned &= products.keys()

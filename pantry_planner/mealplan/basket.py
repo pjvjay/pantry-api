@@ -4,9 +4,12 @@ the country of origin and the product's labels, and whatever is not available ne
 code: no LLM call and no write.
 
 The products are the draft's own: the resolve's pick for each line, replaced by the shopper's
-pin, read and checked as /mealplan/schedule reads them (schedule.prepare). Nothing is resolved
-here: a recipe that is not resolved lists no lines, and its status says so. A recipe is chosen
-when it has a meal (place.expand: its wanted count and the meals already on the board).
+pin, read and checked as /mealplan/schedule reads them (schedule.prepare), with one
+difference: a pin the origin exclusion now holds back, which the schedule refuses, stays on
+its line here and is shown held back, as a planned product is, for the shopper to answer in
+this stage. Nothing is resolved here: a recipe that is not resolved lists no lines, and its
+status says so. A recipe is chosen when it has a meal (place.expand: its wanted count and the
+meals already on the board).
 
 Every product is bought once for every meal of every recipe that uses it, at its cheapest
 offer in range (the price matrix the trips read; the catalog's pack_price), by the catalog's
@@ -19,7 +22,13 @@ split evenly when no line's need is known; a line of unknown need beside known o
 dates and can buy more packs; the Shop stage has their figures.
 
 The plan's origin exclusion applies as everywhere else (origins.filter_pool): a product
-evidenced as from an excluded country is not available and is never priced.
+evidenced as from an excluded country is not available and is never priced. Each line says
+what the exclusion left out for it (held_back, at most three): its own product first when
+that is now excluded, then the candidates for its ingredient the exclusion dropped from the
+pool the plan picks from (catalog.held_back: the resolve's retrieval without the exclusion,
+in the planner's order), those a store that is on sells in range, each with its evidence in
+a shopper's words and the offer it would have been bought at. origin_held_back counts them
+across the basket, each product once.
 
 Each recipe names its picture as the catalog does (catalog.image).
 
@@ -37,10 +46,10 @@ from collections import Counter
 from dataclasses import dataclass
 from fractions import Fraction
 
-from .. import alternatives, flow
+from .. import alternatives, db, flow
 from ..models import Product
 from ..nlsearch.units import is_non_purchase, normalize_quantity, tokens
-from ..origins import _match_preference, filter_pool
+from ..origins import _match_preference, exclusion_claim, filter_pool
 from . import catalog, diets, place, schedule
 from .models import (
     SLOTS,
@@ -50,6 +59,7 @@ from .models import (
     BasketProduct,
     BasketRecipe,
     BasketStore,
+    HeldBackProduct,
     Meal,
     MealPlanDraft,
 )
@@ -57,6 +67,8 @@ from .needs import USABLE, fmt_qty, meal_servings, recipe_servings
 
 NO_PRODUCT = "no product was chosen for it"
 STORES_OFF = "stores_off"
+# What one line names of what the origin exclusion left out; origin_held_back counts them all.
+MAX_HELD_BACK = 3
 _STATUS = {"resolved": "evidenced", "conflicting": "conflicting"}
 
 
@@ -118,8 +130,9 @@ class Purchases:
 
 
 def purchases(draft: MealPlanDraft) -> Purchases:
-    """Raises MealPlanError (REST 422) as /mealplan/schedule does."""
-    pre = schedule.prepare(draft)
+    """Raises MealPlanError (REST 422) as /mealplan/schedule does, but for a pin the origin
+    exclusion holds back, which is kept (schedule.prepare's keep_held) and held back here."""
+    pre = schedule.prepare(draft, keep_held=True)
     products, docs, chosen = pre.products, pre.docs, pre.chosen
     meals = place.expand(draft)
     count = Counter(m.recipe_key for m in meals)
@@ -155,7 +168,7 @@ def purchases(draft: MealPlanDraft) -> Purchases:
 
 
 def basket(draft: MealPlanDraft) -> Basket:
-    """The basket for a draft. Raises MealPlanError (REST 422) as /mealplan/schedule does."""
+    """The basket for a draft. Raises MealPlanError (REST 422) as purchases does."""
     t0 = time.perf_counter()
     pu = purchases(draft)
     products, docs, chosen = pu.pre.products, pu.pre.docs, pu.pre.chosen
@@ -164,10 +177,16 @@ def basket(draft: MealPlanDraft) -> Basket:
     s = draft.settings
     lat, lon, max_km = schedule.shopping_point(s)
     evidence = catalog.evidence_version(s)
-    offer = flow._cheapest_offers(
-        schedule._offers(sorted(buying.keys() - held.keys()), lat, lon, max_km, s.stores_off),
-        "spec")
+    dropped = _dropped(draft, pu, evidence)
+    # One price query for what the basket buys and what the exclusion left out of it.
+    cheapest = flow._cheapest_offers(schedule._offers(
+        sorted(buying.keys() | {pid for ds in dropped.values() for pid, _c, _f in ds}),
+        lat, lon, max_km, s.stores_off), "spec")
+    offer = {pid: o for pid, o in cheapest.items() if pid in buying and pid not in held}
     stocked = set(offer)
+    backs = _held_backs(pu, dropped, cheapest)
+    shown = sorted({pid for back in backs.values() for pid, _c, _f in back})
+    rows = db.load_origin_evidence(shown) if shown else {}
     missing = sorted(buying.keys() - held.keys() - stocked)
     # Sold in range only at stores the shopper turned off: those stores, nearest first.
     only_off: dict[int, list[str]] = {}
@@ -247,14 +266,57 @@ def basket(draft: MealPlanDraft) -> Basket:
                                 store=BasketStore(name=o["store"], distance_km=o["dist_km"]),
                                 cost_for_need=share.get((key, ln.line_no)))
             unavailable += not line["available"]
-            lines.append(BasketLine(**line))
+            lines.append(BasketLine(**line, held_back=[
+                _held_product(d, products, cheapest, rows)
+                for d in backs.get((key, ln.line_no), [])[:MAX_HELD_BACK]]))
         recipes.append(BasketRecipe(key=key, title=doc.title,
                                     image=catalog.image(draft.recipes[key].ref, doc),
                                     status=resolved.status if resolved else "unresolved",
                                     meals=count[key], lines=lines))
     return Basket(rev=draft.rev, recipes=recipes, unavailable_count=unavailable,
                   est_total=round(sum(cost.values()), 2) + 0.0, budget=draft.prefs.budget,
-                  latency_ms=int((time.perf_counter() - t0) * 1000))
+                  latency_ms=int((time.perf_counter() - t0) * 1000),
+                  origin_held_back=len(shown))
+
+
+def _dropped(draft: MealPlanDraft, pu: Purchases, evidence: tuple[int, int] | None
+             ) -> dict[tuple[str, int], list[tuple[int, str, str]]]:
+    """(recipe key, line_no) -> the candidates the plan's origin exclusion drops from the
+    line's pool, ranked as the planner ranks them (catalog.held_back); none without one."""
+    s = draft.settings
+    if not s.exclude_origin:
+        return {}
+    return {(key, no): ds for key in pu.usable
+            for no, ds in catalog.cached_held_back(draft.recipes[key].ref, pu.pre.docs[key], s,
+                                                   evidence).items()}
+
+
+def _held_backs(pu: Purchases, dropped: dict[tuple[str, int], list[tuple[int, str, str]]],
+                cheapest: dict[int, dict]) -> dict[tuple[str, int], list[tuple[int, str, str]]]:
+    """(recipe key, line_no) -> everything the origin exclusion left out for the line,
+    (product id, country, field): its own product first when that is held back, then the
+    candidates it dropped that a store that is on sells in range (`cheapest`)."""
+    out: dict[tuple[str, int], list[tuple[int, str, str]]] = {}
+    for key in pu.usable:
+        for ln in pu.pre.docs[key].lines:
+            if is_non_purchase(ln.name):
+                continue
+            pid = pu.pre.chosen[key].get(ln.line_no)
+            back = [(pid, *pu.held[pid])] if pid is not None and pid in pu.held else []
+            back += [d for d in dropped.get((key, ln.line_no), ())
+                     if d[0] != pid and d[0] in cheapest]
+            if back:
+                out[key, ln.line_no] = back
+    return out
+
+
+def _held_product(d: tuple[int, str, str], products: dict[int, Product],
+                  cheapest: dict[int, dict], rows: dict[int, list]) -> HeldBackProduct:
+    pid, country, fld = d
+    o = cheapest.get(pid)
+    return HeldBackProduct(product_id=pid, product=products[pid].name, country=country,
+                           claim=exclusion_claim(rows.get(pid, []), country, fld), field=fld,
+                           store=o["store"] if o else None, price=o["price"] if o else None)
 
 
 def _not_in_range(max_km: float | None, nearest: dict | None) -> str:

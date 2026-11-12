@@ -76,6 +76,29 @@ def _preference_rank(origin, preference: list[str]) -> int:
     return preference_rank(origin, preference)
 
 
+def by_words(ing: RecipeIngredient, products: list[Product], *,
+             origins_by_id: dict | None = None, preference: list[str] | None = None,
+             substitutes: dict[int, list[int]] | None = None) -> list[Product]:
+    """What a line matched by words chooses among, best first, as select_products ranks it
+    (its first is the pick): the products less the line's own t4 substitutes (`substitutes`,
+    line_no -> product ids) or, without it, less every product flagged substitute, and all of
+    them when that leaves none; by token overlap, then "fresh", then head noun (semantic_key,
+    the ranking the alternatives share), then origin preference, then offer price, then
+    catalog id."""
+    origins_by_id = origins_by_id or {}
+    preference = [c for c in (preference or []) if c.strip()]
+    if substitutes is None:
+        pool = [p for p in products if not p.substitute] or products
+    else:
+        subs = set(substitutes.get(ing.line_no, ()))
+        pool = [p for p in products if p.id not in subs] or products
+    return sorted(pool, key=lambda p: (
+        *semantic_key(ing.name, p),
+        _preference_rank(origins_by_id.get(p.id), preference),
+        p.store_price if p.store_price is not None else p.price,
+        p.id))
+
+
 def select_products(ingredients: list[RecipeIngredient],
                     products: list[Product], *, model: str,
                     enable_thinking: bool = False,
@@ -129,20 +152,11 @@ def select_products(ingredients: list[RecipeIngredient],
             selections.append(Selection(line_no=ing.line_no, product_id=pid, confidence=0.9,
                                         reasoning=why))
             continue
-        if substitutes is None:
-            pool = [p for p in products if not p.substitute] or products
-        else:
-            subs = set(substitutes.get(ing.line_no, ()))
-            pool = [p for p in products if p.id not in subs] or products
+        pool = by_words(ing, products, origins_by_id=origins_by_id, preference=preference,
+                        substitutes=substitutes)
         if not pool:
             continue
-        # semantic_key is the ranking the alternatives share: overlap, then
-        # "fresh", then head noun.
-        pick = min(pool, key=lambda p: (
-            *semantic_key(ing.name, p),
-            _preference_rank(origins_by_id.get(p.id), preference),
-            p.store_price if p.store_price is not None else p.price,
-            p.id))
+        pick = pool[0]
         why = "demo mode: highest token overlap, then head noun, then cheapest offer"
         if preference:
             why = ("demo mode: highest token overlap, then head noun, then origin "

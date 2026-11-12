@@ -430,6 +430,41 @@ def test_receipt_matches_the_claim_it_describes():
     assert o.source == "label-photo"
 
 
+def test_a_dropped_products_claim_is_the_row_its_verdict_rests_on():
+    """The words for why the exclusion dropped a product come from the row that named the
+    excluded country in the field that matched, not from the representative row: the Kraft
+    case reads its American ingredients, not "Made in Canada". A row with no text says it by
+    its claim; conflicting evidence by the row that names the country."""
+    from pantry_planner import db
+    from pantry_planner.origins import exclusion_claim, filter_pool, resolve_all
+
+    db.save_origin_evidence([
+        _ev(product_id=1, claim_type="product-of", ingredient_origin="United States",
+            verbatim="Ingredients: product of the USA"),
+        _ev(product_id=1, source="label-photo", claim_type="made-in",
+            manufactured_in="Canada", verbatim="Made in Canada", confidence="high"),
+        _ev(product_id=2, source="label-photo", manufactured_in="United States"),
+        _ev(product_id=3, source="label-photo", claim_type="product-of",
+            ingredient_origin="United States", manufactured_in="United States"),
+        _ev(product_id=4, manufactured_in="Canada", verbatim="Made in Canada"),
+        _ev(product_id=4, source="label-photo", manufactured_in="United States",
+            verbatim="Made in U.S.A."),
+    ])
+    origins = resolve_all([1, 2, 3, 4])
+    assert origins[1].verbatim == "Made in Canada"      # the representative row
+    _kept, dropped = filter_pool([_product(pid) for pid in (1, 2, 3, 4)],
+                                 exclude=["United States"], origins=origins)
+    verdicts = {p.id: (country, fld) for p, country, fld in dropped}
+    assert verdicts == {1: ("United States", "ingredient_origin"),
+                        2: ("United States", "manufactured_in"),
+                        3: ("United States", "ingredient_origin"),
+                        4: ("United States", "conflicting_evidence")}
+    evidence = db.load_origin_evidence([1, 2, 3, 4])
+    assert {pid: exclusion_claim(evidence[pid], *v) for pid, v in verdicts.items()} == {
+        1: "Ingredients: product of the USA", 2: "Made in United States",
+        3: "From United States", 4: "Made in U.S.A."}
+
+
 def test_importer_only_evidence_still_warns_when_it_names_an_excluded_country():
     """Unresolved is not clean — an importer address naming an excluded
     country must be surfaced rather than passing silently."""
