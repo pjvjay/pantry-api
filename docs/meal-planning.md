@@ -560,7 +560,8 @@ unknown need), so the lines add up to `est_total`. Trips that buy on several dat
 more; stage 5 shows theirs. `origin` is `{country, claim, status: evidenced | conflicting | unknown,
 preferred_rank}`: `claim` in plain words ("From Thailand", "Made in Canada, ingredients may
 be imported", "Origin unclear: sources disagree", "Origin unknown"), and `preferred_rank` the
-place (1 first) of the preference entry it matches. An excluded product is not available and never
+place (1 first) of the preference entry it matches; the schedule's trip lines say the same for
+the same product (`origin` on each trip line). An excluded product is not available and never
 priced; a product no store in range sells names the nearest offer. `unavailable_kind` is
 `origin_excluded`, `stores_off` ("Sold only at stores you turned off: ..."), `out_of_range` or
 `not_stocked` (null when available); for a line the
@@ -669,6 +670,20 @@ can set the packs (`packs_override["<date>:<product_id>"]`, 0 to drop the line).
 Each trip is priced with the trip optimizer over its stores in range (`tripopt`), and lists
 its `frontier` and `recommended` store split. `fresh` is recommended unless it has must-fix
 warnings that `fewest_trips` does not.
+
+Each trip line is `{product, category, packs, packs_basis, need_qty, need_uom, leftover_qty,
+leftover_until, storage, freeze_on_arrival, shelf_life, for_meals, store, price,
+price_at_approval, price_delta, stocked, origin}`. `origin` says where the product comes from
+exactly as `/mealplan/basket` says it for the line buying the same product (`{country, claim,
+status, preferred_rank}`, above): the same helper (`basket.line_origin`) over the same
+evidence and the plan's `preference`, so one product reads the same in the Ingredients stage,
+on the Shop stage's trips, in in-store mode and in its offline copy ("From Canada", "Made in
+United States, ingredients may be imported", "Origin unclear: sources disagree", "Origin
+unknown"). The evidence for every product on every trip of both strategies is read in one
+query, whatever the number of lines (`schedule._line_origins`). Every line of a schedule has
+one; it is null only inside the re-schedules an Options list runs, which are never returned.
+The diff of an approved trip and its `list_text` (Copy list, Print list, the calendar's trip
+description) do not repeat it.
 
 ### Warnings
 

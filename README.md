@@ -492,7 +492,8 @@ shopper), `POST /mealplan/resolve` picks products once per recipe, and
 `POST /mealplan/schedule` (pure, no LLM, byte-identical for the same draft) places the meals
 and proposes the fewest shopping trips that keep each perishable inside its cited storage
 time, for a "fresh" and a "fewest trips" (freeze on arrival) strategy, with a shopping list
-per trip grouped by store and aisle. `POST /mealplan/suggest-cook-days` proposes a
+per trip grouped by store and aisle, each line saying where its product comes from as the
+basket does (`origin`). `POST /mealplan/suggest-cook-days` proposes a
 freshness-aware layout with a cited reason per move. `POST /mealplan/alternatives` gives every
 trip line the chat cart's Options: the same ranking, each row's figures from the plan
 re-scheduled with that product pinned (or, with no trip date yet, for every line buying the

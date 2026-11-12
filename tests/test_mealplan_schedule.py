@@ -415,6 +415,83 @@ def test_every_cited_line_carries_its_source_and_unknowns_carry_none(example):
                     assert (info["days_planned"] is None) == (info["status"] == "unknown")
 
 
+BUTTER, EGGS, SALT = 18, 60, 122     # Butter Salted 454g, Eggs Large Dozen, Table Salt 1kg
+
+
+def _evidence(pid: int, source: str, claim: str, verbatim: str, ingredient: str,
+              made: str) -> dict:
+    return dict(product_id=pid, source=source, source_ref=f"{pid}-{source}.jpg",
+                claim_type=claim, verbatim=verbatim, ingredient_origin=ingredient,
+                manufactured_in=made, confidence="high", importer_only=False, note="",
+                observed_at="")
+
+
+def test_each_trip_line_says_where_its_product_comes_from_as_the_basket_does(reseed):
+    """Butter is a product of Canada, the plan's second preference; the chicken thighs are made
+    in the United States; the eggs' sources disagree (Canada, France); salt has no evidence.
+    Every line of every trip, under both strategies, says so in the basket's words, and says
+    the same as the basket's line buying the same product, so the Ingredients stage, the Shop
+    stage and the list in the shop agree."""
+    from pantry_planner import db
+
+    db.save_origin_evidence([
+        _evidence(BUTTER, "label-photo", "product-of", "Product of Canada", "Canada", "Canada"),
+        _evidence(THIGHS, "label-photo", "made-in", "Made in United States", "",
+                  "United States"),
+        _evidence(EGGS, "label-photo", "product-of", "Product of Canada", "Canada", "Canada"),
+        _evidence(EGGS, "off", "product-of", "Product of France", "France", "France")])
+    draft = starter_draft({"chicken_biryani": 2, "tuna_melt": 2, "scrambled_eggs_on_toast": 1},
+                          settings={"preference": ["France", "Canada"]})
+    lines = [ln for s in schedule(draft)["strategies"] for t in s["trips"] for ln in t["lines"]]
+    origin = {pid: [ln["origin"] for ln in lines if ln["product"]["id"] == pid]
+              for pid in (BUTTER, THIGHS, EGGS, SALT)}
+    want = {
+        BUTTER: {"country": "Canada", "claim": "From Canada", "status": "evidenced",
+                 "preferred_rank": 2},
+        THIGHS: {"country": "United States", "status": "evidenced", "preferred_rank": None,
+                 "claim": "Made in United States, ingredients may be imported"},
+        EGGS: {"country": None, "claim": "Origin unclear: sources disagree",
+               "status": "conflicting", "preferred_rank": None},
+        SALT: {"country": None, "claim": "Origin unknown", "status": "unknown",
+               "preferred_rank": None}}
+    for pid, said in origin.items():
+        assert len(said) >= 2 and all(o == want[pid] for o in said), PRODUCTS[pid]["name"]
+    basket = client().post("/mealplan/basket", json={"draft": draft}).json()
+    in_basket = {ln["product"]["id"]: ln["origin"] for r in basket["recipes"]
+                 for ln in r["lines"]}
+    assert {ln["product"]["id"] for ln in lines} == set(in_basket)
+    for ln in lines:
+        assert ln["origin"] == in_basket[ln["product"]["id"]], ln["product"]["name"]
+
+
+def test_the_trip_lines_origins_are_read_in_one_evidence_query(example, monkeypatch):
+    """However many lines the trips have, their origins come from one read of the evidence,
+    for every product on every trip of both strategies."""
+    from sqlalchemy import event
+
+    from pantry_planner import db
+
+    asked: list[list[int]] = []
+    real = db.load_origin_evidence
+    monkeypatch.setattr(db, "load_origin_evidence",
+                        lambda ids=None: asked.append(ids) or real(ids))
+    statements: list[str] = []
+
+    def record(_conn, _cursor, statement, *_a):
+        statements.append(statement)
+
+    eng = db.engine()
+    event.listen(eng, "before_cursor_execute", record)
+    try:
+        sched = schedule(example)
+    finally:
+        event.remove(eng, "before_cursor_execute", record)
+    lines = [ln for s in sched["strategies"] for t in s["trips"] for ln in t["lines"]]
+    assert len(lines) > 40 and all(ln["origin"] is not None for ln in lines)
+    assert asked == [sorted({ln["product"]["id"] for ln in lines})]
+    assert sum("product_origin_evidence" in st for st in statements) == 1
+
+
 def test_list_text_is_grouped_by_store_then_aisle_with_the_demo_footer(example):
     for t in strategy(schedule(example), "fresh")["trips"]:
         text_lines = t["list_text"].splitlines()

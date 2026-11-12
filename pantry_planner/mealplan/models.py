@@ -347,11 +347,28 @@ class MealRef(BaseModel):
     slot: Slot
 
 
+class BasketOrigin(BaseModel):
+    """Where a product comes from, as a basket line and a trip line both say it
+    (basket.line_origin, from the product's evidence and the plan's preference), so one
+    product reads the same in the Ingredients stage, on the Shop stage's trips and in the shop.
+    status: evidenced (the evidence resolves to a country), conflicting or unknown. claim is
+    the evidence in plain words: "From Thailand", "Made in Canada, ingredients may be
+    imported", "Origin unclear: sources disagree", "Origin unknown".
+    preferred_rank is the place (1 first) of the plan's preference entry it matches."""
+    country: str | None
+    claim: str
+    status: Literal["evidenced", "unknown", "conflicting"]
+    preferred_rank: int | None
+
+
 class TripLine(BaseModel):
     """One product bought on one trip, for one or more meals. packs None: the amount is
     unknown (packs_basis says why), and so is the price. price is the assigned store's offer
     times packs (demo prices). leftover is packs x size minus the need, when both are known;
-    leftover_until only when the storage time is cited."""
+    leftover_until only when the storage time is cited. origin is where the product comes
+    from, as /mealplan/basket says it for the same product (schedule._line_origins). Every
+    line of a schedule has one; it is None only on the lines of the re-schedules an Options
+    list runs, which are never returned."""
     product: LineProduct
     category: str | None
     packs: int | None
@@ -369,6 +386,7 @@ class TripLine(BaseModel):
     price_at_approval: float | None = None
     price_delta: float | None = None
     stocked: bool
+    origin: BasketOrigin | None = None
 
 
 class TripDiff(BaseModel):
@@ -617,17 +635,6 @@ class BasketProduct(BaseModel):
 class BasketStore(BaseModel):
     name: str
     distance_km: float | None
-
-
-class BasketOrigin(BaseModel):
-    """status: evidenced (the evidence resolves to a country), conflicting or unknown. claim is
-    the evidence in plain words: "From Thailand", "Made in Canada, ingredients may be
-    imported", "Origin unclear: sources disagree", "Origin unknown".
-    preferred_rank is the place (1 first) of the plan's preference entry it matches."""
-    country: str | None
-    claim: str
-    status: Literal["evidenced", "unknown", "conflicting"]
-    preferred_rank: int | None
 
 
 class HeldBackProduct(BaseModel):

@@ -87,7 +87,10 @@ def _claim(alt) -> str:
     return f"From {alt.country}, as the source states"
 
 
-def _origin(o, demo: bool, preference: list[str]) -> BasketOrigin:
+def line_origin(o, demo: bool, preference: list[str]) -> BasketOrigin:
+    """A product's origin as a basket line and a trip line say it: `o` its resolved origin
+    and `demo` whether a demo label photo is among its evidence (alternatives._evidence, which
+    both read), `preference` the plan's."""
     alt = alternatives._alt_origin(o, demo)
     hit = _match_preference(o, preference) if o is not None and o.status == "resolved" else None
     return BasketOrigin(country=alt.country if alt.status == "resolved" else None,
@@ -238,7 +241,7 @@ def basket(draft: MealPlanDraft) -> Basket:
                     and pins[str(ln.line_no)] != planned.get(ln.line_no),
                     "shared_with": sorted({k for k, _no in buying.get(pid, []) if k != key}),
                     "product": None, "store": None, "price": None, "cost_for_need": None,
-                    "origin": _origin(origins.get(pid), pid in demo, list(s.preference)),
+                    "origin": line_origin(origins.get(pid), pid in demo, list(s.preference)),
                     "available": False, "unavailable_kind": None, "why_unavailable": None}
             if pid is None:
                 kind, why = planner.left_out.get(ln.line_no, (None, None)) if planner else (

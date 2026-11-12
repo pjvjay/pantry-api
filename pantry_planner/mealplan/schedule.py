@@ -2,7 +2,8 @@
 
 No LLM call and no write. The server trusts only ids from the draft: product names, sizes,
 categories and prices are re-read from the database on every call, recipe amounts from the
-recipe itself (resolve.recipe_doc), storage times from shelf_life.json. Output depends only
+recipe itself (resolve.recipe_doc), storage times from shelf_life.json, and each trip line's
+origin from the origin evidence, in the basket's words (_line_origins). Output depends only
 on the draft and the data, so the same draft gives byte-identical JSON.
 
 Both strategies are computed every time:
@@ -23,7 +24,7 @@ from dataclasses import dataclass
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .. import calendar_export, db, nutrition, tripopt
+from .. import alternatives, calendar_export, db, nutrition, tripopt
 from ..config import settings
 from ..db import SEEDS_DIR
 from ..models import MealNutrition, NutritionSource, PeriodNutrition, Product, RecipeDoc
@@ -595,6 +596,7 @@ def compute(draft: MealPlanDraft) -> MealSchedule:
         res, ws = _strategy(ctx, name)
         results.append(res)
         warnings.extend(ws)
+    _line_origins(draft, products, results)
     warnings.extend(_budget_warnings(draft, results))
     warnings.sort(key=warn.sort_key)
     for res in results:
@@ -621,6 +623,23 @@ def compute(draft: MealPlanDraft) -> MealSchedule:
         approved_schedule=calendar_export.approved_schedule(
             draft, results, placed, docs, per_recipe, notice=SYNTHETIC_NOTICE),
         sources=_sources(nutrition_sources), synthetic_notice=SYNTHETIC_NOTICE)
+
+
+def _line_origins(draft: MealPlanDraft, products: dict[int, Product],
+                  results: list[StrategyResult]) -> None:
+    """Fills each trip line's origin in place as /mealplan/basket says it for the same plan:
+    the same helper (basket.line_origin) over the same evidence (alternatives._evidence) and
+    the plan's preference, so one product reads the same in the Ingredients stage, on the
+    Shop stage's list and in the shop. The evidence for every product on every trip of both
+    strategies is read in one query."""
+    from .basket import line_origin      # basket imports this module
+
+    lines = [ln for res in results for t in res.trips for ln in t.lines]
+    origins, demo = alternatives._evidence(sorted({ln.product.id for ln in lines}), products)
+    preference = list(draft.settings.preference)
+    for ln in lines:
+        pid = ln.product.id
+        ln.origin = line_origin(origins.get(pid), pid in demo, preference)
 
 
 def _nutrition(draft: MealPlanDraft, docs: dict[str, RecipeDoc], placed: list[PlacedMeal],
