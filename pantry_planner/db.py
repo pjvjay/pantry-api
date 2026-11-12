@@ -586,6 +586,24 @@ def load_origin_evidence(product_ids: list[int] | None = None
     return out
 
 
+def origin_evidence_version() -> tuple[int, int]:
+    """(rows, highest id) of product_origin_evidence, from one small query: what caches of
+    origin-filtered picks are keyed on, so they follow the evidence. Evidence is append-only
+    (save_origin_evidence never updates or deletes a row), so every write changes it, whether
+    this process made it (a reviewed submission) or another (an ingest from the CLI). Only a
+    wipe (seed_from_json) followed by as many new rows under reused ids, as SQLite reuses
+    them, would leave it as it was; a process that wipes the table clears those caches
+    itself (mealplan.catalog.clear_cache, mealplan.resolve.clear_cache)."""
+    from sqlalchemy import func, select
+
+    n: int | None
+    top: int | None
+    with Session(engine()) as s:
+        n, top = s.execute(select(func.count(ProductOriginEvidenceRow.id),
+                                  func.max(ProductOriginEvidenceRow.id))).one()
+    return int(n or 0), int(top or 0)
+
+
 # An observation is identified by what it says and where it came from —
 # not by when it was read. Re-ingesting the same file must be a no-op.
 # importer_only and confidence are part of the identity: a corrected

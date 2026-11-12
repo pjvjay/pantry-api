@@ -163,6 +163,7 @@ def basket(draft: MealPlanDraft) -> Basket:
     origins, demo, held = pu.origins, pu.demo, pu.held
     s = draft.settings
     lat, lon, max_km = schedule.shopping_point(s)
+    evidence = catalog.evidence_version(s)
     offer = flow._cheapest_offers(
         schedule._offers(sorted(buying.keys() - held.keys()), lat, lon, max_km, s.stores_off),
         "spec")
@@ -201,7 +202,7 @@ def basket(draft: MealPlanDraft) -> Basket:
         resolved = draft.resolved.get(key)
         lines: list[BasketLine] = []
         left = _left_out(resolved)
-        planner = (catalog.cached_picks(draft.recipes[key].ref, doc, s)
+        planner = (catalog.cached_picks(draft.recipes[key].ref, doc, s, evidence)
                    if key in usable and any(chosen[key].get(ln.line_no) is None
                                             and not is_non_purchase(ln.name)
                                             for ln in doc.lines) else None)

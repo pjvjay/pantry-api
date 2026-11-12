@@ -102,7 +102,12 @@ A recipe is resolved when it enters the tray, never on a drag. Library recipes g
 `flow.run(slug)` (the classic pipeline). Every RecipeDoc (a demo starter, a pasted or
 imported recipe, a dish the assistant wrote) goes through `flow.run_spec`: the reviewed lines
 are planned exactly as given, with no parse, and only the product choice is the selector's.
-Results are cached in process (64 entries) by the recipe and every knob that changes them. A
+Results are cached in process (64 entries) by the recipe and every knob that changes them.
+Under an origin rule (an exclusion or a preference) that includes the origin evidence, by its
+version (`db.origin_evidence_version`: the rows and the highest id of
+`product_origin_evidence`, read once a request), so evidence added since, by an ingest in
+another process or a reviewed submission, is a new resolve rather than a pick it now holds
+back. With no rule, evidence changes no pick and is not read. A
 recipe that fails keeps its own status (`needs_servings`, `unconfirmed_lines`, `not_found`,
 `unparseable`, `aborted`, `llm_error`) and the others still resolve.
 
@@ -520,7 +525,8 @@ selector; live, the resolve's model may pick another product later.
   nothing avoided.
 
 The picks are cached in process per recipe and shopping point, so a diet or household change
-answers from the cache.
+answers from the cache. Under an origin rule the key holds the origin evidence's version too,
+as the resolve's does, so new evidence is new picks without a restart.
 
 **Pictures.** A catalog or basket recipe names its picture as `image`, and never holds one:
 

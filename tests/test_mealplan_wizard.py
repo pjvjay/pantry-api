@@ -1000,3 +1000,68 @@ def test_the_stores_route_refuses_what_the_schedule_refuses(chosen, monkeypatch)
                                                                         burst=1))
     assert client().post("/mealplan/stores", json={"draft": chosen}).status_code == 200
     assert client().post("/mealplan/stores", json={"draft": chosen}).status_code == 429
+
+
+# ─── Picks that follow the evidence ──────────────────────────
+
+US = ["United States"]
+
+
+def test_picks_follow_new_evidence_with_no_cache_cleared(reseed):
+    """Evidence reaches the database from another process (an ingest from the CLI) and no
+    cache is cleared: under the exclusion the resolve and the catalog pick again, so the
+    recipe resolved again buys another product instead of leaving its line to answer."""
+    ref = {"key": "lib:beef_rice_bowl", "slug": "beef_rice_bowl"}
+    rules = {"exclude_origin": US}
+
+    def resolve() -> dict:
+        r = client().post("/mealplan/resolve", json={"recipes": [ref], **rules})
+        assert r.status_code == 200, r.text
+        return r.json()["resolved"][0]
+
+    def beef(body: dict) -> dict:
+        return next(ln for r in body["recipes"] for ln in r["lines"]
+                    if ln["ingredient"] == "Ground Beef")
+
+    def catalog_pick() -> int:
+        return beef({"recipes": [by_key(cat(settings=rules))[ref["key"]]]})["product_id"]
+
+    before = resolve()
+    pick = before["lines"][0]["product_id"]
+    assert resolve()["cached"] and catalog_pick() == pick
+    _us_evidence(pick)                       # written to the database only, as an ingest does
+    draft = {"start_date": "2026-10-09", "days": 7, "settings": rules,
+             "recipes": {ref["key"]: {"ref": ref, "wanted": 2, "slot": "dinner"}},
+             "resolved": {ref["key"]: before}}
+    stale = beef(bask(draft))
+    assert stale["unavailable_kind"] == "origin_excluded"
+    after = resolve()
+    now = after["lines"][0]["product_id"]
+    assert not after["cached"] and now not in (pick, None)
+    assert catalog_pick() == now
+    fresh = beef(bask({**draft, "resolved": {ref["key"]: after}}))
+    assert fresh["available"] and fresh["product"]["id"] == now
+
+
+def test_the_evidence_is_read_once_a_request_and_only_under_an_origin_rule(chosen,
+                                                                          monkeypatch):
+    """The evidence's version is one small query: a catalog, a basket and a resolve under an
+    origin rule read it once each, and nothing reads it without one."""
+    from pantry_planner import db
+
+    reads = []
+    real = db.origin_evidence_version
+    monkeypatch.setattr(db, "origin_evidence_version", lambda: reads.append(1) or real())
+    refs = [{"key": f"starter:{k}", "starter": k} for k in COUNTS]
+    for rules in ({"exclude_origin": US}, {"preference": ["Canada"]}):
+        reads.clear()
+        cat(settings=rules)
+        bask({**chosen, "settings": rules})
+        r = client().post("/mealplan/resolve", json={"recipes": refs[:2], **rules})
+        assert r.status_code == 200
+        assert len(reads) == 3, rules
+    reads.clear()
+    cat()
+    bask(chosen)
+    assert client().post("/mealplan/resolve", json={"recipes": refs[:2]}).status_code == 200
+    assert reads == []

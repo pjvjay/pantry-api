@@ -775,8 +775,13 @@ def mealplan_resolve(req: MealPlanResolveRequest) -> MealPlanResolveResponse:
 
     _check_countries(req.exclude_origin, req.preference)
     t0 = time.perf_counter()
+    # The origin evidence's version, read once for every recipe: an origin rule's picks
+    # follow the evidence (the resolve's cache is keyed on it).
+    evidence = (db.origin_evidence_version() if req.exclude_origin or req.preference
+                else None)
     out = [resolve_one(ref, lat=req.lat, lon=req.lon, max_km=req.max_km,
-                       exclude=req.exclude_origin, preference=req.preference)
+                       exclude=req.exclude_origin, preference=req.preference,
+                       evidence=evidence)
            for ref in req.recipes]
     return MealPlanResolveResponse(
         resolved=out, llm_cost_usd=round(sum(r.llm_cost_usd for r in out if not r.cached), 6),

@@ -174,6 +174,10 @@ def picks(ref: RecipeRef, doc: RecipeDoc, s: PlanSettings) -> Picks:
 
 # Picks depend only on the recipe and the plan's shopping point and origin rules, not on the
 # diet, the household or the budget the shopper changes in this stage: cached in process.
+# Under an origin rule they depend on the origin evidence too, which another process can add
+# (an ingest from the CLI), so the key holds its version (db.origin_evidence_version), read
+# once per request: new evidence is new picks. With no rule, evidence changes no pick and is
+# not read.
 _CACHE_SIZE = 256
 _cache: OrderedDict[str, Picks] = OrderedDict()
 _cache_lock = threading.Lock()
@@ -184,10 +188,23 @@ def clear_cache() -> None:
         _cache.clear()
 
 
-def cached_picks(ref: RecipeRef, doc: RecipeDoc, s: PlanSettings) -> Picks:
+def evidence_version(s: PlanSettings) -> tuple[int, int] | None:
+    """The origin evidence's version when the plan has an origin rule, else None."""
+    return db.origin_evidence_version() if s.exclude_origin or s.preference else None
+
+
+def cached_picks(ref: RecipeRef, doc: RecipeDoc, s: PlanSettings,
+                 evidence: tuple[int, int] | None = None) -> Picks:
+    """picks, from the cache when it can. `evidence` is the version this request read
+    (evidence_version); read here when the plan has an origin rule and it is not given."""
+    if not (s.exclude_origin or s.preference):
+        evidence = None
+    elif evidence is None:
+        evidence = db.origin_evidence_version()
     body = {"ref": ref.model_dump(mode="json"), "lat": s.lat, "lon": s.lon,
             "max_km": s.max_km, "exclude": list(s.exclude_origin),
-            "preference": list(s.preference)}
+            "preference": list(s.preference),
+            "evidence": list(evidence) if evidence is not None else None}
     key = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
     with _cache_lock:
         hit = _cache.get(key)
@@ -274,7 +291,8 @@ def catalog(*, household_servings: int, diet: Diet, avoid: list[Avoid], settings
     slot_of = {ref.key: (metas[ref.key] or {}).get("slot", "dinner") for ref in refs}
     refs = [ref for ref in refs if slots is None or slot_of[ref.key] in slots]
     docs = {ref.key: recipe_doc(ref) for ref in refs}
-    found = {ref.key: cached_picks(ref, docs[ref.key], settings) for ref in refs}
+    evidence = evidence_version(settings)
+    found = {ref.key: cached_picks(ref, docs[ref.key], settings, evidence) for ref in refs}
     products = {p.id: p for p in db.load_all_products()}
     chosen = _with_pins(found, pins or {}, products, settings)
     lat, lon, max_km = schedule.shopping_point(settings)

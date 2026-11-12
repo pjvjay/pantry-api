@@ -5,7 +5,9 @@ recipes go through flow.run (the seeded lines, as /plan/{slug} plans them); ever
 (a demo starter, a pasted or imported recipe, a dish the assistant wrote) goes through
 flow.run_spec, so its reviewed lines are planned as given with no parse, and only the
 product choice is the selector's. Results are cached in process (64 entries) by everything
-that can change them.
+that can change them: under an origin rule (an exclusion or a preference) that includes the
+origin evidence, by its version (db.origin_evidence_version), so a pick follows evidence added
+since, from this process or another. With no rule, evidence changes no pick and is not read.
 
 A recipe that fails keeps a status of its own (needs_servings, unconfirmed_lines, not_found,
 unparseable, aborted, llm_error) and never fails the others.
@@ -150,14 +152,21 @@ def _lines(doc: RecipeDoc, plan: ShoppingPlan | None) -> list[ResolvedLine]:
 
 def resolve_one(ref: RecipeRef, *, lat: float | None = None, lon: float | None = None,
                 max_km: float | None = None, exclude: list[str] | None = None,
-                preference: list[str] | None = None) -> ResolvedRecipe:
+                preference: list[str] | None = None,
+                evidence: tuple[int, int] | None = None) -> ResolvedRecipe:
     """Resolve one recipe, from the cache when it can. Never raises for a recipe that
-    fails: the failure is its status."""
+    fails: the failure is its status. `evidence` is the evidence version the request read
+    once for all its recipes; read here when there is an origin rule and it is not given."""
     from ..llm import LLMError
     from ..nlsearch import PlanAborted, UnparseableRecipe
 
+    if not (exclude or preference):
+        evidence = None
+    elif evidence is None:
+        evidence = db.origin_evidence_version()
     knobs = {"lat": lat, "lon": lon, "max_km": max_km, "exclude": list(exclude or []),
-             "preference": list(preference or [])}
+             "preference": list(preference or []),
+             "evidence": list(evidence) if evidence is not None else None}
     key = _cache_key(ref, knobs)
     with _cache_lock:
         hit = _cache.get(key)
