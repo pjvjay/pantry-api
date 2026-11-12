@@ -534,7 +534,11 @@ class TripLineOptions(BaseModel):
     ranking is for that line and every other line of the plan with the same ingredient that
     buys nothing, with no row current; ranking.held_back lists what the origin exclusion holds
     back, with its evidence, and ranking.out_of_reach what is sold only at stores turned off
-    or beyond the plan's distance. Neither is choosable; choosing a row pins every line."""
+    or beyond the plan's distance. Neither is choosable; choosing a row pins every line.
+
+    Asked for by a product the origin exclusion now holds back (a pin, which with no trip
+    date is kept on its line as the basket keeps it, or a product planned before its
+    evidence): no row is current, and the product is the first of ranking.held_back."""
     v: Literal[1] = 1
     rev: int
     strategy: Strategy

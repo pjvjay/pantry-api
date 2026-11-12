@@ -170,6 +170,16 @@ class LineNotPlannedError(PinError):
     """The line number names no planned line (REST 422 line_not_planned)."""
 
 
+class HeldBackPinError(PinError):
+    """The pinned product is one the plan's origin exclusion holds back: `product_id`, the
+    excluded `country` its evidence matched and the `field` it matched in, as
+    origins.filter_pool reports them."""
+
+    def __init__(self, message: str, line_no: int, product_id: int, country: str, field: str):
+        super().__init__(message, line_no)
+        self.product_id, self.country, self.field = product_id, country, field
+
+
 class StaleBasisError(BasisError):
     """The catalog changed under the basis: a product it buys is gone or no longer sold in
     range. Planning the recipe again is the remedy (REST 409 stale_basis)."""
@@ -539,8 +549,8 @@ def validate_pins(basis: PlanBasis, pins: list[Pin] | None = None, *,
         match = g.pools[line_no].found.get(pid)
         if pid in g.held:
             country, fld = g.held[pid]
-            raise PinError(f"{product.name} is evidenced as {_where(country, fld)}, which "
-                           "this plan excludes", line_no)
+            raise HeldBackPinError(f"{product.name} is evidenced as {_where(country, fld)}, "
+                                   "which this plan excludes", line_no, pid, country, fld)
         if match is None and not _available(basis, offers.get(pid)) and pid not in near:
             # Not found because no store sells it at all (same-aisle substitutes are looked
             # up among offers): that is the reason, not the words.
@@ -936,9 +946,10 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
                       open_lines: bool = False) -> AlternativeRanking:
     """The other products that could fill `line_no`, in order (ORDER_MEANING, or ORDER when
     the line is matched by words), with the cart's pick always included and flagged
-    current. Deterministic for the same basis and database; no LLM, no write. Raises
-    BasisError or PinError (a bad basis, an unplanned line, a bad pin). `effect`: another
-    planner's trips stand in for the cart's (TripEffect).
+    current, unless the plan's origin exclusion now holds the pick back: it is then the first
+    of held_back, and no row is current. Deterministic for the same basis and database; no
+    LLM, no write. Raises BasisError or PinError (a bad basis, an unplanned line, a bad
+    pin). `effect`: another planner's trips stand in for the cart's (TripEffect).
 
     `open_lines`: `line_no` may be a line the plan bought nothing for. It then has no
     current pick: the rows are every product that could fill it (and each unpicked line of
@@ -988,6 +999,13 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
                          for pid, m in found.items() if pid in other}
         held = sorted((pid for pid in pool.found if pid in g.held),
                       key=lambda pid: (catalog[pid].name, pid))
+        # The pick itself when the exclusion now holds it back (evidence added since it was
+        # planned or pinned, or the rule turned on after it; a meal plan's Ingredients stage
+        # keeps such a pin): no row, so none is current, and the first product held back, as
+        # the basket names it first on its line.
+        held_pick = current_id is not None and current_id in g.held
+        if held_pick:
+            held = [current_id, *(pid for pid in held if pid != current_id)]
         selectable = {pid: m for pid, m in found.items() if pid not in g.held}
         # The hard rules (rule): never choosable, and said why.
         original = catalog.get(planned[line_no].product_id) \
@@ -999,7 +1017,7 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
             if broken is not None:
                 ruled[pid] = broken
                 del selectable[pid]
-        if current_id is not None and current_id not in selectable:
+        if current_id is not None and current_id not in selectable and not held_pick:
             selectable[current_id] = "outside"
         stats = _stats(s, sorted(selectable))
         located = has_location(basis)
@@ -1014,7 +1032,7 @@ def rank_alternatives(basis: PlanBasis, line_no: int, limit: int = DEFAULT_LIMIT
                                   f"{line_no}, has no offer in range any more; plan the "
                                   "recipe again")
         # Another planner's line no longer stocked: its options are what the shopper needs.
-        del selectable[current_id]
+        selectable.pop(current_id, None)
     unavailable = [pid for pid in selectable
                    if pid != current_id and not _available(basis, offers.get(pid))]
     for pid in unavailable:

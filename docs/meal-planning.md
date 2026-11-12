@@ -378,14 +378,24 @@ ranking}` (`mealplan/options.py`, no LLM):
 - `stocked: false` when no store in range sells the line's product any more: its options are
   listed and it is not among the rows. The `no_longer_stocked` and `not_stocked` warnings'
   `open_options` remedy opens exactly this.
-- 422 with the schedule's codes for a draft it refuses; 409 `no_trip_line` when the trip buys
-  no such product (the plan changed).
+- 422 with the schedule's codes for a draft it refuses (with no `trip_date`, all but a pin the
+  origin exclusion now holds back: below); 409 `no_trip_line` when the trip buys no such
+  product (the plan changed).
 - With no `trip_date` (the wizard's Ingredients stage, before any trip exists) the purchase is
   every line of the plan that buys the product, for all its recipe's meals, as
   `/mealplan/basket` lists them, and choosing still pins them all. No trip is worked out:
   every row's `trip` is null with a reason saying so, its `packs` are what those meals need
   and its `cost_for_need` those packs at its cheapest offer in range; `trip_date` and
-  `plan_total` are null.
+  `plan_total` are null. The draft is read as the basket reads it: a pin the origin
+  exclusion now holds back (evidence added after it was pinned, or the rule turned on since)
+  stays on its line instead of being refused, so the Ingredients stage's "Another product"
+  on that line offers what can replace it. A trip's Options (with `trip_date`) refuse such a
+  pin, as the schedule does.
+- A product the origin exclusion now holds back, a pin as above or a product planned before
+  its evidence, is no row of its own Options: no row is `current`, and the product is the
+  first of `ranking.held_back`, with its evidence, as the basket names it first on its line.
+  Choosing a row replaces it on every covered line (the planner's own pick, when it is a
+  row, takes the pin off).
 - **A line that buys nothing** (the basket's rows with no product: the resolve left it out
   for the origin rule, out of range or not stocked, and no pin fills it) is asked for by
   `line: {recipe_key, line_no}` instead of a product. The answer has `product_id: null`,
@@ -419,14 +429,19 @@ nothing for included: the pin fills it, and the basket, the schedule and the cat
 it there), the product is one of its candidates, no hard rule keeps it out (it adds no
 contains-tag the resolve's product lacks, and contains nothing the plan's diet, avoid list or
 the recipe's diets leave out), the plan's origin exclusion does not hold it back, and a store
-in range sells it. Otherwise it is 422 `pin_invalid` with `recipe_key`, `line_no` and the reason
-("... is evidenced as United States (made or packed there), which this plan excludes"). The
-Ingredients stage (`/mealplan/basket` and `/mealplan/stores`, through `basket.purchases`)
+in range sells it. Otherwise it is 422 `pin_invalid` with `recipe_key`, `line_no` and the
+reason ("... cannot be bought for line 1 (Chicken Thighs): no store sells it"). A pin the
+origin exclusion holds back is named by `product_id` too, with
+`unavailable_kind: "origin_excluded"` (the basket's word for its line), and the reason says the
+origin rule holds it back: "Chicken Biryani: Chicken Thighs Boneless 450g, your product for
+Chicken Thighs, is held back by the origin rule: it is evidenced as United States (made or
+packed there), which this plan excludes". The Ingredients stage (`/mealplan/basket`,
+`/mealplan/stores` and Options with no trip date, through `schedule.prepare`'s `keep_held`)
 checks every rule but the origin exclusion: a pin evidence holds back only after it was
 pinned, or once the rule is turned on, stays on its line there, held back, for the shopper to
-answer. A pin applies to every meal of its recipe, wherever the meals move. Pins are bounded: at most 40
-lines per recipe, line numbers of at most 4 digits, product ids from 1 to 2^31 - 1. An
-approved trip whose products change through a pin becomes `needs_review` by the fingerprint
+answer. A pin applies to every meal of its recipe, wherever the meals move. Pins are bounded:
+at most 40 lines per recipe, line numbers of at most 4 digits, product ids from 1 to 2^31 - 1.
+An approved trip whose products change through a pin becomes `needs_review` by the fingerprint
 rule below.
 
 ### Unknown servings

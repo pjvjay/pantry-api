@@ -866,8 +866,10 @@ def mealplan_alternatives(req: TripLineOptionsRequest) -> TripLineOptions:
     buys nothing and every other such line of the same ingredient (product_id null, no row
     current; ranking.out_of_reach says what is sold only at stores turned off or beyond the
     plan's distance). The console pins the chosen product on `lines`. 422 as
-    /mealplan/schedule, and for both or neither of product_id and line; 409 no_trip_line
-    when nothing buys such a product any more, or the line buys something."""
+    /mealplan/schedule, but with no trip_date a pin the origin exclusion now holds back is
+    kept as /mealplan/basket keeps it (its Options list it first in ranking.held_back, no row
+    current); 422 for both or neither of product_id and line; 409 no_trip_line when nothing
+    buys such a product any more, or the line buys something."""
     from . import alternatives as alts
     from .mealplan.models import MealPlanError
     from .mealplan.options import NoTripLineError, options_error, trip_line_options

@@ -454,6 +454,87 @@ def test_without_a_trip_date_a_product_nothing_buys_is_a_409(example):
     assert r.status_code == 409 and r.json()["detail"]["error"] == "no_trip_line"
 
 
+def _made_in_the_us(pid: int) -> None:
+    from pantry_planner import db
+
+    db.save_origin_evidence([dict(
+        product_id=pid, source="label-photo", source_ref=f"{pid}.jpg", claim_type="made-in",
+        verbatim="Made in United States", ingredient_origin="", manufactured_in="United States",
+        confidence="high", importer_only=False, note="", observed_at="")])
+
+
+def test_a_pin_the_origin_rule_now_holds_back_is_replaced_from_its_options(example, reseed):
+    """Pinned, then evidenced as made in the United States, which the plan excludes: the
+    schedule refuses the pin and says why, naming the product and the origin rule. The
+    Ingredients stage's Options for it (no trip date) read the draft as the basket does,
+    keeping the pin on its line: the rows are what can take its place, none current, and the
+    pin is the first product held back, with its evidence, as the basket names it first on
+    its line. A row chosen replaces the pin and the plan is scheduled again. A trip's Options
+    refuse the pin as the schedule does."""
+    rule = {"exclude_origin": ["United States"]}
+    draft = {**example, "settings": rule, "pins": {BIRYANI: {"1": BONELESS}}}
+    trip, _line = lines_of(schedule(draft), "fresh", BONELESS)[0]
+    _made_in_the_us(BONELESS)
+
+    refused = {
+        "error": "pin_invalid", "recipe_key": BIRYANI, "line_no": 1, "product_id": BONELESS,
+        "unavailable_kind": "origin_excluded",
+        "detail": "Chicken Biryani: Chicken Thighs Boneless 450g, your product for Chicken "
+                  "Thighs, is held back by the origin rule: it is evidenced as United States "
+                  "(made or packed there), which this plan excludes"}
+    r = client().post("/mealplan/schedule", json=draft)
+    assert (r.status_code, r.json()["detail"]) == (422, refused)
+
+    opts = _no_trip(draft, BONELESS)
+    assert (opts["product_id"], opts["pinned"], opts["trip_date"], opts["plan_total"]) == (
+        BONELESS, True, None, None)
+    assert [(c["recipe_key"], c["line_no"], c["planner_product_id"], c["pinned_product_id"])
+            for c in opts["lines"]] == [(BIRYANI, 1, THIGHS, BONELESS)]
+    ranking = opts["ranking"]
+    first = ranking["held_back"][0]
+    assert (first["product_id"], first["country"], first["field"], first["verbatim"]) == (
+        BONELESS, "United States", "manufactured_in", "Made in United States")
+    rows = [it["product_id"] for it in ranking["items"]]
+    assert THIGHS in rows and BONELESS not in rows
+    assert not any(it["current"] for it in ranking["items"])
+    basket = client().post("/mealplan/basket", json={"draft": draft}).json()
+    (line,) = [ln for r in basket["recipes"] if r["key"] == BIRYANI for ln in r["lines"]
+               if ln["line_no"] == 1]
+    assert (line["unavailable_kind"], line["held_back"][0]["product_id"]) == (
+        "origin_excluded", BONELESS)
+    # every other line's Options answer too, with the pin kept on its line
+    assert any(it["current"] for it in _no_trip(draft, SALT)["ranking"]["items"])
+
+    other = next(pid for pid in rows if pid != THIGHS)
+    for chosen in (THIGHS, other):           # the planner's own pick is no pin
+        after = pinned(draft, opts, chosen)
+        assert after["pins"] == ({} if chosen == THIGHS else {BIRYANI: {"1": chosen}})
+        sched = schedule(after)
+        assert lines_of(sched, "fresh", chosen) and not lines_of(sched, "fresh", BONELESS)
+
+    r = client().post("/mealplan/alternatives", json={
+        "draft": draft, "trip_date": trip["date"], "product_id": BONELESS})
+    assert (r.status_code, r.json()["detail"]) == (422, refused)
+
+
+def test_a_product_planned_before_its_evidence_is_no_row_of_its_own_options(example, reseed):
+    """The resolve's own pick, evidenced as made in the United States after it was planned:
+    its Options, on a trip or with none, have no current row, and it is the first product
+    held back, also once no store sells it any more."""
+    _made_in_the_us(THIGHS)
+    draft = {**example, "settings": {"exclude_origin": ["United States"]}}
+    trip, _line = lines_of(schedule(draft), "fresh", THIGHS)[0]
+    for gone in (False, True):
+        if gone:
+            _sql("DELETE FROM store_products WHERE product_id = :p", p=THIGHS)
+        for opts in (options(draft, trip["date"], THIGHS), _no_trip(draft, THIGHS)):
+            ranking = opts["ranking"]
+            assert opts["stocked"] is not gone
+            assert ranking["held_back"][0]["product_id"] == THIGHS
+            assert THIGHS not in {it["product_id"] for it in ranking["items"]}
+            assert ranking["items"] and not any(it["current"] for it in ranking["items"])
+
+
 # ─── A pin on a line the resolve bought nothing for ──────────
 
 YELLOW_ONIONS = (12, 162, 163, 164)    # Yellow Onion, and the 3 lb, 10 lb and organic bags

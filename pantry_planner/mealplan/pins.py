@@ -99,10 +99,12 @@ def check_pins(draft: MealPlanDraft, docs: dict[str, RecipeDoc],
                products: dict[int, Product], *, keep_held: bool = False) -> None:
     """Every pin of every resolved recipe through alternatives.validate_pins, with what the
     plan and the recipe leave out (forbidden); the first that fails is 422 pin_invalid,
-    naming the recipe, the line and the reason. A pin may fill a line the resolve bought
-    nothing for, checked the same way. A recipe not resolved yet (or whose resolve failed)
-    buys nothing, so its pins wait until it is. A pin seen for the first time is logged as a
-    pick (matching/events.py).
+    naming the recipe, the line and the reason; one the origin exclusion holds back names the
+    product too (product_id, with unavailable_kind origin_excluded, the basket's word for its
+    line), and the reason says the origin rule holds it back. A pin may fill a line the
+    resolve bought nothing for, checked the same way. A recipe not resolved yet (or whose
+    resolve failed) buys nothing, so its pins wait until it is. A pin seen for the first time
+    is logged as a pick (matching/events.py).
 
     `keep_held` (the Ingredients stage: basket.purchases) checks every rule but the origin
     exclusion: a pin the exclusion now holds back (evidence added since the pin, or the rule
@@ -119,13 +121,20 @@ def check_pins(draft: MealPlanDraft, docs: dict[str, RecipeDoc],
         if keep_held:
             basis = basis.model_copy(update={"exclude_origin": []})
         pins = [Pin(line_no=int(raw), product_id=pid) for raw, pid in sorted(lines.items())]
+        names = {ln.line_no: ln.name for ln in basis.lines}
         try:
             valid = alternatives.validate_pins(basis, pins, catalog=products, open_lines=True,
                                                forbid=forbidden(draft, [key]))
+        except alternatives.HeldBackPinError as e:
+            raise MealPlanError(
+                "pin_invalid", f"{docs[key].title}: {products[e.product_id].name}, your product "
+                f"for {names[e.line_no]}, is held back by the origin rule: it is evidenced as "
+                f"{alternatives._where(e.country, e.field)}, which this plan excludes",
+                recipe_key=key, line_no=e.line_no, product_id=e.product_id,
+                unavailable_kind="origin_excluded") from e
         except alternatives.PinError as e:
             raise MealPlanError("pin_invalid", f"{docs[key].title}: {e}", recipe_key=key,
                                 line_no=e.line_no) from e
-        names = {ln.line_no: ln.name for ln in basis.lines}
         planned = {ln.line_no: ln.product_id for ln in basis.lines}
         for line_no, v in valid.items():
             events.picked(names[line_no], v.product_id, was=planned.get(line_no), once=True)
