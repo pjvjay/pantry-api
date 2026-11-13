@@ -447,8 +447,9 @@ in an `origin_excluded` decide warning: the product, its evidence and the line, 
 stage keeps it on its line, held back and never priced, for the shopper to answer there. A pin
 applies to every meal of its recipe, wherever the meals move. Pins are bounded:
 at most 40 lines per recipe, line numbers of at most 4 digits, product ids from 1 to 2^31 - 1.
-An approved trip whose products change through a pin becomes `needs_review` by the fingerprint
-rule below.
+An approved trip whose products change through a pin, or that loses a product the origin
+exclusion now holds back, becomes `needs_review` by the fingerprint rule below; a trip line's
+`origin` alone is not in the fingerprint.
 
 ### Unknown servings
 
