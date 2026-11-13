@@ -519,20 +519,27 @@ def test_a_pin_the_origin_rule_now_holds_back_is_replaced_from_its_options(examp
 
 def test_a_product_planned_before_its_evidence_is_no_row_of_its_own_options(example, reseed):
     """The resolve's own pick, evidenced as made in the United States after it was planned:
-    its Options, on a trip or with none, have no current row, and it is the first product
-    held back, also once no store sells it any more."""
+    no trip buys it, so a trip's Options for it are refused as for any product the trip does
+    not buy, and its Options with no trip (the Ingredients stage, where its line waits for
+    the shopper's answer) have no current row and name it first among the products held
+    back, also once no store sells it any more."""
+    (trip, _line), *_ = lines_of(schedule(example), "fresh", THIGHS)
     _made_in_the_us(THIGHS)
     draft = {**example, "settings": {"exclude_origin": ["United States"]}}
-    trip, _line = lines_of(schedule(draft), "fresh", THIGHS)[0]
+    ruled = schedule(draft)
+    assert lines_of(ruled, "fresh", THIGHS) == lines_of(ruled, "fewest_trips", THIGHS) == []
+    r = client().post("/mealplan/alternatives",
+                      json={"draft": draft, "trip_date": trip["date"], "product_id": THIGHS})
+    assert (r.status_code, r.json()["detail"]["error"]) == (409, "no_trip_line")
     for gone in (False, True):
         if gone:
             _sql("DELETE FROM store_products WHERE product_id = :p", p=THIGHS)
-        for opts in (options(draft, trip["date"], THIGHS), _no_trip(draft, THIGHS)):
-            ranking = opts["ranking"]
-            assert opts["stocked"] is not gone
-            assert ranking["held_back"][0]["product_id"] == THIGHS
-            assert THIGHS not in {it["product_id"] for it in ranking["items"]}
-            assert ranking["items"] and not any(it["current"] for it in ranking["items"])
+        opts = _no_trip(draft, THIGHS)
+        ranking = opts["ranking"]
+        assert opts["stocked"] is not gone
+        assert ranking["held_back"][0]["product_id"] == THIGHS
+        assert THIGHS not in {it["product_id"] for it in ranking["items"]}
+        assert ranking["items"] and not any(it["current"] for it in ranking["items"])
 
 
 # ─── A pin on a line the resolve bought nothing for ──────────

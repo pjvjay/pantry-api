@@ -439,7 +439,13 @@ packed there), which this plan excludes". The Ingredients stage (`/mealplan/bask
 `/mealplan/stores` and Options with no trip date, through `schedule.prepare`'s `keep_held`)
 checks every rule but the origin exclusion: a pin evidence holds back only after it was
 pinned, or once the rule is turned on, stays on its line there, held back, for the shopper to
-answer. A pin applies to every meal of its recipe, wherever the meals move. Pins are bounded:
+answer. No trip buys a product the origin exclusion holds back. A planned product evidenced
+as from an excluded country after the resolve picked it (`schedule.prepare` without
+`keep_held`) is taken off its line, which then buys nothing on any trip. The schedule names it
+in an `origin_excluded` decide warning: the product, its evidence and the line, with the
+`resolve` remedy, which checks the recipe's products again under the rule. The Ingredients
+stage keeps it on its line, held back and never priced, for the shopper to answer there. A pin
+applies to every meal of its recipe, wherever the meals move. Pins are bounded:
 at most 40 lines per recipe, line numbers of at most 4 digits, product ids from 1 to 2^31 - 1.
 An approved trip whose products change through a pin becomes `needs_review` by the fingerprint
 rule below.
@@ -706,7 +712,7 @@ description) do not repeat it.
 | --- | --- |
 | must_fix | `unplaced`, `fridge_window_exceeded`, `meal_before_trip`, `needs_servings`, `no_longer_stocked` |
 | should_fix | `over_budget` |
-| decide | `needs_review`, `not_stocked`, `buy_ahead_exceeded`, `trip_cap_exceeded`, `unresolved_recipe` |
+| decide | `needs_review`, `not_stocked`, `buy_ahead_exceeded`, `trip_cap_exceeded`, `unresolved_recipe`, `origin_excluded` |
 | note | `amount_unknown`, `shelf_life_unknown`, `price_changed` |
 
 Each carries at most three remedies: edits the console can apply (`move_meal`,

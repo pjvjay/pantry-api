@@ -542,12 +542,32 @@ class Prepared:
     needs: list[Need]
     board: Board
     cook: dict[str, tuple[int, str, str]]
+    held: list[HeldLine]
+
+
+@dataclass(frozen=True)
+class HeldLine:
+    """A planned product the origin exclusion holds back, taken off the trips: the resolve
+    picked it before its evidence came in. The shopper answers it in the Ingredients stage."""
+    recipe_key: str
+    line_no: int
+    ingredient: str
+    product: Product
+    country: str
+    field: str
+    claim: str
 
 
 def prepare(draft: MealPlanDraft, *, keep_held: bool = False) -> Prepared:
     """Read and place a draft. Raises MealPlanError (REST 422) for a draft no schedule can
     be computed for, a pin alternatives.validate_pins refuses among them; with `keep_held`,
-    not a pin the origin exclusion holds back (pins.check_pins)."""
+    not a pin the origin exclusion holds back (pins.check_pins).
+
+    Without `keep_held` no trip buys a product the plan's origin exclusion holds back: a
+    planned product evidenced as from an excluded country (the resolve picked it before its
+    evidence came in) is taken off its line, which buys nothing, and listed in `held` for
+    the schedule's warnings. With `keep_held` (the Ingredients stage) it stays on its line,
+    which the basket shows held back and never prices."""
     from .pins import check_pins
 
     if draft.v != 1:
@@ -557,6 +577,7 @@ def prepare(draft: MealPlanDraft, *, keep_held: bool = False) -> Prepared:
     docs = {key: recipe_doc(dr.ref, dr.servings) for key, dr in sorted(draft.recipes.items())}
     chosen = {key: line_products(draft, key, docs[key], products) for key in docs}
     check_pins(draft, docs, products, keep_held=keep_held)
+    held = [] if keep_held else _take_off_held(draft, docs, products, chosen)
     meals, days = place.place(draft)
 
     board = Board(days=draft.days, used={})
@@ -581,7 +602,47 @@ def prepare(draft: MealPlanDraft, *, keep_held: bool = False) -> Prepared:
             needs.extend(needs_for_meal(draft, m, day, slot, doc, chosen[m.recipe_key]))
     needs.sort(key=lambda n: (n.day, SLOTS.index(n.slot), n.meal_id, n.line_no))
     return Prepared(products=products, docs=docs, chosen=chosen, placed=placed, needs=needs,
-                    board=board, cook=cook)
+                    board=board, cook=cook, held=held)
+
+
+def _take_off_held(draft: MealPlanDraft, docs: dict[str, RecipeDoc],
+                   products: dict[int, Product], chosen: dict[str, dict[int, int]]
+                   ) -> list[HeldLine]:
+    """Takes every planned product the origin exclusion holds back off its line in `chosen`
+    (in place) and returns them, by recipe and line. The exclusion reads the evidence as
+    everywhere else (origins.filter_pool: only positive evidence holds a product back), and
+    the claim is the basket's (origins.exclusion_claim). A pin is not looked at: check_pins
+    has refused any the exclusion holds back."""
+    from ..origins import exclusion_claim, filter_pool, resolve_origin
+
+    exclude = [c for c in draft.settings.exclude_origin if c.strip()]
+    if not exclude:
+        return []
+    pinned = {(key, int(raw)) for key, lines in draft.pins.items() for raw in lines
+              if raw.isdigit()}
+    planned = sorted({pid for key, lines in chosen.items() for ln, pid in lines.items()
+                      if (key, ln) not in pinned})
+    if not planned:
+        return []
+    rows = db.load_origin_evidence(planned)
+    origins = {pid: resolve_origin(pid, products[pid].name, rows.get(pid, []))
+               for pid in planned}
+    _kept, dropped = filter_pool([products[pid] for pid in planned], exclude=exclude,
+                                 origins=origins)
+    verdict = {p.id: (country, fld) for p, country, fld in dropped}
+    out: list[HeldLine] = []
+    for key in sorted(chosen):
+        names = {ln.line_no: ln.name for ln in docs[key].lines}
+        for ln_no, pid in sorted(chosen[key].items()):
+            if (key, ln_no) in pinned or pid not in verdict:
+                continue
+            country, fld = verdict[pid]
+            del chosen[key][ln_no]
+            out.append(HeldLine(recipe_key=key, line_no=ln_no,
+                                ingredient=names.get(ln_no, f"line {ln_no}"),
+                                product=products[pid], country=country, field=fld,
+                                claim=exclusion_claim(rows.get(pid, []), country, fld)))
+    return out
 
 
 def compute(draft: MealPlanDraft) -> MealSchedule:
@@ -590,7 +651,8 @@ def compute(draft: MealPlanDraft) -> MealSchedule:
     pre = prepare(draft)
     products, docs, placed, needs = pre.products, pre.docs, pre.placed, pre.needs
     ctx = _Ctx(draft, products, needs, pre.board, pre.cook)
-    warnings = _plan_warnings(draft, placed, docs, needs)
+    warnings = _plan_warnings(draft, placed, docs, needs) + _held_warnings(draft, placed,
+                                                                          docs, pre.held)
     results = []
     for name in STRATEGIES:
         res, ws = _strategy(ctx, name)
@@ -632,7 +694,7 @@ def _line_origins(draft: MealPlanDraft, products: dict[int, Product],
     the plan's preference, so one product reads the same in the Ingredients stage, on the
     Shop stage's list and in the shop. The evidence for every product on every trip of both
     strategies is read in one query."""
-    from .basket import line_origin      # basket imports this module
+    from .basket import line_origin  # basket imports this module
 
     lines = [ln for res in results for t in res.trips for ln in t.lines]
     origins, demo = alternatives._evidence(sorted({ln.product.id for ln in lines}), products)
@@ -675,6 +737,30 @@ def _nutrition(draft: MealPlanDraft, docs: dict[str, RecipeDoc], placed: list[Pl
         out.append(day.nutrition)
     cited = sorted({i for mn in per_recipe.values() for i in mn.source_ids})
     return per_recipe, nutrition.period_nutrition(out, slots_on), nutrition.sources(ref, cited)
+
+
+def _held_warnings(draft: MealPlanDraft, placed: list[PlacedMeal],
+                   docs: dict[str, RecipeDoc], held: list[HeldLine]) -> list[PlanWarning]:
+    """One decide warning per line prepare took a held-back product off, for a recipe with a
+    meal on the board: what the product is evidenced as, that the trips buy nothing for the
+    line, and the remedy that checks the recipe's products again under the rule."""
+    on_board = {m.recipe_key for m in placed if m.date is not None}
+    out = []
+    for h in held:
+        if h.recipe_key not in on_board:
+            continue
+        out.append(warn.make(
+            "decide", "origin_excluded",
+            f"{docs[h.recipe_key].title}: {h.product.name}, the planned product for "
+            f"{h.ingredient}, is held back by the origin rule: it is evidenced as "
+            f"{alternatives._where(h.country, h.field)}, which this plan excludes "
+            f'("{h.claim}"). The trips buy nothing for {h.ingredient} until the recipe\'s '
+            "products are checked again, or another product or meal is chosen.",
+            recipe_key=h.recipe_key, product_id=h.product.id,
+            meal_ids=[m.id for m in placed
+                      if m.recipe_key == h.recipe_key and m.date is not None],
+            remedies=[warn.resolve(h.recipe_key)]))
+    return out
 
 
 def _plan_warnings(draft: MealPlanDraft, placed: list[PlacedMeal],

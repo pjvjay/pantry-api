@@ -1143,6 +1143,48 @@ def test_a_pinned_product_the_rule_now_holds_back_is_named_first_on_its_line(res
     assert (r.status_code, r.json()["detail"]["error"]) == (422, "pin_invalid")
 
 
+def test_a_planned_product_the_rule_now_holds_back_is_never_bought(reseed):
+    """Resolved, then evidenced as made in the United States: the Ingredients stage keeps the
+    planned product on its line, held back, for the shopper to answer, and until then no trip
+    of either strategy buys it. The schedule says so in a decide warning that names the
+    product, the evidence and the line, with the remedy that checks the recipe's products
+    again. Without the rule the trips buy it as before, and so they do under the rule while
+    nothing evidences it (only positive evidence holds a product back)."""
+    from tests.mealplan_fixtures import schedule
+
+    key = "lib:beef_rice_bowl"
+    draft = _resolved_draft([key])
+    planned = draft["resolved"][key]["lines"][0]["product_id"]
+    ruled = {**draft, "settings": {"exclude_origin": US}}
+
+    def bought(body: dict) -> set[int]:
+        return {ln["product"]["id"] for res in body["strategies"] for t in res["trips"]
+                for ln in t["lines"]}
+
+    def held(body: dict) -> list[dict]:
+        return [w for w in body["warnings"] if w["code"] == "origin_excluded"]
+
+    before = schedule(ruled)
+    assert planned in bought(before) and held(before) == []
+    _us_evidence(planned)
+    body = schedule(ruled)
+    assert planned not in bought(body)
+    assert bought(body) == bought(before) - {planned}
+    (w,) = held(body)
+    assert (w["level"], w["recipe_key"], w["product_id"], w["remedies"]) == (
+        "decide", key, planned, [{"op": "resolve", "recipe_key": key}])
+    assert sorted(w["meal_ids"]) == sorted(m["id"] for m in body["meals"]
+                                           if m["recipe_key"] == key and m["date"])
+    assert ("is held back by the origin rule: it is evidenced as United States (made or "
+            'packed there), which this plan excludes ("Made in United States")') in w["message"]
+    assert "The trips buy nothing for Ground Beef until" in w["message"]
+    (beef,) = [ln for r in bask(ruled)["recipes"] for ln in r["lines"] if ln["line_no"] == 1]
+    assert (beef["product"]["id"], beef["available"], beef["unavailable_kind"]) == (
+        planned, False, "origin_excluded")
+    unruled = schedule(draft)
+    assert planned in bought(unruled) and held(unruled) == []
+
+
 def test_a_line_matched_by_words_names_the_products_sharing_the_most_words(reseed, by_words):
     """Matched by words (names no seed knows, with the embedder down), a line's candidates are
     the products sharing the most words with it. A shopper's recipe resolved before the
