@@ -36,9 +36,11 @@ exclusion now holds back stays on its line, which the basket shows held back, so
 offer what can take its place. With a trip date the draft is the schedule's, which refuses
 such a pin (422 pin_invalid).
 
-A product the origin exclusion now holds back (that pin, or a product planned before its
-evidence) is no row of its own Options: no row is current, and it is the first of
-ranking.held_back, with its evidence, as the basket names it first on its line.
+With no trip date, a product the origin exclusion now holds back (that pin, or a product
+planned before its evidence) is no row of its own Options: no row is current, and it is the
+first of ranking.held_back, with its evidence, as the basket names it first on its line. No
+trip buys such a product (schedule.prepare takes it off), so a trip's Options for it are
+NoTripLineError (409 no_trip_line).
 
 A line that buys nothing (the resolve found no product it may buy, under the origin rule, in
 range or at all, and no pin fills it) has Options too, asked for by the line instead of a
@@ -236,7 +238,9 @@ def trip_line_options(draft: MealPlanDraft, trip_date: dt.date | None, product_i
         if not here:
             raise NoTripLineError(
                 f"no trip on {day_label(trip_date)} buys product {product_id} under "
-                f"{STRATEGY_NAMES.get(name, name)}; the plan changed since")
+                f"{STRATEGY_NAMES.get(name, name)}; the plan changed since"
+                + ("" if not any(h.product.id == product_id for h in pre.held)
+                   else ", or the origin rule now holds it back"))
         meals = {m.meal_id for ln in here for m in ln.for_meals}
         bought = [n for n in pre.needs if n.product_id == product_id and n.meal_id in meals]
     covered = opened or sorted({(n.recipe_key, n.line_no) for n in bought})

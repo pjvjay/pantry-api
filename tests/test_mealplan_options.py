@@ -531,6 +531,7 @@ def test_a_product_planned_before_its_evidence_is_no_row_of_its_own_options(exam
     r = client().post("/mealplan/alternatives",
                       json={"draft": draft, "trip_date": trip["date"], "product_id": THIGHS})
     assert (r.status_code, r.json()["detail"]["error"]) == (409, "no_trip_line")
+    assert r.json()["detail"]["detail"].endswith("or the origin rule now holds it back")
     for gone in (False, True):
         if gone:
             _sql("DELETE FROM store_products WHERE product_id = :p", p=THIGHS)

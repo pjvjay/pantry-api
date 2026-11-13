@@ -1185,6 +1185,58 @@ def test_a_planned_product_the_rule_now_holds_back_is_never_bought(reseed):
     assert planned in bought(unruled) and held(unruled) == []
 
 
+def test_a_pin_equal_to_the_planned_product_is_held_back_like_it(reseed):
+    """A pin equal to the resolve's own pick (pinned, then a later resolve picked the same
+    product) is the planned product: alternatives.validate_pins drops it unchecked, so the
+    schedule's take-off looks at it, and once the rule holds it back no trip buys it and the
+    schedule warns about it, as the Ingredients stage shows its line held back."""
+    from tests.mealplan_fixtures import schedule
+
+    key = "lib:beef_rice_bowl"
+    draft = _resolved_draft([key])
+    planned = draft["resolved"][key]["lines"][0]["product_id"]
+    ruled = {**draft, "pins": {key: {"1": planned}}, "settings": {"exclude_origin": US}}
+    assert planned in {ln["product"]["id"] for res in schedule(ruled)["strategies"]
+                       for t in res["trips"] for ln in t["lines"]}
+    _us_evidence(planned)
+    body = schedule(ruled)
+    assert planned not in {ln["product"]["id"] for res in body["strategies"]
+                           for t in res["trips"] for ln in t["lines"]}
+    (w,) = [w for w in body["warnings"] if w["code"] == "origin_excluded"]
+    assert (w["recipe_key"], w["product_id"]) == (key, planned)
+    (beef,) = [ln for r in bask(ruled)["recipes"] for ln in r["lines"] if ln["line_no"] == 1]
+    assert (beef["product"]["id"], beef["available"], beef["unavailable_kind"]) == (
+        planned, False, "origin_excluded")
+
+
+def test_cook_days_follow_what_the_trips_buy_not_a_held_product(reseed):
+    """Suggest cook days lays meals out by the products the trips buy. A planned product the
+    rule holds back is on no trip, so its fridge time binds no meal and no reason cites it:
+    with Saturday shopping, the layout is the one for the same recipe without that line."""
+    thighs, rice, stock = 11, 9, 57
+
+    def bowl(lines: list) -> dict:
+        return doc_draft({"doc:bowl": doc_recipe("doc:bowl", "Chicken Rice Bowl", 2, lines,
+                                                 wanted=3)},
+                         settings={"exclude_origin": US}, prefs={"shop_weekdays": [5]})
+
+    def suggest(draft: dict) -> dict:
+        r = client().post("/mealplan/suggest-cook-days", json=draft)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    held = bowl([("Chicken Thighs", 500, "g", thighs), ("Rice", 300, "g", rice),
+                 ("Chicken Stock", 500, "ml", stock)])
+    bare = bowl([("Rice", 300, "g", rice), ("Chicken Stock", 500, "ml", stock)])
+    before = suggest(held)
+    assert any("Chicken Thighs" in op["reason"] for op in before["ops"])
+    _us_evidence(thighs)
+    after = suggest(held)
+    assert not any("Chicken Thighs" in op["reason"] for op in after["ops"])
+    assert sorted(op["to"]["date"] for op in after["ops"]) == sorted(
+        op["to"]["date"] for op in suggest(bare)["ops"])
+
+
 def test_a_line_matched_by_words_names_the_products_sharing_the_most_words(reseed, by_words):
     """Matched by words (names no seed knows, with the embedder down), a line's candidates are
     the products sharing the most words with it. A shopper's recipe resolved before the

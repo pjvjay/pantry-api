@@ -222,13 +222,16 @@ def freshness_layout(draft: MealPlanDraft, before) -> dict:
                                 and i not in dismissed})
     first = trip_days[0] if trip_days else 0
 
-    horizons: dict[str, Horizon] = {}
-    for key, dr in sorted(draft.recipes.items()):
+    docs = {key: recipe_doc(dr.ref, dr.servings) for key, dr in sorted(draft.recipes.items())}
+    chosen: dict[str, dict[int, int]] = {}
+    for key, doc in docs.items():
         resolved = draft.resolved.get(key)
-        chosen = {}
-        if resolved is not None and resolved.status in USABLE:
-            chosen = line_products(draft, key, recipe_doc(dr.ref, dr.servings), products)
-        horizons[key] = horizon(draft, products, chosen)
+        usable = resolved is not None and resolved.status in USABLE
+        chosen[key] = line_products(draft, key, doc, products) if usable else {}
+    # What the trips buy: a product the origin exclusion holds back is on none of them, so
+    # it sets no horizon and no reason cites it (schedule.prepare takes it off the same way).
+    sched._take_off_held(draft, docs, products, chosen)
+    horizons: dict[str, Horizon] = {key: horizon(draft, products, chosen[key]) for key in docs}
 
     groups: dict[str, list[Meal]] = {}
     for m in meals:

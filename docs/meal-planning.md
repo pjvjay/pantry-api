@@ -391,11 +391,13 @@ ranking}` (`mealplan/options.py`, no LLM):
   stays on its line instead of being refused, so the Ingredients stage's "Another product"
   on that line offers what can replace it. A trip's Options (with `trip_date`) refuse such a
   pin, as the schedule does.
-- A product the origin exclusion now holds back, a pin as above or a product planned before
-  its evidence, is no row of its own Options: no row is `current`, and the product is the
-  first of `ranking.held_back`, with its evidence, as the basket names it first on its line.
-  Choosing a row replaces it on every covered line (the planner's own pick, when it is a
-  row, takes the pin off).
+- With no `trip_date`, a product the origin exclusion now holds back, a pin as above or a
+  product planned before its evidence, is no row of its own Options: no row is `current`,
+  and the product is the first of `ranking.held_back`, with its evidence, as the basket
+  names it first on its line. Choosing a row replaces it on every covered line (the
+  planner's own pick, when it is a row, takes the pin off). No trip buys such a product (the
+  schedule takes it off its line), so a trip's Options for it answer 409 `no_trip_line`,
+  whose detail says the origin rule now holds it back.
 - **A line that buys nothing** (the basket's rows with no product: the resolve left it out
   for the origin rule, out of range or not stocked, and no pin fills it) is asked for by
   `line: {recipe_key, line_no}` instead of a product. The answer has `product_id: null`,

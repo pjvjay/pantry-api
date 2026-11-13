@@ -611,15 +611,20 @@ def _take_off_held(draft: MealPlanDraft, docs: dict[str, RecipeDoc],
     """Takes every planned product the origin exclusion holds back off its line in `chosen`
     (in place) and returns them, by recipe and line. The exclusion reads the evidence as
     everywhere else (origins.filter_pool: only positive evidence holds a product back), and
-    the claim is the basket's (origins.exclusion_claim). A pin is not looked at: check_pins
-    has refused any the exclusion holds back."""
+    the claim is the basket's (origins.exclusion_claim). A pin that differs from the
+    resolve's pick is not looked at: check_pins has refused any the exclusion holds back. A
+    pin equal to the pick is the planned product (alternatives.validate_pins drops it
+    unchecked, as it does to undo a swap), so it is looked at here like any other."""
     from ..origins import exclusion_claim, filter_pool, resolve_origin
 
     exclude = [c for c in draft.settings.exclude_origin if c.strip()]
     if not exclude:
         return []
-    pinned = {(key, int(raw)) for key, lines in draft.pins.items() for raw in lines
-              if raw.isdigit()}
+    picks = {(key, ln.line_no): ln.product_id for key, r in draft.resolved.items()
+             if r.status in USABLE for ln in r.lines}
+    pinned = {(key, int(raw)) for key, lines in draft.pins.items()
+              for raw, pid in lines.items()
+              if raw.isdigit() and pid != picks.get((key, int(raw)))}
     planned = sorted({pid for key, lines in chosen.items() for ln, pid in lines.items()
                       if (key, ln) not in pinned})
     if not planned:
