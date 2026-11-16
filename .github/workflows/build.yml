@@ -4,14 +4,14 @@
 #   push to main
 #     → pytest
 #     → docker build (linux/amd64 + linux/arm64)
-#     → push ghcr.io/pjvjay/pantry-api:dev-<sha>
-#     → bump_image_tag.py in pjvjay/pantry-gitops (no external binary)
+#     → push ghcr.io/<owner>/pantry-api:dev-<sha>
+#     → bump_image_tag.py in <owner>/pantry-gitops (no external binary)
 #     → ArgoCD rolls the API Deployment on AKS
 #
 # Auth:
 #   - GHCR push: the workflow's own GITHUB_TOKEN (packages: write)
 #   - gitops write-back: GITOPS_PAT repo secret — a fine-grained PAT
-#     with contents:write on pjvjay/pantry-gitops only
+#     with contents:write on <owner>/pantry-gitops only
 # ============================================================
 
 name: build-and-deploy
@@ -38,7 +38,7 @@ permissions:
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/pantry-api
-  GITOPS_REPO: pjvjay/pantry-gitops
+  GITOPS_REPO: ${{ github.repository_owner }}/pantry-gitops
 
 jobs:
   test:

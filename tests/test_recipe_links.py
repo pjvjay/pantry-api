@@ -1,9 +1,9 @@
 """Planning a real recipe: partial plans, a distance limit, generic matching.
 
-A recipe fetched from a link (pjvjay/pantry-api#21) names more than the
+A recipe fetched from a link (pantry-api#21) names more than the
 seeded catalog stocks, says "light brown sugar" where the shelf says "Brown
 Sugar", and wants "nearby" to mean something. The fixtures name ingredients
-the 160-product catalog (pjvjay/pantry-api#22) still lacks — saffron,
+the 160-product catalog (pantry-api#22) still lacks — saffron,
 lemongrass, potato starch, MSG — since it now stocks Sichuan peppercorns,
 cornstarch and light soy sauce. (The size-cap regression from
 the same live run is in test_nlsearch.py, next to the cap's other tests.) Each test states the right

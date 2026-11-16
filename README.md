@@ -1,7 +1,7 @@
 # pantry-api
 
 *(formerly `pantry-planner` — renamed as part of the
-[pantry-platform](https://github.com/pjvjay/pantry-platform) polyrepo split)*
+pantry-platform polyrepo split)*
 
 A small demo project: given a recipe and a store catalog, an LLM picks the
 best product for each ingredient — optimizing for cost when semantic matches
@@ -341,7 +341,7 @@ Indian, Mexican and baking pantry that real recipe links ask for. Products 166-1
 mango, sliced pepperoni, pizza dough, instant yeast) are **synthetic demo products**, invented
 for the meal plan's demo starter recipes; `seeds/demo_products.json` holds the same four rows
 with that label, because a product row has no field for it. The file is
-a byte-identical copy of [pantry-db](https://github.com/pjvjay/pantry-db)'s
+a byte-identical copy of pantry-db's
 `seeds/products.json`, which also generates the Postgres `seed.sql`; change it
 there first, copy it here (`cmp` the two files), and the derived rows (terms,
 store prices, brands, reviews) come out the same on both sides because
@@ -630,7 +630,7 @@ public demo runs keyless, free, and abuse-proof while the query-plan
 machinery, gates, and optimizers run unchanged.
 `pantry_planner/demo_server.py` serves the built SPA (`SPA_DIST`) and the
 API from one port for single-container hosting — see
-[pantry-platform/demo](https://github.com/pjvjay/pantry-platform/tree/main/demo)
+pantry-platform/demo
 for the Hugging Face Space image.
 
 ## MCP server
@@ -1009,19 +1009,19 @@ This repo is one of six in the **pantry-platform** GitOps demo:
 
 ```
 git push here
-  → GitHub Actions: pytest → ghcr.io/pjvjay/pantry-api:dev-<sha> (amd64+arm64)
+  → GitHub Actions: pytest → ghcr.io/<owner>/pantry-api:dev-<sha> (amd64+arm64)
   → CI bumps the image tag in pantry-gitops
   → ArgoCD reconciles the Deployment on AKS
 ```
 
 | Repo | Role |
 |---|---|
-| [pantry-api](https://github.com/pjvjay/pantry-api) | this repo — FastAPI + LLM pipeline |
-| [pantry-frontend](https://github.com/pjvjay/pantry-frontend) | React SPA |
-| [pantry-db](https://github.com/pjvjay/pantry-db) | schema migrations + seeds (PreSync Job) |
-| [pantry-gitops](https://github.com/pjvjay/pantry-gitops) | ArgoCD app-of-apps + Kustomize manifests |
-| [pantry-infra](https://github.com/pjvjay/pantry-infra) | Terraform bootstrap (ArgoCD project + root app) |
-| [pantry-platform](https://github.com/pjvjay/pantry-platform) | umbrella — architecture docs + local compose |
+| pantry-api | this repo — FastAPI + LLM pipeline |
+| pantry-frontend | React SPA |
+| pantry-db | schema migrations + seeds (PreSync Job) |
+| pantry-gitops | ArgoCD app-of-apps + Kustomize manifests |
+| pantry-infra | Terraform bootstrap (ArgoCD project + root app) |
+| pantry-platform | umbrella — architecture docs + local compose |
 
 In Kubernetes the API never runs DDL — schema belongs to pantry-db's
 migration Job; this app just reads `DB_HOST`/`DB_USER`/`DB_PASSWORD` from
