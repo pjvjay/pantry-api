@@ -578,7 +578,7 @@ def test_product_terms_tokenizer_parity():
     (units.index_text: name + description, negated words cut). pantry-db's
     KEEP-IN-SYNC copy is held to the GOLDEN_TERMS table below. Every
     product, not a sample: the catalog grows by copying pantry-db's seed
-    (pjvjay/pantry-api#22), and a new row ("Jalapeno", "Whipping Cream
+    (pantry-api#22), and a new row ("Jalapeno", "Whipping Cream
     35%") is where a tokenizer edge case would first show."""
     from sqlalchemy import text
     from sqlalchemy.orm import Session

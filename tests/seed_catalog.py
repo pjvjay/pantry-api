@@ -3,7 +3,7 @@
 Tests that need a catalog-wide number (how many products, how many in an
 aisle) take it from the file the seed loader reads, never from the database
 the code under test wrote and never from a literal. The catalog is a copy of
-pantry-db's seed and grows with it (pjvjay/pantry-api#22); a count derived
+pantry-db's seed and grows with it (pantry-api#22); a count derived
 here follows it, while a loader that drops or duplicates a row still fails.
 """
 from __future__ import annotations

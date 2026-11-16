@@ -1,4 +1,4 @@
-"""Recipe-link basket quality (pjvjay/pantry-api#25, pjvjay/pantry-db#12).
+"""Recipe-link basket quality (pantry-api#25, pantry-db#12).
 
 The live skill runs on 2026-10-03 priced real recipes with seven kinds of
 error, and the PR #24 review found more. Each test names the case it pins and
